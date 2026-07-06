@@ -1,0 +1,299 @@
+:root {
+  --primary-gradient: linear-gradient(135deg, #4355b9 0%, #24389c 100%);
+  --accent-gradient: linear-gradient(135deg, #00ab9c 0%, #006a60 100%);
+  --danger-gradient: linear-gradient(135deg, #ff6b6b 0%, #d63031 100%);
+  --success-gradient: linear-gradient(135deg, #51cf66 0%, #37b24d 100%);
+  --warning-gradient: linear-gradient(135deg, #fcc419 0%, #f59f00 100%);
+
+  --bg: #f5f6fa;
+  --panel-bg: rgba(255, 255, 255, 0.85);
+  --border: rgba(67, 85, 185, 0.12);
+  --text: #2f3542;
+  --text-muted: #747d8c;
+  --text-light: #ffffff;
+  --shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.05);
+  --radius-lg: 16px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+}
+
+[data-theme="dark"] {
+  --bg: #0b0c10;
+  --panel-bg: rgba(26, 27, 34, 0.85);
+  --border: rgba(255, 255, 255, 0.08);
+  --text: #f1f2f6;
+  --text-muted: #a4b0be;
+  --shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Outfit', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  transition: background-color 0.3s, color 0.3s;
+  overflow-x: hidden;
+}
+
+/* Scrollbar styles */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Glassmorphism panel styling */
+.tms-panel {
+  background: var(--panel-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.tms-panel:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.08);
+}
+
+/* Header & Typography */
+h1, h2, h3, h4 {
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Custom interactive buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border-radius: 50px;
+  border: none;
+  font-family: 'Outfit', sans-serif;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s, filter 0.2s;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.btn:active {
+  transform: scale(0.96);
+}
+
+.btn-primary {
+  background: var(--primary-gradient);
+  color: #fff;
+  box-shadow: 0 4px 15px rgba(67, 85, 185, 0.2);
+}
+
+.btn-secondary {
+  background: var(--accent-gradient);
+  color: #fff;
+  box-shadow: 0 4px 15px rgba(0, 171, 156, 0.2);
+}
+
+.btn-danger {
+  background: var(--danger-gradient);
+  color: #fff;
+}
+
+/* Layout Framework */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+  width: 100%;
+}
+
+@media (max-width: 960px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Sidebar Styling */
+.sidebar {
+  background: var(--panel-bg);
+  border-right: 1px solid var(--border);
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.nav-links {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  text-decoration: none;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.nav-link:hover, .nav-link.active {
+  background: var(--border);
+  color: var(--text);
+}
+
+.nav-link.active {
+  font-weight: 600;
+  border-left: 4px solid #4355b9;
+}
+
+/* Digital ID Card Styling */
+.digital-id-card {
+  width: 320px;
+  height: 480px;
+  background: var(--primary-gradient);
+  color: #fff;
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 15px 35px rgba(36, 56, 156, 0.35);
+  position: relative;
+  overflow: hidden;
+  margin: 0 auto;
+}
+
+.digital-id-card::before {
+  content: '';
+  position: absolute;
+  top: -50px;
+  right: -50px;
+  width: 150px;
+  height: 150px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 50%;
+}
+
+.barcode {
+  background: #fff;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.barcode-lines {
+  width: 100%;
+  height: 40px;
+  background: repeating-linear-gradient(90deg, #000, #000 2px, #fff 2px, #fff 8px);
+}
+
+/* Canteen Wallet reloading and PIN panel */
+.canteen-wallet-card {
+  background: var(--accent-gradient);
+  color: #fff;
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  box-shadow: 0 10px 25px rgba(0, 106, 96, 0.35);
+}
+
+/* Billing Calendar Grid */
+.payment-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+}
+
+.calendar-day {
+  aspect-ratio: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  position: relative;
+}
+
+.day-status-indicator {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+}
+
+.status-paid { background: #37b24d; }
+.status-due { background: #f59f00; }
+.status-overdue { background: #d63031; }
+
+/* Live Driver Transit GPS Mock Map */
+.live-map-tracker {
+  height: 300px;
+  background: #dfe4ea;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  position: relative;
+  overflow: hidden;
+  background-image: radial-gradient(#ced6e0 20%, transparent 20%),
+                    radial-gradient(#ced6e0 20%, transparent 20%);
+  background-size: 20px 20px;
+  background-position: 0 0, 10px 10px;
+}
+
+.live-map-pin {
+  width: 16px;
+  height: 16px;
+  background: var(--danger-gradient);
+  border-radius: 50%;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 10px rgba(214, 48, 49, 0.25);
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0px rgba(214, 48, 49, 0.4); }
+  100% { box-shadow: 0 0 0 12px rgba(214, 48, 49, 0); }
+}
+
+/* Animations */
+.fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
