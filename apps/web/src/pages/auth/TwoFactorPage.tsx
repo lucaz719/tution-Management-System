@@ -9,7 +9,7 @@ const TWO_FA_DURATION = 5 * 60; // 5 min (PRD §7)
 
 export function TwoFactorPage() {
   const navigate = useNavigate();
-  const { user, roleRedirectPath } = useAuth();
+  const { user, verify2FA } = useAuth();
   const { showToast } = useToast();
 
   const [otp, setOtp]               = useState<string[]>(Array(6).fill(''));
@@ -32,7 +32,32 @@ export function TwoFactorPage() {
       if (trustDevice) {
         document.cookie = `tms_trusted=${Date.now()}; max-age=${30 * 24 * 3600}; path=/; SameSite=Strict`;
       }
-      const dest = roleRedirectPath();
+      
+      // Update requiresTwoFactor state globally
+      verify2FA();
+
+      // Compute destination directly to avoid state update lag
+      let dest = '/login';
+      if (user) {
+        if (user.firstLogin) {
+          dest = user.role === 'TENANT_ADMIN' ? '/setup/tenant' : 
+                 user.role === 'BRANCH_ADMIN' ? '/setup/branch' : '/login';
+        } else {
+          const ROLE_DEFAULT_PATHS: Record<string, string> = {
+            SUPER_ADMIN:   '/super-admin/dashboard',
+            TENANT_ADMIN:  '/tenant/dashboard',
+            BRANCH_ADMIN:  '/branch/dashboard',
+            TEACHER:       '/teacher/dashboard',
+            ACCOUNTANT:    '/staff/finance',
+            RECEPTIONIST:  '/staff/reception',
+            JANITOR:       '/staff/tasks',
+            STUDENT:       '/student/home',
+            PARENT:        '/parent/home',
+          };
+          dest = ROLE_DEFAULT_PATHS[user.role] ?? '/login';
+        }
+      }
+
       navigate(dest, { replace: true });
     } catch {
       const rem = attempts - 1;
@@ -46,7 +71,7 @@ export function TwoFactorPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [attempts, expired, trustDevice, navigate, roleRedirectPath, showToast]);
+  }, [attempts, expired, trustDevice, navigate, verify2FA, showToast, user]);
 
   const handleResend = useCallback(async () => {
     setIsLoading(true);

@@ -32,6 +32,7 @@ export interface AuthContextValue {
   login: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
   logout: () => void;
   roleRedirectPath: () => string;
+  verify2FA: () => void;
 }
 
 // ─── Role → Route mapping (PRD §2.6) ─────────────────────────────────────────
@@ -157,6 +158,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return ROLE_DEFAULT_PATHS[user.role] ?? '/login';
   }, [user]);
 
+  const verify2FA = useCallback(() => {
+    if (user) {
+      const updated = { ...user, requiresTwoFactor: false };
+      setUser(updated);
+      localStorage.setItem('tms_user', JSON.stringify(updated));
+    }
+  }, [user]);
+
   const value: AuthContextValue = {
     user,
     token,
@@ -165,6 +174,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     login,
     logout,
     roleRedirectPath,
+    verify2FA,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
