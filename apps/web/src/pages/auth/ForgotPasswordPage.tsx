@@ -140,6 +140,23 @@ export function ForgotPasswordPage() {
               registered phone number.
             </p>
 
+            <div style={{
+              background: 'rgba(63, 81, 181, 0.08)',
+              border: '1px solid rgba(63, 81, 181, 0.15)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '12px',
+              fontSize: '12px',
+              color: 'var(--brand)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              marginBottom: '16px',
+              lineHeight: '1.4'
+            }}>
+              <span className="material-symbols-outlined" style={{ fontSize: '18px', color: 'var(--brand)' }}>info</span>
+              <span><strong>Demo Mode:</strong> You can enter any 6 digits (e.g. 123456) to proceed.</span>
+            </div>
+
             <div className="auth-form">
               <OTPInput
                 value={otp}
