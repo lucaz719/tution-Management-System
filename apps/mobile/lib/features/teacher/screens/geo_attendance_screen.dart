@@ -78,7 +78,7 @@ class _GeoAttendanceScreenState extends State<GeoAttendanceScreen> {
     final lastKnown = await Geolocator.getLastKnownPosition();
     if (lastKnown != null) {
       _lastPosition = lastKnown;
-      _lastCheckedAt = lastKnown.timestamp?.toLocal() ?? DateTime.now();
+      _lastCheckedAt = lastKnown.timestamp.toLocal();
     }
 
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -104,9 +104,7 @@ class _GeoAttendanceScreenState extends State<GeoAttendanceScreen> {
     _permissionDenied = false;
 
     final currentPosition = await Geolocator.getCurrentPosition(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.best,
-      ),
+      desiredAccuracy: LocationAccuracy.best,
     );
     _updateFromPosition(currentPosition);
 
@@ -141,7 +139,7 @@ class _GeoAttendanceScreenState extends State<GeoAttendanceScreen> {
 
     setState(() {
       _lastPosition = position;
-      _lastCheckedAt = position.timestamp?.toLocal() ?? DateTime.now();
+      _lastCheckedAt = position.timestamp.toLocal();
       _status = nextStatus;
       if (_isMarkedIn) {
         if (nextStatus == GeoFenceStatus.outside) {

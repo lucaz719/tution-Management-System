@@ -130,7 +130,7 @@ class _OtpInputFieldState extends State<OtpInputField> {
                   index == 5 ? TextInputAction.done : TextInputAction.next,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.titleLarge,
-              inputFormatters: const [FilteringTextInputFormatter.digitsOnly],
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               decoration: InputDecoration(
                 isDense: true,
                 filled: true,

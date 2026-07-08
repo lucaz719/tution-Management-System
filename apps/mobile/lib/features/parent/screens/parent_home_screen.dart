@@ -60,20 +60,18 @@ class _ParentHomeScreenState extends ConsumerState<ParentHomeScreen> {
               const Row(
                 children: [
                   Expanded(
-                    child: KPICard(
+                    child: KpiCard(
                       title: 'Attendance this month',
                       value: '94%',
-                      delta: '+1.5% improvement',
-                      icon: Icons.trending_up_rounded,
+                      deltaText: '+1.5% improvement',
                     ),
                   ),
                   SizedBox(width: 14),
                   Expanded(
-                    child: KPICard(
+                    child: KpiCard(
                       title: 'Fees due',
                       value: 'NPR 4,500',
-                      delta: '2 invoices open',
-                      icon: Icons.account_balance_wallet_outlined,
+                      deltaText: '2 invoices open',
                     ),
                   ),
                 ],

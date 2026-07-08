@@ -47,7 +47,7 @@ ThemeData buildTmsTheme() {
       bodySmall:
           GoogleFonts.outfit(fontSize: 12, color: kColorText.withOpacity(0.74)),
     ),
-    cardTheme: CardTheme(
+    cardTheme: CardThemeData(
       color: kColorBg,
       elevation: 0,
       margin: EdgeInsets.zero,

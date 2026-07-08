@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:tms_mobile/features/parent/widgets/child_switcher_bar.dart';
+import 'package:tms_mobile/shared/models/app_models.dart';
 import 'package:tms_mobile/shared/widgets/status_chip.dart';
 
 class ParentAttendanceScreen extends StatefulWidget {
