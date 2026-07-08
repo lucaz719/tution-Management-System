@@ -42,7 +42,7 @@ function ToastCard({ item, onDismiss }: { item: ToastItem; onDismiss: () => void
         {SEVERITY_ICONS[item.severity]}
       </span>
       <p className="toast-message">{item.message}</p>
-      <button className="toast-close" onClick={onDismiss} aria-label="Dismiss notification">
+      <button type="button" className="toast-close" onClick={onDismiss} aria-label="Dismiss notification">
         <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>close</span>
       </button>
     </div>

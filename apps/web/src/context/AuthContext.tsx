@@ -1,187 +1,249 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { api, removeAuthToken, setAuthToken } from '../services/api';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { removeAuthToken } from '../services/api';
+import {
+  AuthFlowError,
+  ROLE_DEFAULT_PATHS,
+  authenticateUser,
+  clearTwoFactorChallenge,
+  createTwoFactorChallenge,
+} from '../features/auth/service';
+import type { AuthUser } from '../features/auth/types';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-export type UserRole =
-  | 'SUPER_ADMIN'
-  | 'TENANT_ADMIN'
-  | 'BRANCH_ADMIN'
-  | 'TEACHER'
-  | 'ACCOUNTANT'
-  | 'RECEPTIONIST'
-  | 'JANITOR'
-  | 'STUDENT'
-  | 'PARENT';
-
-export interface AuthUser {
-  id: string;
-  email: string;
-  name: string;
-  role: UserRole;
-  avatar?: string;
-  firstLogin?: boolean;
-  requiresTwoFactor?: boolean;
-}
-
-export interface AuthContextValue {
+interface AuthContextValue {
   user: AuthUser | null;
   token: string | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  isTwoFactorPending: boolean;
+  attemptCount: number;
   login: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
   logout: () => void;
   roleRedirectPath: () => string;
   verify2FA: () => void;
+  resetAttemptCount: () => void;
 }
 
-// ─── Role → Route mapping (PRD §2.6) ─────────────────────────────────────────
-
-const ROLE_DEFAULT_PATHS: Record<UserRole, string> = {
-  SUPER_ADMIN:   '/super-admin/dashboard',
-  TENANT_ADMIN:  '/tenant/dashboard',
-  BRANCH_ADMIN:  '/branch/dashboard',
-  TEACHER:       '/teacher/dashboard',
-  ACCOUNTANT:    '/staff/finance',
-  RECEPTIONIST:  '/staff/reception',
-  JANITOR:       '/staff/tasks',
-  STUDENT:       '/student/home',
-  PARENT:        '/parent/home',
-};
-
-// Heuristic email → role mapping (until real API provides role in token)
-const emailToRole = (email: string): UserRole => {
-  if (email.includes('superadmin'))  return 'SUPER_ADMIN';
-  if (email.includes('admin@'))      return 'TENANT_ADMIN';
-  if (email.includes('branch-admin') || email.includes('branch.admin')) return 'BRANCH_ADMIN';
-  if (email.includes('teacher') || email.includes('shyam@')) return 'TEACHER';
-  if (email.includes('accountant'))  return 'ACCOUNTANT';
-  if (email.includes('student'))     return 'STUDENT';
-  if (email.includes('parent'))      return 'PARENT';
-  return 'PARENT';
-};
-
-// ─── Context ──────────────────────────────────────────────────────────────────
+const STORAGE_KEYS = {
+  token: 'tms_token',
+  user: 'tms_user',
+  tenantId: 'tms_tenant_id',
+  sessionScope: 'tms_session_scope',
+} as const;
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+function getStoredScope(): 'persistent' | 'session' | null {
+  const scope = localStorage.getItem(STORAGE_KEYS.sessionScope);
+  if (scope === 'persistent' || scope === 'session') {
+    return scope;
+  }
+
+  return null;
+}
+
+function clearSessionStorageArtifacts(): void {
+  sessionStorage.removeItem(STORAGE_KEYS.token);
+  sessionStorage.removeItem(STORAGE_KEYS.user);
+  sessionStorage.removeItem(STORAGE_KEYS.tenantId);
+}
+
+function clearLocalStorageArtifacts(): void {
+  localStorage.removeItem(STORAGE_KEYS.token);
+  localStorage.removeItem(STORAGE_KEYS.user);
+  localStorage.removeItem(STORAGE_KEYS.tenantId);
+  localStorage.removeItem(STORAGE_KEYS.sessionScope);
+}
+
+function writeStoredSession(token: string, user: AuthUser, tenantId: string | null | undefined, rememberMe: boolean): void {
+  if (rememberMe) {
+    localStorage.setItem(STORAGE_KEYS.token, token);
+    localStorage.setItem(STORAGE_KEYS.user, JSON.stringify(user));
+    if (tenantId) {
+      localStorage.setItem(STORAGE_KEYS.tenantId, tenantId);
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.tenantId);
+    }
+    localStorage.setItem(STORAGE_KEYS.sessionScope, 'persistent');
+    clearSessionStorageArtifacts();
+    return;
+  }
+
+  sessionStorage.setItem(STORAGE_KEYS.token, token);
+  sessionStorage.setItem(STORAGE_KEYS.user, JSON.stringify(user));
+  if (tenantId) {
+    sessionStorage.setItem(STORAGE_KEYS.tenantId, tenantId);
+  } else {
+    sessionStorage.removeItem(STORAGE_KEYS.tenantId);
+  }
+
+  localStorage.setItem(STORAGE_KEYS.sessionScope, 'session');
+  localStorage.removeItem(STORAGE_KEYS.token);
+  localStorage.removeItem(STORAGE_KEYS.user);
+  localStorage.removeItem(STORAGE_KEYS.tenantId);
+}
+
+function updateStoredUser(user: AuthUser): void {
+  const serializedUser = JSON.stringify(user);
+  const scope = getStoredScope();
+
+  if (scope === 'persistent') {
+    localStorage.setItem(STORAGE_KEYS.user, serializedUser);
+    return;
+  }
+
+  sessionStorage.setItem(STORAGE_KEYS.user, serializedUser);
+}
+
+function readStoredSession(): { token: string | null; user: AuthUser | null } {
+  const scope = getStoredScope();
+
+  if (scope === 'session' && !sessionStorage.getItem(STORAGE_KEYS.token)) {
+    clearLocalStorageArtifacts();
+    return { token: null, user: null };
+  }
+
+  const token =
+    (scope === 'session' ? sessionStorage.getItem(STORAGE_KEYS.token) : null) ??
+    sessionStorage.getItem(STORAGE_KEYS.token) ??
+    localStorage.getItem(STORAGE_KEYS.token);
+
+  const rawUser =
+    (scope === 'session' ? sessionStorage.getItem(STORAGE_KEYS.user) : null) ??
+    sessionStorage.getItem(STORAGE_KEYS.user) ??
+    localStorage.getItem(STORAGE_KEYS.user);
+
+  if (!token || !rawUser) {
+    return { token: null, user: null };
+  }
+
+  try {
+    return {
+      token,
+      user: JSON.parse(rawUser) as AuthUser,
+    };
+  } catch {
+    clearLocalStorageArtifacts();
+    clearSessionStorageArtifacts();
+    return { token: null, user: null };
+  }
+}
+
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [attemptCount, setAttemptCount] = useState(0);
 
-  // Restore session on mount
   useEffect(() => {
-    const storedToken = localStorage.getItem('tms_token');
-    const storedUser  = localStorage.getItem('tms_user');
-    if (storedToken && storedUser) {
-      try {
-        const parsed = JSON.parse(storedUser) as AuthUser;
-        setToken(storedToken);
-        setUser(parsed);
-        setAuthToken(storedToken);
-      } catch {
-        localStorage.removeItem('tms_token');
-        localStorage.removeItem('tms_user');
-      }
-    }
+    const storedSession = readStoredSession();
+    setUser(storedSession.user);
+    setToken(storedSession.token);
     setIsLoading(false);
+  }, []);
+
+  const resetAttemptCount = useCallback(() => {
+    setAttemptCount(0);
   }, []);
 
   const login = useCallback(async (email: string, password: string, rememberMe = false) => {
+    if (attemptCount >= 5) {
+      throw new AuthFlowError('ACCOUNT_LOCKED', 'Your account has been locked after 5 failed attempts.');
+    }
+
     setIsLoading(true);
-    let authUser: AuthUser;
-    let authToken: string;
 
     try {
-      const res = await api.auth.login(email, password);
-      authToken = res.token ?? `mock-jwt-${Date.now()}`;
-      authUser = {
-        id:    res.user?.id    ?? crypto.randomUUID(),
-        email: res.user?.email ?? email,
-        name:  res.user?.name  ?? email.split('@')[0],
-        role:  (res.user?.role as UserRole) ?? emailToRole(email),
-        firstLogin:         res.user?.firstLogin ?? false,
-        requiresTwoFactor:  res.user?.requiresTwoFactor ?? false,
-      };
-    } catch {
-      // Fallback mock session so demo works without backend
-      authToken = `mock-jwt-${Date.now()}`;
-      authUser = {
-        id:    crypto.randomUUID(),
-        email,
-        name:  email.split('@')[0],
-        role:  emailToRole(email),
-        firstLogin:        false,
-        requiresTwoFactor: ['SUPER_ADMIN', 'TENANT_ADMIN'].includes(emailToRole(email)),
-      };
+      const session = await authenticateUser(email, password);
+      writeStoredSession(session.token, session.user, session.tenantId, rememberMe);
+
+      if (session.user.requiresTwoFactor) {
+        createTwoFactorChallenge(session.user.email);
+      } else {
+        clearTwoFactorChallenge();
+      }
+
+      setToken(session.token);
+      setUser(session.user);
+      setAttemptCount(0);
+    } catch (error) {
+      const nextAttemptCount = attemptCount + 1;
+      setAttemptCount(nextAttemptCount);
+
+      if (nextAttemptCount >= 5) {
+        throw new AuthFlowError('ACCOUNT_LOCKED', 'Your account has been locked after 5 failed attempts.');
+      }
+
+      throw error;
+    } finally {
+      setIsLoading(false);
     }
-
-    setAuthToken(authToken);
-    setToken(authToken);
-    setUser(authUser);
-
-    const storage = rememberMe ? localStorage : sessionStorage;
-    storage.setItem('tms_token', authToken);
-    storage.setItem('tms_user',  JSON.stringify(authUser));
-    // Always write to localStorage for session restore (overridden by sessionStorage behavior)
-    localStorage.setItem('tms_token', authToken);
-    localStorage.setItem('tms_user',  JSON.stringify(authUser));
-    if (!rememberMe) {
-      // Will be cleared on tab close via beforeunload
-      window.addEventListener('beforeunload', () => {
-        localStorage.removeItem('tms_token');
-        localStorage.removeItem('tms_user');
-      }, { once: true });
-    }
-
-    setIsLoading(false);
-  }, []);
+  }, [attemptCount]);
 
   const logout = useCallback(() => {
     removeAuthToken();
-    localStorage.removeItem('tms_token');
-    localStorage.removeItem('tms_user');
-    sessionStorage.removeItem('tms_token');
-    sessionStorage.removeItem('tms_user');
-    setToken(null);
+    clearLocalStorageArtifacts();
+    clearSessionStorageArtifacts();
+    clearTwoFactorChallenge();
     setUser(null);
+    setToken(null);
+    setAttemptCount(0);
   }, []);
 
   const roleRedirectPath = useCallback((): string => {
-    if (!user) return '/login';
-    if (user.firstLogin) {
-      if (user.role === 'TENANT_ADMIN') return '/setup/tenant';
-      if (user.role === 'BRANCH_ADMIN') return '/setup/branch';
+    if (!user) {
+      return '/login';
     }
-    if (user.requiresTwoFactor) return '/two-factor';
+
+    if (user.requiresTwoFactor) {
+      return '/2fa';
+    }
+
+    if (user.firstLogin) {
+      if (user.role === 'TENANT_ADMIN') {
+        return '/setup/tenant';
+      }
+
+      if (user.role === 'BRANCH_ADMIN') {
+        return '/setup/branch';
+      }
+    }
+
     return ROLE_DEFAULT_PATHS[user.role] ?? '/login';
   }, [user]);
 
   const verify2FA = useCallback(() => {
-    if (user) {
-      const updated = { ...user, requiresTwoFactor: false };
-      setUser(updated);
-      localStorage.setItem('tms_user', JSON.stringify(updated));
+    if (!user) {
+      return;
     }
+
+    const updatedUser: AuthUser = { ...user, requiresTwoFactor: false };
+    clearTwoFactorChallenge();
+    updateStoredUser(updatedUser);
+    setUser(updatedUser);
   }, [user]);
 
-  const value: AuthContextValue = {
+  const value = useMemo<AuthContextValue>(() => ({
     user,
     token,
     isLoading,
-    isAuthenticated: !!token && !!user,
+    isAuthenticated: Boolean(token && user && !user.requiresTwoFactor),
+    isTwoFactorPending: Boolean(token && user?.requiresTwoFactor),
+    attemptCount,
     login,
     logout,
     roleRedirectPath,
     verify2FA,
-  };
+    resetAttemptCount,
+  }), [attemptCount, isLoading, login, logout, roleRedirectPath, token, user, verify2FA, resetAttemptCount]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used inside <AuthProvider>');
-  return ctx;
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used inside <AuthProvider>');
+  }
+
+  return context;
 }

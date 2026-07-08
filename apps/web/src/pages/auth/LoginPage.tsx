@@ -1,260 +1,327 @@
-import React, { useState, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
+import { useMemo, useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { useToast } from '../../components/ui/Toast';
+import { useAuth } from '../../context/AuthContext';
+import { AuthFlowError } from '../../features/auth/service';
+import { isValidEmailAddress } from '../../features/auth/utils';
 
-// ─── Demo quick-fill (hidden unless ?demo=true) ───────────────────────────────
+const FEATURE_BULLETS = [
+  {
+    icon: 'visibility',
+    title: 'Multi-branch visibility',
+    text: 'Track operations, staffing, and performance across every center from one secure workspace.',
+  },
+  {
+    icon: 'co_present',
+    title: 'Real-time attendance',
+    text: 'Monitor check-ins, class presence, and staff activity with live operational context.',
+  },
+  {
+    icon: 'payments',
+    title: 'Smart fee tracking',
+    text: 'Follow invoices, dues, and financial health with branch-aware reporting built in.',
+  },
+] as const;
 
 const DEMO_USERS = [
-  { label: 'Tenant Admin',    email: 'admin@pinnacle.edu.np',        password: 'PinnacleAdmin777!',  hint: 'Institutional P&L & global policy' },
-  { label: 'Branch Admin',    email: 'branch-admin@pinnacle.edu.np', password: 'BaneshworAdmin888!', hint: 'Petty cash approvals & vehicle transit' },
-  { label: 'Teacher',         email: 'shyam@pinnacle.edu.np',        password: 'PhysicsPass999!',    hint: 'Geo-attendance, lesson gates & parent chat' },
-  { label: 'Student/Parent',  email: 'parent.shyam@gmail.com',       password: 'ShyamParent123!',    hint: 'Digital ID, payment calendars & wallet' },
-];
+  { label: 'Tenant Admin', email: 'admin@pinnacle.edu.np', password: 'PinnacleAdmin777!' },
+  { label: 'Branch Admin', email: 'branch-admin@pinnacle.edu.np', password: 'BaneshworAdmin888!' },
+  { label: 'Teacher', email: 'shyam@pinnacle.edu.np', password: 'PhysicsPass999!' },
+  { label: 'Parent', email: 'parent.shyam@gmail.com', password: 'ShyamParent123!' },
+] as const;
 
-const ROLE_ICONS: Record<string, string> = {
-  'Tenant Admin':   'domain',
-  'Branch Admin':   'location_away',
-  'Teacher':        'account_circle',
-  'Student/Parent': 'family_restroom',
-};
+function validateLoginEmail(email: string): string {
+  if (!email.trim()) {
+    return 'Email is required.';
+  }
 
-const ROLE_COLORS: Record<string, string> = {
-  'Tenant Admin':   '#4355b9',
-  'Branch Admin':   '#00ab9c',
-  'Teacher':        '#f59f00',
-  'Student/Parent': '#ff6b6b',
-};
+  if (!isValidEmailAddress(email)) {
+    return 'Enter a valid email address.';
+  }
+
+  return '';
+}
+
+function SealMotif() {
+  return (
+    <div className="auth-seal" aria-hidden="true">
+      <svg viewBox="0 0 240 240" fill="none">
+        <defs>
+          <path id="seal-path" d="M120 28a92 92 0 1 1 0 184a92 92 0 0 1 0-184Z" />
+        </defs>
+        <circle cx="120" cy="120" r="102" stroke="rgba(255,255,255,0.28)" strokeWidth="2" />
+        <circle cx="120" cy="120" r="82" stroke="rgba(255,255,255,0.18)" strokeWidth="1.5" />
+        <text fill="rgba(255,255,255,0.88)" fontFamily="Roboto, sans-serif" fontSize="11" letterSpacing="2">
+          <textPath href="#seal-path" startOffset="3%">
+            SANSKARDIP SHIKSHALAYA • TUITION MANAGEMENT SYSTEM •
+          </textPath>
+        </text>
+        <circle cx="120" cy="120" r="46" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.18)" />
+        <path
+          d="M120 84l10 20 22 3-16 15 4 22-20-10-20 10 4-22-16-15 22-3 10-20Z"
+          fill="rgba(243,156,18,0.96)"
+        />
+      </svg>
+    </div>
+  );
+}
 
 export function LoginPage() {
-  const navigate   = useNavigate();
-  const { login, roleRedirectPath } = useAuth();
+  const { login, attemptCount } = useAuth();
   const { showToast } = useToast();
-
-  const [email, setEmail]         = useState('');
-  const [password, setPassword]   = useState('');
-  const [showPw, setShowPw]       = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [emailError, setEmailError] = useState('');
+  const [emailTouched, setEmailTouched] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [failCount, setFailCount] = useState(0);
-  const [lockDialog, setLockDialog] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [lockDialogOpen, setLockDialogOpen] = useState(false);
 
-  const isDemoMode = new URLSearchParams(window.location.search).get('demo') === 'true';
+  const isDemoMode = useMemo(
+    () => new URLSearchParams(window.location.search).get('demo') === 'true',
+    []
+  );
 
-  const handleSubmit = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (failCount >= 5) { setLockDialog(true); return; }
-    setIsLoading(true);
+  const canSubmit = email.trim().length > 0 && password.trim().length > 0;
+
+  const handleEmailBlur = () => {
+    setEmailTouched(true);
+    setEmailError(validateLoginEmail(email));
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const nextEmailError = validateLoginEmail(email);
+    setEmailTouched(true);
+    setEmailError(nextEmailError);
+
+    if (nextEmailError || attemptCount >= 5) {
+      if (attemptCount >= 5) {
+        setLockDialogOpen(true);
+      }
+      return;
+    }
+
+    setIsSubmitting(true);
+
     try {
       await login(email, password, rememberMe);
-      const dest = roleRedirectPath();
-      navigate(dest, { replace: true });
-    } catch {
-      const next = failCount + 1;
-      setFailCount(next);
-      if (next >= 5) {
-        setLockDialog(true);
+    } catch (error) {
+      if (error instanceof AuthFlowError && error.code === 'ACCOUNT_LOCKED') {
+        setLockDialogOpen(true);
       } else {
+        const nextRemainingAttempts = Math.max(0, 4 - attemptCount);
         showToast(
-          `Invalid email or password. ${5 - next} attempt${5 - next === 1 ? '' : 's'} remaining before account lock.`,
-          'error'
+          `Invalid email or password. ${nextRemainingAttempts} attempt${nextRemainingAttempts === 1 ? '' : 's'} remaining before account lock.`,
+          'error',
+          4000
         );
       }
     } finally {
-      setIsLoading(false);
+      setIsSubmitting(false);
     }
-  }, [email, password, rememberMe, failCount, login, navigate, roleRedirectPath, showToast]);
-
-  const handleDemoFill = (user: typeof DEMO_USERS[0]) => {
-    setEmail(user.email);
-    setPassword(user.password);
   };
 
   return (
     <div className="auth-page">
       <div className="auth-split">
-        {/* ── Left Hero Panel ── */}
-        <div className="auth-hero">
+        <section className="auth-hero">
           <div className="auth-hero-content">
-            <div className="auth-logo-row">
-              <span className="material-symbols-outlined auth-logo-icon">school</span>
+            <div className="auth-wordmark">
+              <div className="auth-wordmark-mark">
+                <span className="material-symbols-outlined">school</span>
+              </div>
               <div>
-                <h1 className="auth-brand">TMS</h1>
-                <p className="auth-brand-sub">Tuition Management System</p>
+                <div className="auth-wordmark-title">TMS</div>
+                <p className="auth-wordmark-subtitle">Institution operations, aligned.</p>
               </div>
             </div>
-            <h2 className="auth-hero-title">Welcome to TMS</h2>
-            <p className="auth-hero-desc">
-              Manage your tuition institution from a single, powerful platform.
+
+            <h1 className="auth-hero-title">Welcome to TMS</h1>
+            <p className="auth-hero-description">
+              Manage branches, classrooms, finance, and day-to-day school operations from one trusted platform.
             </p>
+
             <ul className="auth-feature-list">
-              {[
-                'Multi-branch management',
-                'Smart attendance & billing',
-                'AI-driven financial insights',
-                'Real-time communication hub',
-              ].map((feat) => (
-                <li key={feat}>
-                  <span className="material-symbols-outlined auth-check-icon">check_circle</span>
-                  {feat}
+              {FEATURE_BULLETS.map((feature) => (
+                <li key={feature.title} className="auth-feature-item">
+                  <span className="material-symbols-outlined auth-feature-icon">{feature.icon}</span>
+                  <div>
+                    <div className="auth-feature-title">{feature.title}</div>
+                    <p className="auth-feature-text">{feature.text}</p>
+                  </div>
                 </li>
               ))}
             </ul>
-          </div>
-          <div className="auth-hero-decoration" aria-hidden="true">
-            <div className="auth-orb auth-orb-1" />
-            <div className="auth-orb auth-orb-2" />
-          </div>
-        </div>
 
-        {/* ── Right Form Panel ── */}
-        <div className="auth-form-panel">
+            <SealMotif />
+          </div>
+        </section>
+
+        <section className="auth-form-panel">
           <div className="auth-form-inner">
-            <h2 className="auth-form-title">Sign In</h2>
-            <p className="auth-form-sub">Enter your credentials to access the platform</p>
+            <div className="auth-form-heading">
+              <div className="auth-form-kicker">
+                <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>
+                  lock
+                </span>
+                Secure access
+              </div>
+              <h2 className="auth-form-title">Sign in to TMS</h2>
+              <p className="auth-form-subtitle">Use your registered institutional account to continue.</p>
+            </div>
 
-            <form onSubmit={handleSubmit} className="auth-form" noValidate>
-              {/* Email */}
+            <form className="auth-form" onSubmit={handleSubmit} noValidate>
               <div className="auth-field">
-                <label htmlFor="login-email" className="auth-label">Email Address</label>
+                <label className="auth-label" htmlFor="login-email">
+                  Email
+                </label>
                 <div className="auth-input-wrap">
                   <span className="material-symbols-outlined auth-input-icon">mail</span>
                   <input
                     id="login-email"
+                    className={`auth-input auth-input--with-leading-icon${emailTouched && emailError ? ' auth-input-invalid' : ''}`}
                     type="email"
-                    className="auth-input"
-                    placeholder="you@institution.edu.np"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      setEmail(nextValue);
+                      if (emailTouched) {
+                        setEmailError(validateLoginEmail(nextValue));
+                      }
+                    }}
+                    onBlur={handleEmailBlur}
                     autoComplete="email"
+                    placeholder="you@institution.edu.np"
                     required
                   />
                 </div>
+                {emailTouched && emailError ? <p className="auth-helper-text auth-helper-text--error">{emailError}</p> : null}
               </div>
 
-              {/* Password */}
               <div className="auth-field">
                 <div className="auth-label-row">
-                  <label htmlFor="login-password" className="auth-label">Password</label>
-                  <Link to="/forgot-password" className="auth-forgot-link">
-                    Forgot password?
+                  <label className="auth-label" htmlFor="login-password">
+                    Password
+                  </label>
+                  <Link to="/forgot-password" className="auth-text-link">
+                    Forgot Password?
                   </Link>
                 </div>
                 <div className="auth-input-wrap">
                   <span className="material-symbols-outlined auth-input-icon">lock</span>
                   <input
                     id="login-password"
-                    type={showPw ? 'text' : 'password'}
-                    className="auth-input auth-input--padded-right"
-                    placeholder="••••••••"
+                    className="auth-input auth-input--with-leading-icon"
+                    type={showPassword ? 'text' : 'password'}
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={(event) => setPassword(event.target.value)}
                     autoComplete="current-password"
+                    placeholder="Enter your password"
                     required
                   />
                   <button
                     type="button"
-                    className="auth-toggle-pw"
-                    onClick={() => setShowPw((v) => !v)}
-                    aria-label={showPw ? 'Hide password' : 'Show password'}
+                    className="auth-password-toggle"
+                    onClick={() => setShowPassword((current) => !current)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
                   >
-                    <span className="material-symbols-outlined">
-                      {showPw ? 'visibility_off' : 'visibility'}
+                    <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>
+                      {showPassword ? 'visibility_off' : 'visibility'}
                     </span>
                   </button>
                 </div>
               </div>
 
-              {/* Remember me */}
-              <label className="auth-remember">
-                <input
-                  type="checkbox"
-                  checked={rememberMe}
-                  onChange={(e) => setRememberMe(e.target.checked)}
-                />
-                <span>Remember me for 30 days</span>
-              </label>
+              <div className="auth-remember">
+                <label className="auth-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(event) => setRememberMe(event.target.checked)}
+                  />
+                  <span>Remember Me</span>
+                </label>
+              </div>
 
-              {/* Submit */}
-              <button
-                type="submit"
-                className="auth-submit-btn"
-                disabled={isLoading || !email || !password}
-              >
-                {isLoading ? (
+              <button type="submit" className="auth-submit-btn" disabled={!canSubmit || isSubmitting}>
+                {isSubmitting ? (
                   <>
                     <span className="auth-spinner" aria-hidden="true" />
-                    Verifying…
+                    Signing in…
                   </>
                 ) : (
                   <>
-                    <span className="material-symbols-outlined">login</span>
+                    <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>
+                      login
+                    </span>
                     Sign In
                   </>
                 )}
               </button>
             </form>
 
-            <p className="auth-help-text">
-              Having trouble signing in?{' '}
-              <a href="mailto:support@tms.edu.np" className="auth-link">
-                Contact your administrator
-              </a>
-            </p>
-
-            {/* Demo Panel (only when ?demo=true) */}
-            {isDemoMode && (
-              <div className="auth-demo-panel">
-                <p className="auth-demo-title">
-                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>experiment</span>
-                  Demo Quick-Fill
-                </p>
-                {DEMO_USERS.map((u) => (
-                  <button
-                    key={u.label}
-                    className="auth-demo-btn"
-                    onClick={() => handleDemoFill(u)}
-                    type="button"
-                  >
-                    <span
-                      className="material-symbols-outlined"
-                      style={{ color: ROLE_COLORS[u.label], fontSize: '20px' }}
+            {isDemoMode ? (
+              <div className="auth-step-shell" style={{ marginTop: '18px' }}>
+                <div className="auth-helper-text">Demo quick fill</div>
+                <div className="auth-form" style={{ gap: '10px' }}>
+                  {DEMO_USERS.map((demoUser) => (
+                    <button
+                      key={demoUser.label}
+                      type="button"
+                      className="auth-link-button"
+                      style={{
+                        padding: '12px 14px',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid rgba(15, 76, 138, 0.14)',
+                        textAlign: 'left',
+                        color: 'var(--color-text)',
+                      }}
+                      onClick={() => {
+                        setEmail(demoUser.email);
+                        setPassword(demoUser.password);
+                        setEmailTouched(false);
+                        setEmailError('');
+                      }}
                     >
-                      {ROLE_ICONS[u.label]}
-                    </span>
-                    <div>
-                      <p style={{ fontWeight: 600, fontSize: '13px' }}>{u.label}</p>
-                      <p style={{ fontSize: '11px', color: 'var(--text-muted-foreground)' }}>{u.hint}</p>
-                    </div>
-                  </button>
-                ))}
+                      {demoUser.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-            )}
+            ) : null}
           </div>
-        </div>
+        </section>
       </div>
 
-      {/* ── Account Lock Dialog ── */}
-      {lockDialog && (
-        <div className="auth-dialog-overlay" role="dialog" aria-modal="true" aria-labelledby="lock-title">
+      {lockDialogOpen ? (
+        <div className="auth-dialog-overlay" role="dialog" aria-modal="true" aria-labelledby="account-lock-title">
           <div className="auth-dialog">
-            <span className="material-symbols-outlined auth-dialog-icon auth-dialog-icon--error">lock</span>
-            <h3 id="lock-title" className="auth-dialog-title">Account Locked</h3>
+            <span className="material-symbols-outlined" style={{ fontSize: '42px', color: 'var(--color-error)' }}>
+              lock
+            </span>
+            <h3 className="auth-dialog-title" id="account-lock-title">
+              Account locked
+            </h3>
             <p className="auth-dialog-body">
-              Your account has been locked after 5 failed attempts. Please reset your password
-              or contact your administrator.
+              Your account is locked after 5 failed attempts. Reset your password to regain access or contact your administrator for help.
             </p>
             <div className="auth-dialog-actions">
-              <Link to="/forgot-password" className="auth-submit-btn" style={{ textDecoration: 'none', textAlign: 'center' }}>
+              <Link to="/forgot-password" className="auth-submit-btn" style={{ textDecoration: 'none' }}>
                 Reset Password
               </Link>
-              <a href="mailto:support@tms.edu.np" className="auth-link" style={{ textAlign: 'center' }}>
+              <a href="mailto:support@tms.edu.np" className="auth-text-link" style={{ textAlign: 'center' }}>
                 Contact Admin
               </a>
+              <button type="button" className="auth-link-button" onClick={() => setLockDialogOpen(false)}>
+                Close
+              </button>
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

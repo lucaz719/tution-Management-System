@@ -1,192 +1,178 @@
-import { useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { OTPInput } from '../../components/ui/OTPInput';
+import { useState } from 'react';
 import { CountdownTimer } from '../../components/ui/CountdownTimer';
-import { useAuth } from '../../context/AuthContext';
+import { OTPInput } from '../../components/ui/OTPInput';
 import { useToast } from '../../components/ui/Toast';
+import { useAuth } from '../../context/AuthContext';
+import {
+  AuthFlowError,
+  getTwoFactorDestinationHint,
+  resendTwoFactorChallenge,
+  trustDeviceForThirtyDays,
+  verifyTwoFactorChallenge,
+} from '../../features/auth/service';
 
-const TWO_FA_DURATION = 5 * 60; // 5 min (PRD §7)
+const TWO_FACTOR_DURATION_SECONDS = 5 * 60;
 
 export function TwoFactorPage() {
-  const navigate = useNavigate();
   const { user, verify2FA } = useAuth();
   const { showToast } = useToast();
-
-  const [otp, setOtp]               = useState<string[]>(Array(6).fill(''));
+  const [otp, setOtp] = useState<string[]>(Array(6).fill(''));
   const [trustDevice, setTrustDevice] = useState(false);
-  const [isLoading, setIsLoading]   = useState(false);
-  const [expired, setExpired]       = useState(false);
-  const [attempts, setAttempts]     = useState(3);
-  const [resendKey, setResendKey]   = useState(0);
+  const [attemptsRemaining, setAttemptsRemaining] = useState(3);
+  const [codeExpired, setCodeExpired] = useState(false);
+  const [timerKey, setTimerKey] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [statusMessage, setStatusMessage] = useState('');
 
-  const maskedPhone = '••••27'; // TODO: get from user profile
+  const destinationHint = user ? getTwoFactorDestinationHint(user.email) : 'phone/email';
+  const isOtpFilled = otp.every((digit) => digit.length === 1);
 
-  const handleVerify = useCallback(async (code: string) => {
-    const otpStr = code;
-    if (attempts <= 0 || expired) return;
-    setIsLoading(true);
+  const handleVerify = async (otpValue: string) => {
+    if (!user || isSubmitting || codeExpired || otpValue.length !== 6 || attemptsRemaining <= 0) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setStatusMessage('');
+
     try {
-      console.log('Verifying 2FA code:', otpStr);
-      // TODO: replace with api.auth.verify2fa(otpStr)
-      await new Promise((res) => setTimeout(res, 700));
+      await verifyTwoFactorChallenge(otpValue);
       if (trustDevice) {
-        document.cookie = `tms_trusted=${Date.now()}; max-age=${30 * 24 * 3600}; path=/; SameSite=Strict`;
+        trustDeviceForThirtyDays(user.email);
       }
-      
-      // Update requiresTwoFactor state globally
       verify2FA();
+      showToast('Two-factor verification successful.', 'success');
+    } catch (error) {
+      const nextAttemptsRemaining = attemptsRemaining - 1;
+      const message =
+        error instanceof AuthFlowError ? error.message : 'We could not verify the code. Please try again.';
 
-      // Compute destination directly to avoid state update lag
-      let dest = '/login';
-      if (user) {
-        if (user.firstLogin) {
-          dest = user.role === 'TENANT_ADMIN' ? '/setup/tenant' : 
-                 user.role === 'BRANCH_ADMIN' ? '/setup/branch' : '/login';
-        } else {
-          const ROLE_DEFAULT_PATHS: Record<string, string> = {
-            SUPER_ADMIN:   '/super-admin/dashboard',
-            TENANT_ADMIN:  '/tenant/dashboard',
-            BRANCH_ADMIN:  '/branch/dashboard',
-            TEACHER:       '/teacher/dashboard',
-            ACCOUNTANT:    '/staff/finance',
-            RECEPTIONIST:  '/staff/reception',
-            JANITOR:       '/staff/tasks',
-            STUDENT:       '/student/home',
-            PARENT:        '/parent/home',
-          };
-          dest = ROLE_DEFAULT_PATHS[user.role] ?? '/login';
-        }
-      }
-
-      navigate(dest, { replace: true });
-    } catch {
-      const rem = attempts - 1;
-      setAttempts(rem);
-      if (rem === 0) {
-        showToast('Too many failed attempts. Please request a new code.', 'error');
+      if (nextAttemptsRemaining <= 0) {
+        setAttemptsRemaining(0);
+        setCodeExpired(true);
         setOtp(Array(6).fill(''));
+        setStatusMessage('The code has been invalidated. Request a new one to continue.');
+        showToast('Verification failed three times. Request a new code.', 'error');
       } else {
-        showToast(`Incorrect code. ${rem} attempt${rem === 1 ? '' : 's'} remaining.`, 'error');
+        setAttemptsRemaining(nextAttemptsRemaining);
+        setStatusMessage(`${message} ${nextAttemptsRemaining} attempts remaining.`);
       }
     } finally {
-      setIsLoading(false);
+      setIsSubmitting(false);
     }
-  }, [attempts, expired, trustDevice, navigate, verify2FA, showToast, user]);
+  };
 
-  const handleResend = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      await new Promise((res) => setTimeout(res, 600));
-      setOtp(Array(6).fill(''));
-      setExpired(false);
-      setAttempts(3);
-      setResendKey((k) => k + 1);
-      showToast('New code sent to your phone.', 'success');
-    } finally {
-      setIsLoading(false);
+  const handleResend = async () => {
+    if (!user) {
+      return;
     }
-  }, [showToast]);
+
+    setIsSubmitting(true);
+
+    try {
+      await resendTwoFactorChallenge(user.email);
+      setOtp(Array(6).fill(''));
+      setAttemptsRemaining(3);
+      setCodeExpired(false);
+      setStatusMessage('');
+      setTimerKey((current) => current + 1);
+      showToast('A new verification code has been sent.', 'success');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <div className="auth-page">
       <div className="auth-centered-card">
-        <div className="auth-icon-circle auth-icon-circle--warning">
-          <span className="material-symbols-outlined">shield</span>
-        </div>
-
-        <h2 className="auth-form-title">Two-Factor Authentication</h2>
-        <p className="auth-form-sub">
-          A verification code has been sent to your registered phone number ending in{' '}
-          <strong>{maskedPhone}</strong>.
-        </p>
-
-        {user && (
-          <div className="auth-2fa-user">
-            <span className="material-symbols-outlined" style={{ color: 'var(--brand)', fontSize: '20px' }}>
-              account_circle
-            </span>
-            <span>{user.name}</span>
+        <div className="auth-step-shell">
+          <div className="auth-form-heading">
+            <h1 className="auth-form-title">Two-Factor Authentication</h1>
+            <p className="auth-form-subtitle">A verification code has been sent to your phone/email.</p>
           </div>
-        )}
 
-        <div style={{
-          background: 'rgba(63, 81, 181, 0.08)',
-          border: '1px solid rgba(63, 81, 181, 0.15)',
-          borderRadius: 'var(--radius-sm)',
-          padding: '12px',
-          fontSize: '12px',
-          color: 'var(--brand)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          marginBottom: '16px',
-          lineHeight: '1.4'
-        }}>
-          <span className="material-symbols-outlined" style={{ fontSize: '18px', color: 'var(--brand)' }}>info</span>
-          <span><strong>Demo Mode:</strong> You can enter any 6 digits (e.g. 123456) to proceed.</span>
-        </div>
+          <div className="auth-otp-message">Delivery target: {destinationHint}</div>
 
-        <div className="auth-form">
-          <OTPInput
-            value={otp}
-            onChange={setOtp}
-            onComplete={handleVerify}
-            disabled={isLoading || expired || attempts === 0}
-            error={attempts < 3}
-          />
+          <div className="auth-attempts">
+            <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>
+              warning
+            </span>
+            {attemptsRemaining} attempts remaining
+          </div>
 
-          <div className="auth-otp-meta">
-            {expired || attempts === 0 ? (
-              <span className="auth-otp-expired">Code expired or locked</span>
-            ) : (
-              <span className="auth-otp-timer">
-                Expires in{' '}
-                <CountdownTimer
-                  durationSeconds={TWO_FA_DURATION}
-                  onExpire={() => setExpired(true)}
-                  resetKey={resendKey}
-                />
+          <div className="auth-form">
+            <OTPInput
+              value={otp}
+              onChange={(nextOtp: string[]) => {
+                setOtp(nextOtp);
+                if (statusMessage) {
+                  setStatusMessage('');
+                }
+              }}
+              onComplete={handleVerify}
+              disabled={isSubmitting || codeExpired || attemptsRemaining === 0}
+              error={Boolean(statusMessage) && attemptsRemaining < 3}
+            />
+
+            {statusMessage ? (
+              <p className="auth-helper-text auth-helper-text--error">{statusMessage}</p>
+            ) : null}
+
+            <div className="auth-otp-meta">
+              <span className={`auth-otp-status${codeExpired ? ' auth-otp-status--error' : ''}`}>
+                {codeExpired ? (
+                  'Code expired'
+                ) : (
+                  <>
+                    Expires in{' '}
+                    <CountdownTimer
+                      durationSeconds={TWO_FACTOR_DURATION_SECONDS}
+                      resetKey={timerKey}
+                      onExpire={() => {
+                        setCodeExpired(true);
+                        setStatusMessage('This code has expired. Request a new code.');
+                      }}
+                    />
+                  </>
+                )}
               </span>
-            )}
+
+              <button
+                type="button"
+                className="auth-link-button"
+                disabled={!codeExpired || isSubmitting}
+                onClick={handleResend}
+              >
+                Resend Code
+              </button>
+            </div>
+
+            <label className="auth-checkbox">
+              <input
+                type="checkbox"
+                checked={trustDevice}
+                onChange={(event) => setTrustDevice(event.target.checked)}
+              />
+              <span>Trust this device for 30 days</span>
+            </label>
+
             <button
               type="button"
-              className="auth-link"
-              onClick={handleResend}
-              disabled={!expired && attempts > 0}
-              style={{ opacity: (!expired && attempts > 0) ? 0.4 : 1 }}
+              className="auth-submit-btn"
+              disabled={!isOtpFilled || isSubmitting || codeExpired || attemptsRemaining === 0}
+              onClick={() => handleVerify(otp.join(''))}
             >
-              Resend Code
+              {isSubmitting ? (
+                <>
+                  <span className="auth-spinner" aria-hidden="true" />
+                  Verifying…
+                </>
+              ) : (
+                'Verify'
+              )}
             </button>
           </div>
-
-          {/* Trust device */}
-          <label className="auth-remember">
-            <input
-              type="checkbox"
-              checked={trustDevice}
-              onChange={(e) => setTrustDevice(e.target.checked)}
-            />
-            <span>Trust this device for 30 days</span>
-          </label>
-
-          <button
-            type="button"
-            className="auth-submit-btn"
-            disabled={otp.join('').length < 6 || isLoading || expired || attempts === 0}
-            onClick={() => handleVerify(otp.join(''))}
-          >
-            {isLoading ? (
-              <><span className="auth-spinner" />Verifying…</>
-            ) : (
-              <><span className="material-symbols-outlined">verified_user</span>Verify Code</>
-            )}
-          </button>
         </div>
-
-        <p className="auth-help-text" style={{ marginTop: '16px' }}>
-          Didn't receive the code?{' '}
-          <a href="mailto:support@tms.edu.np" className="auth-link">Contact support</a>
-        </p>
       </div>
     </div>
   );

@@ -5,7 +5,7 @@ const API_BASE_URL = 'http://localhost:3001/api';
 
 // Helper to get token
 export function getAuthToken(): string | null {
-  return localStorage.getItem('tms_token');
+  return sessionStorage.getItem('tms_token') ?? localStorage.getItem('tms_token');
 }
 
 // Helper to set token
@@ -18,6 +18,10 @@ export function removeAuthToken() {
   localStorage.removeItem('tms_token');
   localStorage.removeItem('tms_tenant_id');
   localStorage.removeItem('tms_user');
+  localStorage.removeItem('tms_session_scope');
+  sessionStorage.removeItem('tms_token');
+  sessionStorage.removeItem('tms_tenant_id');
+  sessionStorage.removeItem('tms_user');
 }
 
 // Helper to get current tenantId

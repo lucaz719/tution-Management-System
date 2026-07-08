@@ -1,46 +1,30 @@
-import React from 'react';
-import { cn } from './utils';
+import type { ButtonHTMLAttributes } from 'react';
+import { TMSButton, type TMSButtonProps } from './TMSButton';
 
-export interface ButtonProps extends React.ComponentProps<'button'> {
+export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
   variant?: 'primary' | 'secondary' | 'danger' | 'outline';
+  children: TMSButtonProps['children'];
 }
 
-export function Button({ variant = 'primary', className, children, ...props }: ButtonProps) {
-  return (
-    <button
-      data-slot="tms-button"
-      className={cn(
-        'btn',
-        {
-          'btn-primary': variant === 'primary',
-          'btn-secondary': variant === 'secondary',
-          'btn-danger': variant === 'danger',
-          'btn-outline': variant === 'outline',
-        },
-        className
-      )}
-      style={{
-        minHeight: '44px',
-        minWidth: '44px',
-        outlineOffset: '2px',
-        cursor: 'pointer',
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: '8px',
-        padding: '12px 24px',
-        borderRadius: '50px',
-        fontWeight: 600,
-        fontSize: '14px',
-        border: variant === 'outline' ? '1px solid var(--border-border)' : 'none',
-        background: variant === 'outline' ? 'transparent' : undefined,
-        color: variant === 'outline' ? 'var(--text-foreground)' : '#fff',
-        transition: 'transform var(--duration-fast) var(--ease-default), filter var(--duration-fast)',
-        ...props.style
-      }}
-      {...props}
-    >
-      {children}
-    </button>
-  );
+export function Button({ variant = 'primary', style, ...props }: ButtonProps) {
+  if (variant === 'outline') {
+    return <TMSButton variant='secondary' style={style} {...props} />;
+  }
+
+  if (variant === 'danger') {
+    return (
+      <TMSButton
+        variant='primary'
+        style={{
+          background: 'var(--color-error)',
+          borderColor: 'var(--color-error)',
+          boxShadow: 'none',
+          ...style,
+        }}
+        {...props}
+      />
+    );
+  }
+
+  return <TMSButton variant={variant} style={style} {...props} />;
 }

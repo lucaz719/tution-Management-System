@@ -1,177 +1,256 @@
-import { useState, useEffect } from 'react';
-import { Card } from '../components/ui/Card';
+import { useEffect, useState } from 'react';
 import { Button } from '../components/ui/Button';
+import { Card } from '../components/ui/Card';
+import { KPICard } from '../components/ui/KPICard';
+import { ProgressRing } from '../components/ui/ProgressRing';
+import { StatusBadge } from '../components/ui/StatusBadge';
+import { TimetableList, type TimetableListItem } from '../components/ui/TimetableList';
 import { api } from '../services/api';
 
-export function BranchAdminDashboard() {
-  const [pettyCashRequests, setPettyCashRequests] = useState<any[]>([]);
-  const [transitRoute, setTransitRoute] = useState({
-    routeName: 'Baneshwor - Tinkune - Koteshwor',
-    driverName: 'Ram Prasad',
-    status: 'In Transit',
-    coords: { lat: 27.6931, lng: 85.3445 }
-  });
+interface PettyCashRequest {
+  id: string;
+  amount: number;
+  purpose: string;
+  status: 'PENDING' | 'APPROVED_LEVEL1';
+  branch?: string;
+}
 
-  const [isLoading, setIsLoading] = useState(false);
+interface TransitRoute {
+  routeName: string;
+  driverName: string;
+  status: string;
+  coords: {
+    lat: number;
+    lng: number;
+  };
+}
+
+interface ResourceLogItem {
+  id: string;
+  label: string;
+  detail: string;
+  state: 'Logged' | 'Pending' | 'Overdue';
+}
+
+const defaultTransitRoute: TransitRoute = {
+  routeName: 'Baneshwor - Tinkune - Koteshwor',
+  driverName: 'Ram Prasad',
+  status: 'In Transit',
+  coords: { lat: 27.6931, lng: 85.3445 },
+};
+
+const todaysTimetable: TimetableListItem[] = [
+  { id: 'tt-1', time: '07:30', title: 'Grade 8 Mathematics', room: 'Room 204', detail: 'Rina Karki', status: 'Scheduled', statusVariant: 'info' },
+  { id: 'tt-2', time: '09:00', title: 'Science Lab Batch A', room: 'Lab 2', detail: 'Sanjay Rai', status: 'In Progress', statusVariant: 'gold' },
+  { id: 'tt-3', time: '11:15', title: 'English Foundation', room: 'Room 112', detail: 'Sarita Limbu', status: 'Completed', statusVariant: 'success' },
+  { id: 'tt-4', time: '13:30', title: 'Bridge Course Session', room: 'Room 301', detail: 'Aakash Bista', status: 'Cancelled', statusVariant: 'error' },
+];
+
+const resourceLogItems: ResourceLogItem[] = [
+  { id: 'log-1', label: 'Classroom Sanitization', detail: 'All classrooms before first bell', state: 'Logged' },
+  { id: 'log-2', label: 'Generator Fuel Check', detail: 'Utility room checklist', state: 'Pending' },
+  { id: 'log-3', label: 'Science Lab Closure', detail: 'End-of-day signoff', state: 'Overdue' },
+  { id: 'log-4', label: 'Library Asset Register', detail: 'New shipment intake', state: 'Logged' },
+];
+
+function getPettyCashVariant(status: PettyCashRequest['status']) {
+  return status === 'PENDING' ? 'warning' : 'success';
+}
+
+function getIndicatorColor(state: ResourceLogItem['state']) {
+  if (state === 'Logged') {
+    return 'var(--color-success)';
+  }
+  if (state === 'Pending') {
+    return 'var(--color-warning)';
+  }
+  return 'var(--color-error)';
+}
+
+export function BranchAdminDashboard() {
+  const [pettyCashRequests, setPettyCashRequests] = useState<PettyCashRequest[]>([]);
+  const [transitRoute, setTransitRoute] = useState<TransitRoute>(defaultTransitRoute);
+  const [isLoading, setIsLoading] = useState(true);
 
   const loadBranchData = async () => {
     setIsLoading(true);
-    try {
-      // 1. Fetch Petty Cash
-      const pc = await api.finances.getPettyCash();
-      setPettyCashRequests(pc);
 
-      // 2. Fetch transit route
-      const route = await api.vehicles.getRoute();
+    try {
+      const [pettyCash, route] = await Promise.all([
+        api.finances.getPettyCash() as Promise<PettyCashRequest[]>,
+        api.vehicles.getRoute() as Promise<TransitRoute>,
+      ]);
+
+      setPettyCashRequests(pettyCash);
       setTransitRoute(route);
-    } catch (err: any) {
-      console.warn('API error, using local mocks:', err.message);
-      // Fallback mocks
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.warn('API error, using local mocks:', message);
       setPettyCashRequests([
         { id: 'pc-101', amount: 4500, purpose: 'Classroom Whiteboards', status: 'PENDING', branch: 'Baneshwor Branch' },
-        { id: 'pc-102', amount: 1500, purpose: 'Science Lab Beakers', status: 'PENDING', branch: 'Baneshwor Branch' }
+        { id: 'pc-102', amount: 1500, purpose: 'Science Lab Beakers', status: 'PENDING', branch: 'Baneshwor Branch' },
       ]);
+      setTransitRoute(defaultTransitRoute);
     } finally {
-      setIsLoading(false);
+      window.setTimeout(() => setIsLoading(false), 700);
     }
   };
 
   useEffect(() => {
-    loadBranchData();
+    void loadBranchData();
   }, []);
 
-  // Update live coordinates simulation
   useEffect(() => {
-    const interval = setInterval(async () => {
-      const nextLat = transitRoute.coords.lat + (Math.random() - 0.5) * 0.0005;
-      const nextLng = transitRoute.coords.lng + (Math.random() - 0.5) * 0.0005;
-      
-      setTransitRoute(prev => ({
-        ...prev,
-        coords: { lat: nextLat, lng: nextLng }
-      }));
+    const intervalId = window.setInterval(() => {
+      setTransitRoute((previous) => {
+        const nextLat = previous.coords.lat + (Math.random() - 0.5) * 0.0005;
+        const nextLng = previous.coords.lng + (Math.random() - 0.5) * 0.0005;
 
-      // Proactively post simulated location to backend Express service
-      try {
-        await api.vehicles.updateLocation(nextLat, nextLng);
-      } catch (err) {
-        // Silently catch errors if API is offline
-      }
+        void api.vehicles.updateLocation(nextLat, nextLng).catch(() => undefined);
+
+        return {
+          ...previous,
+          coords: { lat: nextLat, lng: nextLng },
+        };
+      });
     }, 4000);
-    return () => clearInterval(interval);
-  }, [transitRoute.coords]);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   const handleL1Approve = async (id: string) => {
     try {
       await api.finances.approvePettyCash(id, 'APPROVE_L1');
-      // Reload lists
-      loadBranchData();
-    } catch (err: any) {
-      // Fallback update in state if API offline
-      setPettyCashRequests(prev =>
-        prev.map(r => (r.id === id ? { ...r, status: 'APPROVED_LEVEL1' } : r))
+      await loadBranchData();
+    } catch {
+      setPettyCashRequests((previous) =>
+        previous.map((request) => (request.id === id ? { ...request, status: 'APPROVED_LEVEL1' } : request))
       );
     }
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h2 style={{ fontSize: '24px', fontWeight: 700 }}>Baneshwor Branch Control Panel</h2>
-          <p style={{ color: 'var(--text-muted-foreground)', fontSize: '14px', marginTop: '4px' }}>
-            Manage local center logistics, cash approvals, and driver coordinates
-          </p>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      <Card hoverable={false} style={{ padding: '18px 20px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+          <div>
+            <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '20px', fontWeight: 600, color: 'var(--color-text)' }}>Baneshwor Branch Control Panel</h3>
+            <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.7)', fontSize: '13px' }}>Attendance, timetable, fee, and operations status for today.</p>
+          </div>
+          <Button variant="outline" onClick={() => void loadBranchData()} disabled={isLoading} style={{ height: '40px' }}>
+            <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>refresh</span>
+            Sync Branch
+          </Button>
         </div>
-        <Button variant="outline" onClick={loadBranchData} disabled={isLoading} style={{ height: '40px' }}>
-          <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>refresh</span>
-          Sync Branch
-        </Button>
+      </Card>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '18px' }}>
+        <Card hoverable={false} style={{ padding: '22px', minHeight: '166px' }}>
+          <p style={{ color: 'rgba(44, 62, 80, 0.72)', fontSize: '13px', fontWeight: 600, marginBottom: '14px' }}>Teacher Attendance Today</p>
+          <ProgressRing percent={92} color="var(--color-accent)" label="Present" loading={isLoading} />
+        </Card>
+        <Card hoverable={false} style={{ padding: '22px', minHeight: '166px' }}>
+          <p style={{ color: 'rgba(44, 62, 80, 0.72)', fontSize: '13px', fontWeight: 600, marginBottom: '14px' }}>Student Attendance Today</p>
+          <ProgressRing percent={87} color="var(--color-primary)" label="Present" loading={isLoading} />
+        </Card>
+        <KPICard title="Blocked Students" value="18" delta="3 overrides today" icon="block" loading={isLoading} accentColor="var(--color-warning)" />
+        <KPICard title="Pending Fee Invoices" value="12" delta="₹28,400 outstanding" icon="receipt_long" loading={isLoading} />
       </div>
 
-      {/* Petty cash approval workflow */}
-      <Card hoverable={false}>
-        <h3 style={{ marginBottom: '16px', fontSize: '18px', fontWeight: 600 }}>Petty Cash Level 1 Approvals Queue</h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {pettyCashRequests.length === 0 ? (
-            <p style={{ color: 'var(--text-muted-foreground)', fontSize: '14px', textAlign: 'center', padding: '16px' }}>
-              No active petty cash requests.
-            </p>
-          ) : (
-            pettyCashRequests.map((req) => (
-              <div key={req.id} style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                padding: '16px',
-                border: '1px solid var(--border-border)',
-                borderRadius: 'var(--radius-md)',
-                background: 'var(--bg-background)'
-              }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '18px' }}>
+        <Card hoverable={false}>
+          <div style={{ marginBottom: '18px' }}>
+            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Today's Timetable</h3>
+            <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Time-ordered classroom activity across the branch.</p>
+          </div>
+          <TimetableList items={todaysTimetable} />
+        </Card>
+
+        <Card hoverable={false}>
+          <div style={{ marginBottom: '18px' }}>
+            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Resource Log Status</h3>
+            <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Daily operational checklist with log health indicators.</p>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {resourceLogItems.map((item) => (
+              <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(15, 76, 138, 0.1)', background: '#FFFFFF' }}>
                 <div>
-                  <p style={{ fontWeight: 600, fontSize: '15px' }}>{req.purpose}</p>
-                  <p style={{ fontSize: '12px', color: 'var(--text-muted-foreground)', marginTop: '2px' }}>
-                    ID: {req.id} | Amount: NPR {req.amount} | Branch: {req.branch || 'Baneshwor'}
-                  </p>
+                  <div style={{ color: 'var(--color-text)', fontSize: '14px', fontWeight: 700 }}>{item.label}</div>
+                  <div style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.62)', fontSize: '12px' }}>{item.detail}</div>
                 </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                  <span style={{
-                    padding: '4px 12px',
-                    borderRadius: '20px',
-                    fontSize: '11px',
-                    fontWeight: 600,
-                    background: req.status === 'PENDING' ? 'rgba(245, 159, 0, 0.12)' : 'rgba(55, 178, 77, 0.12)',
-                    color: req.status === 'PENDING' ? '#f59f00' : '#37b24d'
-                  }}>
-                    {req.status}
-                  </span>
-
-                  {req.status === 'PENDING' && (
-                    <Button variant="secondary" onClick={() => handleL1Approve(req.id)} style={{ padding: '6px 16px', fontSize: '11px', minHeight: '32px', height: '32px' }}>
-                      Approve L1
-                    </Button>
-                  )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    {Array.from({ length: 3 }, (_, index) => (
+                      <span key={`${item.id}-${index}`} style={{ width: '8px', height: '8px', borderRadius: '50%', background: getIndicatorColor(item.state), opacity: 1 - index * 0.2 }} />
+                    ))}
+                  </div>
+                  <StatusBadge variant={item.state === 'Logged' ? 'success' : item.state === 'Pending' ? 'warning' : 'error'}>{item.state}</StatusBadge>
                 </div>
               </div>
-            ))
-          )}
-        </div>
-      </Card>
-
-      {/* Bus GPS tracker */}
-      <Card hoverable={false}>
-        <h3 style={{ marginBottom: '8px', fontSize: '18px', fontWeight: 600 }}>Active Student Transit GPS Tracking</h3>
-        <p style={{ color: 'var(--text-muted-foreground)', fontSize: '13px', marginBottom: '16px' }}>
-          Bus Route: <strong>{transitRoute.routeName}</strong> | Driver: <strong>{transitRoute.driverName}</strong>
-        </p>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '24px' }}>
-          <div className="live-map-tracker">
-            <div className="live-map-pin" style={{
-              top: '50%',
-              left: '50%',
-            }}></div>
+            ))}
           </div>
+        </Card>
+      </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '12px' }}>
-            <div style={{ padding: '16px', border: '1px solid var(--border-border)', borderRadius: 'var(--radius-md)' }}>
-              <p style={{ fontSize: '12px', color: 'var(--text-muted-foreground)', fontWeight: 600 }}>GPS COORDINATES</p>
-              <p style={{ fontSize: '18px', fontWeight: 700, marginTop: '4px' }}>
-                {transitRoute.coords.lat.toFixed(5)}° N, {transitRoute.coords.lng.toFixed(5)}° E
-              </p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '18px' }}>
+        <Card hoverable={false}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '12px', flexWrap: 'wrap' }}>
+            <div>
+              <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Petty Cash Level 1 Approvals Queue</h3>
+              <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Existing finance workflow preserved.</p>
             </div>
+            <StatusBadge variant="info">{pettyCashRequests.length} requests</StatusBadge>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {pettyCashRequests.length === 0 ? (
+              <p style={{ color: 'rgba(44, 62, 80, 0.64)', fontSize: '14px', textAlign: 'center', padding: '24px 0' }}>No active petty cash requests.</p>
+            ) : (
+              pettyCashRequests.map((request) => (
+                <div key={request.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(15, 76, 138, 0.1)', background: '#FFFFFF', flexWrap: 'wrap' }}>
+                  <div>
+                    <p style={{ fontWeight: 700, fontSize: '15px', color: 'var(--color-text)' }}>{request.purpose}</p>
+                    <p style={{ marginTop: '4px', fontSize: '12px', color: 'rgba(44, 62, 80, 0.68)' }}>ID: {request.id} · Amount: NPR {request.amount.toLocaleString()} · Branch: {request.branch ?? 'Baneshwor'}</p>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <StatusBadge variant={getPettyCashVariant(request.status)}>{request.status}</StatusBadge>
+                    {request.status === 'PENDING' ? (
+                      <Button variant="outline" onClick={() => void handleL1Approve(request.id)} style={{ minHeight: '36px', height: '36px', padding: '8px 16px', borderColor: 'rgba(15, 76, 138, 0.18)' }}>
+                        Approve L1
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </Card>
 
-            <div style={{ padding: '16px', border: '1px solid var(--border-border)', borderRadius: 'var(--radius-md)' }}>
-              <p style={{ fontSize: '12px', color: 'var(--text-muted-foreground)', fontWeight: 600 }}>CONNECTION STATUS</p>
-              <p style={{ fontSize: '15px', fontWeight: 600, color: '#37b24d', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#37b24d', display: 'inline-block' }}></span>
-                Driver Application Live
-              </p>
+        <Card hoverable={false}>
+          <div style={{ marginBottom: '16px' }}>
+            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Active Student Transit GPS Tracking</h3>
+            <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Route: {transitRoute.routeName} · Driver: {transitRoute.driverName}</p>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: '18px' }}>
+            <div className="live-map-tracker">
+              <div className="live-map-pin" style={{ top: '50%', left: '50%' }} />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '12px' }}>
+              <div style={{ padding: '16px', borderRadius: '12px', border: '1px solid rgba(15, 76, 138, 0.1)', background: '#FFFFFF' }}>
+                <p style={{ fontSize: '12px', fontWeight: 700, color: 'rgba(44, 62, 80, 0.62)' }}>GPS COORDINATES</p>
+                <p style={{ marginTop: '6px', fontFamily: 'var(--font-display)', fontSize: '22px', fontWeight: 600, color: 'var(--color-text)' }}>{transitRoute.coords.lat.toFixed(5)}° N</p>
+                <p style={{ color: 'rgba(44, 62, 80, 0.7)', fontSize: '14px' }}>{transitRoute.coords.lng.toFixed(5)}° E</p>
+              </div>
+              <div style={{ padding: '16px', borderRadius: '12px', border: '1px solid rgba(15, 76, 138, 0.1)', background: '#FFFFFF' }}>
+                <p style={{ fontSize: '12px', fontWeight: 700, color: 'rgba(44, 62, 80, 0.62)' }}>CONNECTION STATUS</p>
+                <p style={{ marginTop: '6px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: 700, color: 'var(--color-success)' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--color-success)' }} />
+                  {transitRoute.status}
+                </p>
+              </div>
             </div>
           </div>
-        </div>
-      </Card>
+        </Card>
+      </div>
     </div>
   );
 }

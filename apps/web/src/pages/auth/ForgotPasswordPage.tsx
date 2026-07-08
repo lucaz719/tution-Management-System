@@ -1,191 +1,238 @@
-import React, { useState, useCallback } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { OTPInput } from '../../components/ui/OTPInput';
 import { CountdownTimer } from '../../components/ui/CountdownTimer';
+import { OTPInput } from '../../components/ui/OTPInput';
 import { useToast } from '../../components/ui/Toast';
+import {
+  AuthFlowError,
+  requestPasswordResetOtp,
+  resendPasswordResetOtp,
+  verifyPasswordResetOtp,
+  isRegisteredAccount,
+} from '../../features/auth/service';
+import { isValidEmailAddress, maskEmail } from '../../features/auth/utils';
 
-type Step = 'email' | 'otp';
+type ForgotPasswordStep = 'email' | 'otp';
 
-const OTP_DURATION_SECONDS = 5 * 60; // 5 min (PRD §3.3)
+const OTP_DURATION_SECONDS = 5 * 60;
+
+function validateRecoveryEmail(email: string): string {
+  if (!email.trim()) {
+    return 'Email is required.';
+  }
+
+  if (!isValidEmailAddress(email)) {
+    return 'Enter a valid email address.';
+  }
+
+  if (!isRegisteredAccount(email)) {
+    return 'We could not find a registered account with that email address.';
+  }
+
+  return '';
+}
 
 export function ForgotPasswordPage() {
   const navigate = useNavigate();
   const { showToast } = useToast();
-
-  const [step, setStep]           = useState<Step>('email');
-  const [email, setEmail]         = useState('');
-  const [otp, setOtp]             = useState<string[]>(Array(6).fill(''));
-  const [isLoading, setIsLoading] = useState(false);
+  const [step, setStep] = useState<ForgotPasswordStep>('email');
+  const [email, setEmail] = useState('');
+  const [emailTouched, setEmailTouched] = useState(false);
+  const [emailError, setEmailError] = useState('');
+  const [otp, setOtp] = useState<string[]>(Array(6).fill(''));
+  const [otpError, setOtpError] = useState('');
   const [otpExpired, setOtpExpired] = useState(false);
-  const [resendKey, setResendKey] = useState(0);
-  const [otpAttempts, setOtpAttempts] = useState(3);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [timerKey, setTimerKey] = useState(0);
 
-  // ── Step 1: Send OTP ──────────────────────────────────────────────────────
+  const maskedEmail = useMemo(() => maskEmail(email), [email]);
+  const isOtpFilled = otp.every((digit) => digit.length === 1);
 
-  const handleSendOTP = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    try {
-      // TODO: replace with api.auth.sendOtp(email)
-      await new Promise((res) => setTimeout(res, 900));
-      setStep('otp');
-      setOtpExpired(false);
-      showToast(`OTP sent to ${email.replace(/(.{2}).*@/, '$1***@')}`, 'success');
-    } catch {
-      showToast('Failed to send OTP. Please check your email and try again.', 'error');
-    } finally {
-      setIsLoading(false);
+  const handleEmailBlur = () => {
+    setEmailTouched(true);
+    setEmailError(validateRecoveryEmail(email));
+  };
+
+  const handleSendOtp = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const nextEmailError = validateRecoveryEmail(email);
+    setEmailTouched(true);
+    setEmailError(nextEmailError);
+
+    if (nextEmailError) {
+      return;
     }
-  }, [email, showToast]);
 
-  // ── Step 2: Verify OTP ────────────────────────────────────────────────────
+    setIsSubmitting(true);
 
-  const handleVerifyOTP = useCallback(async (otpStr: string) => {
-    if (otpAttempts <= 0) return;
-    setIsLoading(true);
     try {
-      // TODO: replace with api.auth.verifyOtp(email, otpStr)
-      await new Promise((res) => setTimeout(res, 700));
-      showToast('OTP verified! Set your new password.', 'success');
-      navigate('/reset-password', { state: { email, otp: otpStr } });
-    } catch {
-      const remaining = otpAttempts - 1;
-      setOtpAttempts(remaining);
-      if (remaining === 0) {
-        showToast('Too many failed attempts. Please request a new OTP.', 'error');
-        setOtp(Array(6).fill(''));
-      } else {
-        showToast(`Incorrect OTP. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`, 'error');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [otpAttempts, navigate, email, showToast]);
-
-  const handleResend = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      await new Promise((res) => setTimeout(res, 700));
+      await requestPasswordResetOtp(email);
       setOtp(Array(6).fill(''));
+      setOtpError('');
       setOtpExpired(false);
-      setOtpAttempts(3);
-      setResendKey((k) => k + 1);
-      showToast('New OTP sent successfully.', 'success');
+      setTimerKey((current) => current + 1);
+      setStep('otp');
+      showToast('We sent a 6-digit OTP to your registered email.', 'success');
+    } catch (error) {
+      const message =
+        error instanceof AuthFlowError ? error.message : 'Unable to send the OTP right now. Please try again.';
+      setEmailError(message);
     } finally {
-      setIsLoading(false);
+      setIsSubmitting(false);
     }
-  }, [showToast]);
+  };
 
-  // Masked email for display
-  const maskedEmail = email.replace(/(.{2}).*@/, '$1***@');
+  const handleVerifyOtp = async (otpValue: string) => {
+    if (otpValue.length !== 6 || otpExpired || isSubmitting) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setOtpError('');
+
+    try {
+      const token = await verifyPasswordResetOtp(email, otpValue);
+      showToast('OTP verified. You can now set a new password.', 'success');
+      navigate(`/reset-password/${token}`);
+    } catch (error) {
+      const message =
+        error instanceof AuthFlowError ? error.message : 'The OTP could not be verified. Please try again.';
+      setOtpError(message);
+      showToast(message, 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    setIsSubmitting(true);
+
+    try {
+      await resendPasswordResetOtp(email);
+      setOtp(Array(6).fill(''));
+      setOtpError('');
+      setOtpExpired(false);
+      setTimerKey((current) => current + 1);
+      showToast('A fresh OTP has been sent.', 'success');
+    } catch (error) {
+      const message =
+        error instanceof AuthFlowError ? error.message : 'Unable to resend the OTP right now. Please try again.';
+      setOtpError(message);
+      showToast(message, 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <div className="auth-page">
       <div className="auth-centered-card">
-        {/* Back link */}
         <Link to="/login" className="auth-back-link">
-          <span className="material-symbols-outlined">arrow_back</span>
+          <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>
+            arrow_back
+          </span>
           Back to Sign In
         </Link>
 
         {step === 'email' ? (
-          <>
-            <div className="auth-icon-circle auth-icon-circle--primary">
-              <span className="material-symbols-outlined">key</span>
+          <div className="auth-step-shell" data-step="email">
+            <div className="auth-form-heading">
+              <h1 className="auth-form-title">Forgot Password?</h1>
+              <p className="auth-form-subtitle">Enter your registered email and we&apos;ll send you an OTP.</p>
             </div>
-            <h2 className="auth-form-title">Forgot Password?</h2>
-            <p className="auth-form-sub">
-              Enter your registered email address. We'll send you an OTP to reset your password.
-            </p>
 
-            <form onSubmit={handleSendOTP} className="auth-form">
+            <form className="auth-form" onSubmit={handleSendOtp} noValidate>
               <div className="auth-field">
-                <label htmlFor="forgot-email" className="auth-label">Email Address</label>
+                <label className="auth-label" htmlFor="forgot-password-email">
+                  Registered email
+                </label>
                 <div className="auth-input-wrap">
                   <span className="material-symbols-outlined auth-input-icon">mail</span>
                   <input
-                    id="forgot-email"
+                    id="forgot-password-email"
+                    className={`auth-input auth-input--with-leading-icon${emailTouched && emailError ? ' auth-input-invalid' : ''}`}
                     type="email"
-                    className="auth-input"
-                    placeholder="you@institution.edu.np"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      setEmail(nextValue);
+                      if (emailTouched) {
+                        setEmailError(validateRecoveryEmail(nextValue));
+                      }
+                    }}
+                    onBlur={handleEmailBlur}
+                    autoComplete="email"
+                    placeholder="you@institution.edu.np"
                     required
-                    autoFocus
                   />
                 </div>
+                {emailTouched && emailError ? <p className="auth-helper-text auth-helper-text--error">{emailError}</p> : null}
               </div>
 
-              <button
-                type="submit"
-                className="auth-submit-btn"
-                disabled={isLoading || !email}
-              >
-                {isLoading ? (
-                  <><span className="auth-spinner" aria-hidden="true" />Sending OTP…</>
+              <button type="submit" className="auth-submit-btn" disabled={!email.trim() || isSubmitting}>
+                {isSubmitting ? (
+                  <>
+                    <span className="auth-spinner" aria-hidden="true" />
+                    Sending OTP…
+                  </>
                 ) : (
-                  <><span className="material-symbols-outlined">send</span>Send OTP</>
+                  'Send OTP'
                 )}
               </button>
             </form>
-          </>
+          </div>
         ) : (
-          <>
-            <div className="auth-icon-circle auth-icon-circle--success">
-              <span className="material-symbols-outlined">mark_email_read</span>
+          <div className="auth-step-shell" data-step="otp">
+            <div className="auth-form-heading">
+              <h1 className="auth-form-title">Verify OTP</h1>
+              <p className="auth-form-subtitle">We sent a 6-digit code to {maskedEmail}.</p>
             </div>
-            <h2 className="auth-form-title">Enter OTP</h2>
-            <p className="auth-form-sub">
-              A 6-digit OTP has been sent to <strong>{maskedEmail}</strong> and your
-              registered phone number.
-            </p>
 
-            <div style={{
-              background: 'rgba(63, 81, 181, 0.08)',
-              border: '1px solid rgba(63, 81, 181, 0.15)',
-              borderRadius: 'var(--radius-sm)',
-              padding: '12px',
-              fontSize: '12px',
-              color: 'var(--brand)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              marginBottom: '16px',
-              lineHeight: '1.4'
-            }}>
-              <span className="material-symbols-outlined" style={{ fontSize: '18px', color: 'var(--brand)' }}>info</span>
-              <span><strong>Demo Mode:</strong> You can enter any 6 digits (e.g. 123456) to proceed.</span>
+            <div className="auth-otp-message">
+              Enter the code exactly as received. The code expires in 5 minutes for your security.
             </div>
 
             <div className="auth-form">
               <OTPInput
                 value={otp}
-                onChange={setOtp}
-                onComplete={handleVerifyOTP}
-                disabled={isLoading || otpExpired || otpAttempts === 0}
-                error={otpAttempts < 3}
+                onChange={(nextOtp: string[]) => {
+                  setOtp(nextOtp);
+                  if (otpError) {
+                    setOtpError('');
+                  }
+                }}
+                onComplete={handleVerifyOtp}
+                disabled={isSubmitting || otpExpired}
+                error={Boolean(otpError)}
               />
 
+              {otpError ? <p className="auth-helper-text auth-helper-text--error">{otpError}</p> : null}
+
               <div className="auth-otp-meta">
-                {otpExpired || otpAttempts === 0 ? (
-                  <span className="auth-otp-expired">OTP expired</span>
-                ) : (
-                  <span className="auth-otp-timer">
-                    Expires in{' '}
-                    <CountdownTimer
-                      durationSeconds={OTP_DURATION_SECONDS}
-                      onExpire={() => setOtpExpired(true)}
-                      resetKey={resendKey}
-                    />
-                  </span>
-                )}
+                <span className={`auth-otp-status${otpExpired ? ' auth-otp-status--error' : ''}`}>
+                  {otpExpired ? (
+                    'OTP expired'
+                  ) : (
+                    <>
+                      Expires in{' '}
+                      <CountdownTimer
+                        durationSeconds={OTP_DURATION_SECONDS}
+                        resetKey={timerKey}
+                        onExpire={() => {
+                          setOtpExpired(true);
+                          setOtpError('This OTP has expired. Request a new one to continue.');
+                        }}
+                      />
+                    </>
+                  )}
+                </span>
 
                 <button
                   type="button"
-                  className="auth-link"
-                  onClick={handleResend}
-                  disabled={!otpExpired && otpAttempts > 0}
-                  style={{ opacity: (!otpExpired && otpAttempts > 0) ? 0.4 : 1 }}
+                  className="auth-link-button"
+                  disabled={!otpExpired || isSubmitting}
+                  onClick={handleResendOtp}
                 >
                   Resend OTP
                 </button>
@@ -194,25 +241,20 @@ export function ForgotPasswordPage() {
               <button
                 type="button"
                 className="auth-submit-btn"
-                disabled={otp.join('').length < 6 || isLoading || otpExpired || otpAttempts === 0}
-                onClick={() => handleVerifyOTP(otp.join(''))}
+                disabled={!isOtpFilled || isSubmitting || otpExpired}
+                onClick={() => handleVerifyOtp(otp.join(''))}
               >
-                {isLoading ? (
-                  <><span className="auth-spinner" aria-hidden="true" />Verifying…</>
+                {isSubmitting ? (
+                  <>
+                    <span className="auth-spinner" aria-hidden="true" />
+                    Verifying…
+                  </>
                 ) : (
-                  <><span className="material-symbols-outlined">verified</span>Verify OTP</>
+                  'Verify'
                 )}
               </button>
-
-              <button
-                type="button"
-                className="auth-text-btn"
-                onClick={() => { setStep('email'); setOtp(Array(6).fill('')); }}
-              >
-                Change email address
-              </button>
             </div>
-          </>
+          </div>
         )}
       </div>
     </div>

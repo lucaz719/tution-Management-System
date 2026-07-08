@@ -1,157 +1,182 @@
-import React, { useState, useCallback } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { PasswordStrengthBar } from '../../components/ui/PasswordStrengthBar';
 import { useToast } from '../../components/ui/Toast';
+import { AuthFlowError, getResetRequestByToken, resetPassword } from '../../features/auth/service';
+import { getPasswordRuleResults } from '../../features/auth/utils';
 
 export function ResetPasswordPage() {
   const navigate = useNavigate();
-  const location = useLocation();
   const { showToast } = useToast();
+  const { token = '' } = useParams();
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [formError, setFormError] = useState('');
 
-  const { email = '', otp = '' } = (location.state as { email?: string; otp?: string }) ?? {};
+  const resetRequest = useMemo(() => (token ? getResetRequestByToken(token) : null), [token]);
+  const ruleResults = getPasswordRuleResults(newPassword);
+  const allRulesPassed = ruleResults.every(Boolean);
+  const passwordsMatch = confirmPassword.length > 0 && newPassword === confirmPassword;
+  const canSubmit = allRulesPassed && passwordsMatch && Boolean(token) && !isSubmitting;
 
-  const [newPw, setNewPw]         = useState('');
-  const [confirmPw, setConfirmPw] = useState('');
-  const [showNew, setShowNew]     = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [success, setSuccess]     = useState(false);
-
-  const passwordsMatch = confirmPw && newPw === confirmPw;
-  const allRulesPassed = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/.test(newPw);
-  const canSubmit = allRulesPassed && passwordsMatch && !isLoading;
-
-  const handleReset = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!canSubmit) return;
-    setIsLoading(true);
-    try {
-      // TODO: replace with api.auth.resetPassword(email, otp, newPw)
-      await new Promise((res) => setTimeout(res, 1000));
-      setSuccess(true);
-      showToast('Password updated successfully!', 'success');
-      setTimeout(() => navigate('/login'), 2500);
-    } catch {
-      showToast('Failed to reset password. The OTP may have expired. Please try again.', 'error');
-    } finally {
-      setIsLoading(false);
+  useEffect(() => {
+    if (!success) {
+      return undefined;
     }
-  }, [canSubmit, navigate, showToast, email, otp]);
+
+    const redirectTimer = window.setTimeout(() => {
+      navigate('/login', { replace: true });
+    }, 1400);
+
+    return () => window.clearTimeout(redirectTimer);
+  }, [navigate, success]);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!token || !canSubmit) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setFormError('');
+
+    try {
+      await resetPassword(token, newPassword);
+      setSuccess(true);
+      showToast('Password reset successful. Redirecting to sign in…', 'success');
+    } catch (error) {
+      const message =
+        error instanceof AuthFlowError ? error.message : 'Unable to reset the password right now. Please try again.';
+      setFormError(message);
+      showToast(message, 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (!resetRequest) {
+    return (
+      <div className="auth-page">
+        <div className="auth-centered-card">
+          <div className="auth-step-shell">
+            <h1 className="auth-form-title">Set new password</h1>
+            <p className="auth-form-subtitle">
+              This reset link is invalid or has expired. Request a new password reset to continue.
+            </p>
+            <Link to="/forgot-password" className="auth-submit-btn" style={{ textDecoration: 'none' }}>
+              Request new reset link
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="auth-page">
       <div className="auth-centered-card">
         <Link to="/forgot-password" className="auth-back-link">
-          <span className="material-symbols-outlined">arrow_back</span>
+          <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>
+            arrow_back
+          </span>
           Back
         </Link>
 
         {success ? (
           <div className="auth-success-state">
-            <div className="auth-icon-circle auth-icon-circle--success">
-              <span className="material-symbols-outlined">check_circle</span>
-            </div>
-            <h2 className="auth-form-title">Password Updated!</h2>
-            <p className="auth-form-sub">Redirecting you to Sign In…</p>
-            <div className="auth-progress-bar">
-              <div className="auth-progress-bar-fill auth-progress-bar-fill--animated" />
-            </div>
+            <span className="material-symbols-outlined" style={{ fontSize: '46px', color: 'var(--color-success)' }}>
+              check_circle
+            </span>
+            <h1 className="auth-form-title">Password updated</h1>
+            <p className="auth-form-subtitle">Your password has been changed successfully.</p>
           </div>
         ) : (
-          <>
-            <div className="auth-icon-circle auth-icon-circle--primary">
-              <span className="material-symbols-outlined">lock_reset</span>
+          <div className="auth-step-shell">
+            <div className="auth-form-heading">
+              <h1 className="auth-form-title">Set new password</h1>
+              <p className="auth-form-subtitle">Choose a strong password for your account.</p>
             </div>
-            <h2 className="auth-form-title">Set New Password</h2>
-            <p className="auth-form-sub">
-              Your new password must be at least 8 characters and include uppercase,
-              lowercase, a number, and a special character.
-            </p>
 
-            <form onSubmit={handleReset} className="auth-form">
-              {/* New Password */}
+            <form className="auth-form" onSubmit={handleSubmit} noValidate>
               <div className="auth-field">
-                <label htmlFor="new-password" className="auth-label">New Password</label>
+                <label className="auth-label" htmlFor="reset-new-password">
+                  New Password
+                </label>
                 <div className="auth-input-wrap">
-                  <span className="material-symbols-outlined auth-input-icon">lock</span>
                   <input
-                    id="new-password"
-                    type={showNew ? 'text' : 'password'}
-                    className="auth-input auth-input--padded-right"
-                    placeholder="Min 8 characters"
-                    value={newPw}
-                    onChange={(e) => setNewPw(e.target.value)}
+                    id="reset-new-password"
+                    className="auth-input"
+                    type={showNewPassword ? 'text' : 'password'}
+                    value={newPassword}
+                    onChange={(event) => setNewPassword(event.target.value)}
                     autoComplete="new-password"
-                    required
-                    autoFocus
-                  />
-                  <button
-                    type="button"
-                    className="auth-toggle-pw"
-                    onClick={() => setShowNew((v) => !v)}
-                    aria-label={showNew ? 'Hide password' : 'Show password'}
-                  >
-                    <span className="material-symbols-outlined">
-                      {showNew ? 'visibility_off' : 'visibility'}
-                    </span>
-                  </button>
-                </div>
-                <PasswordStrengthBar password={newPw} />
-              </div>
-
-              {/* Confirm Password */}
-              <div className="auth-field">
-                <label htmlFor="confirm-password" className="auth-label">Confirm Password</label>
-                <div className="auth-input-wrap">
-                  <span className="material-symbols-outlined auth-input-icon">lock</span>
-                  <input
-                    id="confirm-password"
-                    type={showConfirm ? 'text' : 'password'}
-                    className="auth-input auth-input--padded-right"
-                    placeholder="Repeat new password"
-                    value={confirmPw}
-                    onChange={(e) => setConfirmPw(e.target.value)}
-                    autoComplete="new-password"
+                    placeholder="Enter a new password"
                     required
                   />
                   <button
                     type="button"
-                    className="auth-toggle-pw"
-                    onClick={() => setShowConfirm((v) => !v)}
-                    aria-label={showConfirm ? 'Hide' : 'Show'}
+                    className="auth-password-toggle"
+                    onClick={() => setShowNewPassword((current) => !current)}
+                    aria-label={showNewPassword ? 'Hide new password' : 'Show new password'}
                   >
-                    <span className="material-symbols-outlined">
-                      {showConfirm ? 'visibility_off' : 'visibility'}
+                    <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>
+                      {showNewPassword ? 'visibility_off' : 'visibility'}
                     </span>
                   </button>
                 </div>
-                {confirmPw && !passwordsMatch && (
-                  <p className="auth-field-error">
-                    <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>error</span>
-                    Passwords do not match
-                  </p>
-                )}
-                {confirmPw && passwordsMatch && (
-                  <p className="auth-field-success">
-                    <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>check_circle</span>
-                    Passwords match
-                  </p>
-                )}
+                <PasswordStrengthBar password={newPassword} />
               </div>
 
-              <button
-                type="submit"
-                className="auth-submit-btn"
-                disabled={!canSubmit}
-              >
-                {isLoading ? (
-                  <><span className="auth-spinner" />Updating Password…</>
+              <div className="auth-field">
+                <label className="auth-label" htmlFor="reset-confirm-password">
+                  Confirm Password
+                </label>
+                <div className="auth-input-wrap">
+                  <input
+                    id="reset-confirm-password"
+                    className={`auth-input${confirmPassword && !passwordsMatch ? ' auth-input-invalid' : ''}`}
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    autoComplete="new-password"
+                    placeholder="Re-enter your new password"
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="auth-password-toggle"
+                    onClick={() => setShowConfirmPassword((current) => !current)}
+                    aria-label={showConfirmPassword ? 'Hide confirmed password' : 'Show confirmed password'}
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>
+                      {showConfirmPassword ? 'visibility_off' : 'visibility'}
+                    </span>
+                  </button>
+                </div>
+                <p className={`auth-helper-text${passwordsMatch ? ' auth-helper-text--success' : ' auth-helper-text--error'}`}>
+                  {passwordsMatch ? '✓ Passwords match' : '✗ Passwords must match'}
+                </p>
+              </div>
+
+              {formError ? <p className="auth-helper-text auth-helper-text--error">{formError}</p> : null}
+
+              <button type="submit" className="auth-submit-btn" disabled={!canSubmit}>
+                {isSubmitting ? (
+                  <>
+                    <span className="auth-spinner" aria-hidden="true" />
+                    Resetting…
+                  </>
                 ) : (
-                  <><span className="material-symbols-outlined">lock_reset</span>Update Password</>
+                  'Reset Password'
                 )}
               </button>
             </form>
-          </>
+          </div>
         )}
       </div>
     </div>

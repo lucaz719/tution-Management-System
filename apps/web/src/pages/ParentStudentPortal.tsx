@@ -1,290 +1,296 @@
-import { useState, useEffect } from 'react';
-import { Card } from '../components/ui/Card';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../components/ui/Button';
-import { api } from '../services/api';
+import { Card } from '../components/ui/Card';
+import { StatusBadge } from '../components/ui/StatusBadge';
+import { TimetableList, type TimetableListItem } from '../components/ui/TimetableList';
+import { useAuth } from '../context/AuthContext';
+
+interface AnnouncementItem {
+  id: string;
+  title: string;
+  dateLabel: string;
+  isNew: boolean;
+}
+
+interface StudentProfile {
+  name: string;
+  grade: string;
+  branch: string;
+  enrollmentId: string;
+  feeStatus: 'PAID' | 'DUE';
+  nextInvoiceDate: string;
+}
+
+interface ParentChildRecord {
+  id: string;
+  name: string;
+  attendance: 'Present' | 'Absent' | 'Excused';
+  feeBalance: string;
+  nextInvoiceDate: string;
+  upcomingTimetable: TimetableListItem[];
+}
+
+const studentProfile: StudentProfile = {
+  name: 'Shyam Bahadur',
+  grade: 'Grade 10 · Science',
+  branch: 'Baneshwor Branch',
+  enrollmentId: 'ST-01-SHYAM',
+  feeStatus: 'DUE',
+  nextInvoiceDate: '12 July 2026',
+};
+
+const studentTimetable: TimetableListItem[] = [
+  { id: 'st-1', time: '07:15', title: 'Physics', room: 'Lab 1', detail: 'Aarati Sharma', status: 'Present', statusVariant: 'success' },
+  { id: 'st-2', time: '09:00', title: 'Mathematics', room: 'Room 204', detail: 'Ritesh Karki', status: 'Upcoming', statusVariant: 'info' },
+  { id: 'st-3', time: '11:30', title: 'English', room: 'Room 110', detail: 'Bina Rai', status: 'Upcoming', statusVariant: 'info' },
+];
+
+const announcements: AnnouncementItem[] = [
+  { id: 'ann-1', title: 'Unit test schedule for Grade 10 released.', dateLabel: 'Today · 08:30', isNew: true },
+  { id: 'ann-2', title: 'Damak inter-branch science fair forms close tomorrow.', dateLabel: 'Today · 06:45', isNew: true },
+  { id: 'ann-3', title: 'Saturday remedial classes start next week.', dateLabel: '06 Jul 2026', isNew: false },
+];
+
+const parentChildren: ParentChildRecord[] = [
+  {
+    id: 'child-1',
+    name: 'Shyam Bahadur',
+    attendance: 'Present',
+    feeBalance: 'NPR 5,650',
+    nextInvoiceDate: '12 July 2026',
+    upcomingTimetable: [
+      { id: 'pt-1', time: '09:00', title: 'Mathematics', room: 'Room 204', detail: 'Ritesh Karki', status: 'Upcoming', statusVariant: 'info' },
+      { id: 'pt-2', time: '11:30', title: 'English', room: 'Room 110', detail: 'Bina Rai', status: 'Upcoming', statusVariant: 'info' },
+    ],
+  },
+  {
+    id: 'child-2',
+    name: 'Riya Bahadur',
+    attendance: 'Excused',
+    feeBalance: 'NPR 0',
+    nextInvoiceDate: '05 Aug 2026',
+    upcomingTimetable: [
+      { id: 'pt-3', time: '08:30', title: 'Social Studies', room: 'Room 115', detail: 'Sushma Adhikari', status: 'Upcoming', statusVariant: 'info' },
+      { id: 'pt-4', time: '10:15', title: 'Computer', room: 'Lab 3', detail: 'Milan Gautam', status: 'Upcoming', statusVariant: 'info' },
+    ],
+  },
+];
+
+function getAttendanceVariant(attendance: ParentChildRecord['attendance']) {
+  if (attendance === 'Present') {
+    return 'success';
+  }
+  if (attendance === 'Excused') {
+    return 'warning';
+  }
+  return 'error';
+}
 
 export function ParentStudentPortal() {
-  const [walletBalance, setWalletBalance] = useState(380);
-  const [reloadAmount, setReloadAmount] = useState('');
-  const [walletPin, setWalletPin] = useState('');
-  const [purchaseItem, setPurchaseItem] = useState('Chicken MoMo (NPR 150)');
-  const [walletMessage, setWalletMessage] = useState('');
-  const [driverLat, setDriverLat] = useState(27.6931);
-  const [driverLng, setDriverLng] = useState(85.3445);
-  const [routeName, setRouteName] = useState('Baneshwor - Tinkune - Koteshwor');
+  const { user } = useAuth();
+  const [isLoading, setIsLoading] = useState(true);
+  const [selectedChildId, setSelectedChildId] = useState(parentChildren[0]?.id ?? '');
 
-  const INITIAL_INVOICES = [
-    { id: 'inv-01', month: 'June', amount: 5650, status: 'PAID' },
-    { id: 'inv-02', month: 'July', amount: 5650, status: 'OVERDUE' },
-    { id: 'inv-03', month: 'August', amount: 5650, status: 'UNPAID' }
-  ];
-
-  const loadStudentData = async () => {
-    try {
-      const w = await api.canteen.getBalance();
-      setWalletBalance(w.balance);
-
-      const route = await api.vehicles.getRoute();
-      setDriverLat(route.coords.lat);
-      setDriverLng(route.coords.lng);
-      setRouteName(route.routeName);
-    } catch (err) {
-      console.warn('API error loading student data, using local mocks');
-    }
-  };
+  const isParentView = user?.role === 'PARENT';
+  const activeChild = useMemo(
+    () => parentChildren.find((child) => child.id === selectedChildId) ?? parentChildren[0],
+    [selectedChildId]
+  );
 
   useEffect(() => {
-    loadStudentData();
+    const timerId = window.setTimeout(() => setIsLoading(false), 700);
+    return () => window.clearTimeout(timerId);
   }, []);
 
-  // Poll driver coordinates for live bus routing updates
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const route = await api.vehicles.getRoute();
-        setDriverLat(route.coords.lat);
-        setDriverLng(route.coords.lng);
-      } catch (err) {
-        // Fallback simulation if offline
-        setDriverLat((prev) => prev + (Math.random() - 0.5) * 0.0003);
-        setDriverLng((prev) => prev + (Math.random() - 0.5) * 0.0003);
-      }
-    }, 4000);
-    return () => clearInterval(interval);
-  }, []);
+  if (isParentView && !activeChild) {
+    return null;
+  }
 
-  const handleCanteenPurchase = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setWalletMessage('');
-    
-    const cost = purchaseItem.includes('Chicken MoMo') ? 150 : purchaseItem.includes('French Fries') ? 120 : 100;
-    
-    try {
-      const res = await api.canteen.debit(cost, walletPin, purchaseItem);
-      if (res.success) {
-        setWalletBalance(res.balance);
-        setWalletMessage(`✅ TRANSACTION COMPLETED! NPR ${cost} debited successfully.`);
-        setWalletPin('');
-      } else {
-        setWalletMessage(`❌ ${res.message || 'Debit declined.'}`);
-      }
-    } catch (err: any) {
-      console.warn('Canteen API failed, applying mock validations:', err.message);
-      // Fallback mocks
-      if (walletPin !== '1234') {
-        setWalletMessage('❌ INCORRECT SECURITY PIN. Debit declined.');
-        return;
-      }
-      if (walletBalance < cost) {
-        setWalletMessage('❌ INSUFFICIENT BALANCE. Please reload first.');
-        return;
-      }
-      setWalletBalance((prev) => prev - cost);
-      setWalletMessage(`✅ TRANSACTION COMPLETED! NPR ${cost} debited successfully.`);
-      setWalletPin('');
-    }
-  };
-
-  const handleWalletReload = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setWalletMessage('');
-    const reload = Number(reloadAmount);
-    if (!reload || reload <= 0) return;
-
-    try {
-      const res = await api.canteen.reload(reload);
-      setWalletBalance(res.balance);
-      setWalletMessage(`✅ Loaded NPR ${reload} via Nepal Pay gateway.`);
-      setReloadAmount('');
-    } catch (err) {
-      console.warn('Reload API failed, using state');
-      setWalletBalance((prev) => prev + reload);
-      setWalletMessage(`✅ Loaded NPR ${reload} via Nepal Pay mock gateway.`);
-      setReloadAmount('');
-    }
-  };
+  const studentFeeIsDue = studentProfile.feeStatus === 'DUE';
+  const parentFeeOutstanding = activeChild ? activeChild.feeBalance !== 'NPR 0' : false;
 
   return (
-    <div style={{ maxWidth: '1100px', margin: '40px auto', padding: '0 24px', display: 'flex', flexDirection: 'column', gap: '32px' }}>
-      <div>
-        <h2 style={{ fontSize: '24px', fontWeight: 700 }}>Shyam Bahadur — Student Workspace</h2>
-        <p style={{ color: 'var(--text-muted-foreground)', fontSize: '14px', marginTop: '4px' }}>
-          Track tuition barcode ID, invoice timelines, and canteen wallet balances
-        </p>
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      {isParentView ? (
+        <>
+          <Card hoverable={false} style={{ padding: '18px 20px' }}>
+            <div>
+              <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '20px', fontWeight: 600, color: 'var(--color-text)' }}>Family Overview</h3>
+              <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.7)', fontSize: '13px' }}>Switch between children without leaving the dashboard.</p>
+            </div>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '16px' }}>
+              {parentChildren.map((child) => {
+                const isActive = child.id === activeChild.id;
+                return (
+                  <button
+                    key={child.id}
+                    type="button"
+                    onClick={() => setSelectedChildId(child.id)}
+                    style={{
+                      minHeight: '40px',
+                      padding: '10px 16px',
+                      borderRadius: '999px',
+                      border: isActive ? 'none' : '1px solid rgba(15, 76, 138, 0.12)',
+                      background: isActive ? 'var(--color-accent)' : '#FFFFFF',
+                      color: isActive ? '#FFFFFF' : 'var(--color-text)',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {child.name}
+                  </button>
+                );
+              })}
+            </div>
+          </Card>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '32px' }}>
-        {/* Left Column */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-          {/* Payment Calendar */}
-          <Card hoverable={false}>
-            <h3 style={{ marginBottom: '16px', fontSize: '18px', fontWeight: 600 }}>Payment Due Dates & Invoices</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {INITIAL_INVOICES.map((inv) => (
-                <div key={inv.id} style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '16px',
-                  border: '1px solid var(--border-border)',
-                  borderRadius: 'var(--radius-md)',
-                  background: 'var(--bg-background)'
-                }}>
-                  <div>
-                    <p style={{ fontWeight: 600 }}>{inv.month} Tuition Bill</p>
-                    <p style={{ fontSize: '12px', color: 'var(--text-muted-foreground)' }}>Amount: NPR {inv.amount}</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '18px' }}>
+            <Card hoverable={false}>
+              <div style={{ marginBottom: '14px' }}>
+                <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Today's Attendance</h3>
+                <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Latest attendance status for {activeChild.name}.</p>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
+                <StatusBadge variant={getAttendanceVariant(activeChild.attendance)}>{activeChild.attendance}</StatusBadge>
+                <span style={{ color: 'rgba(44, 62, 80, 0.62)', fontSize: '12px', fontWeight: 600 }}>Recorded at 07:12 AM</span>
+              </div>
+            </Card>
+
+            <Card hoverable={false}>
+              <div style={{ marginBottom: '14px' }}>
+                <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Pending Fee Balance</h3>
+                <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Current outstanding amount and next invoice date.</p>
+              </div>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: '28px', fontWeight: 600, color: 'var(--color-text)' }}>{activeChild.feeBalance}</div>
+              <div style={{ marginTop: '6px', color: 'rgba(44, 62, 80, 0.62)', fontSize: '13px' }}>Next invoice: {activeChild.nextInvoiceDate}</div>
+              {parentFeeOutstanding ? (
+                <Button style={{ marginTop: '16px', background: 'var(--color-accent)', boxShadow: 'none' }}>Pay Now</Button>
+              ) : (
+                <StatusBadge variant="success">No outstanding balance</StatusBadge>
+              )}
+            </Card>
+
+            <Card hoverable={false}>
+              <div style={{ marginBottom: '18px' }}>
+                <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Upcoming Timetable</h3>
+                <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Remaining classes for the day.</p>
+              </div>
+              <TimetableList items={activeChild.upcomingTimetable} />
+            </Card>
+
+            <Card hoverable={false} style={{ position: 'relative', overflow: 'hidden' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', gap: '12px' }}>
+                <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Recent Results</h3>
+                <StatusBadge variant="gold">Phase 2</StatusBadge>
+              </div>
+              <div style={{ filter: 'blur(2px)', opacity: 0.55, display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {['Physics · 91%', 'Mathematics · 88%', 'English · 93%'].map((item) => (
+                  <div key={item} style={{ padding: '14px 16px', borderRadius: '12px', background: '#FFFFFF', border: '1px solid rgba(15, 76, 138, 0.1)', fontSize: '14px', fontWeight: 600, color: 'var(--color-text)' }}>
+                    {item}
                   </div>
+                ))}
+              </div>
+              <div style={{ position: 'absolute', inset: 'auto 20px 20px 20px', padding: '14px 16px', borderRadius: '12px', background: 'rgba(243, 156, 18, 0.12)', color: 'var(--color-accent)', fontSize: '13px', fontWeight: 700 }}>
+                Results unlock here once the Phase 2 results workspace is enabled.
+              </div>
+            </Card>
+          </div>
 
-                  <span style={{
-                    padding: '4px 12px',
-                    borderRadius: '20px',
-                    fontSize: '11px',
-                    fontWeight: 600,
-                    background: inv.status === 'PAID' ? 'rgba(55, 178, 77, 0.12)' : inv.status === 'OVERDUE' ? 'rgba(214, 48, 49, 0.12)' : 'rgba(245, 159, 0, 0.12)',
-                    color: inv.status === 'PAID' ? '#37b24d' : inv.status === 'OVERDUE' ? '#d63031' : '#f59f00'
-                  }}>
-                    {inv.status}
-                  </span>
+          <Card hoverable={false}>
+            <div style={{ marginBottom: '18px' }}>
+              <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>School Announcements</h3>
+              <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Latest branch notices for all enrolled children.</p>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {announcements.map((announcement) => (
+                <div key={announcement.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(15, 76, 138, 0.1)', background: '#FFFFFF', flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-text)' }}>{announcement.title}</div>
+                    <div style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.62)', fontSize: '12px' }}>{announcement.dateLabel}</div>
+                  </div>
+                  {announcement.isNew ? <StatusBadge variant="gold">NEW</StatusBadge> : null}
                 </div>
               ))}
             </div>
           </Card>
-
-          {/* Cashless wallet Canteen */}
+        </>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '18px' }}>
           <Card hoverable={false}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h3 style={{ fontSize: '18px', fontWeight: 600 }}>Canteen Cashless Wallet</h3>
-              <p style={{ fontSize: '18px', fontWeight: 800, color: '#00ab9c' }}>Balance: NPR {walletBalance}</p>
+            <div style={{ marginBottom: '18px' }}>
+              <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Today's Timetable</h3>
+              <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Today's subjects, rooms, and attendance status.</p>
             </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '20px' }}>
-              {/* Purchase form */}
-              <form onSubmit={handleCanteenPurchase} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <label style={{ fontSize: '12px', fontWeight: 600 }}>Active Canteen Item</label>
-                  <select
-                    value={purchaseItem}
-                    onChange={(e) => setPurchaseItem(e.target.value)}
-                    style={{
-                      padding: '8px',
-                      borderRadius: 'var(--radius-sm)',
-                      border: '1px solid var(--border-border)',
-                      background: 'var(--bg-background)',
-                      color: 'var(--text-foreground)',
-                      fontFamily: 'inherit'
-                    }}
-                  >
-                    <option>Chicken MoMo (NPR 150)</option>
-                    <option>Cold Coffee (NPR 100)</option>
-                    <option>French Fries (NPR 120)</option>
-                  </select>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <label style={{ fontSize: '12px', fontWeight: 600 }}>4-Digit Wallet PIN (1234)</label>
-                  <input
-                    type="password"
-                    placeholder="••••"
-                    value={walletPin}
-                    onChange={(e) => setWalletPin(e.target.value)}
-                    style={{
-                      padding: '8px',
-                      borderRadius: 'var(--radius-sm)',
-                      border: '1px solid var(--border-border)',
-                      background: 'var(--bg-background)',
-                      color: 'var(--text-foreground)',
-                      fontFamily: 'inherit'
-                    }}
-                  />
-                </div>
-
-                <Button variant="secondary" style={{ padding: '8px', fontSize: '12px', minHeight: '36px', height: '36px' }} type="submit">
-                  Pay Cashless
-                </Button>
-              </form>
-
-              {/* Reload Balance */}
-              <form onSubmit={handleWalletReload} style={{ display: 'flex', flexDirection: 'column', gap: '12px', justifyContent: 'center' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <label style={{ fontSize: '12px', fontWeight: 600 }}>Reload Amount (NPR)</label>
-                  <input
-                    type="number"
-                    placeholder="e.g. 500"
-                    value={reloadAmount}
-                    onChange={(e) => setReloadAmount(e.target.value)}
-                    style={{
-                      padding: '8px',
-                      borderRadius: 'var(--radius-sm)',
-                      border: '1px solid var(--border-border)',
-                      background: 'var(--bg-background)',
-                      color: 'var(--text-foreground)',
-                      fontFamily: 'inherit'
-                    }}
-                  />
-                </div>
-
-                <Button style={{ padding: '8px', fontSize: '12px', minHeight: '36px', height: '36px' }} type="submit">
-                  Reload Wallet
-                </Button>
-              </form>
-            </div>
-
-            {walletMessage && (
-              <p style={{ marginTop: '16px', fontSize: '13px', fontWeight: 600, color: walletMessage.includes('✅') ? '#37b24d' : '#d63031' }}>
-                {walletMessage}
-              </p>
+            {isLoading ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {Array.from({ length: 3 }, (_, index) => (
+                  <div key={`tt-skeleton-${index}`} style={{ height: '62px', borderRadius: '12px', background: 'rgba(15, 76, 138, 0.08)' }} />
+                ))}
+              </div>
+            ) : (
+              <TimetableList items={studentTimetable} />
             )}
           </Card>
-        </div>
 
-        {/* Right Column */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-          {/* Digital student ID Card */}
-          <div className="digital-id-card">
-            <div>
-              <h4 style={{ color: '#fff', fontSize: '14px', letterSpacing: '2px', textTransform: 'uppercase', fontWeight: 700 }}>Student ID Card</h4>
-              <p style={{ fontSize: '10px', color: 'rgba(255, 255, 255, 0.7)', marginTop: '2px' }}>Pinnacle Tuition Academy</p>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-              <div style={{
-                width: '70px',
-                height: '70px',
-                background: '#dfe4ea',
-                borderRadius: '50%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}>
-                <span className="material-symbols-outlined" style={{ fontSize: '40px', color: '#4355b9' }}>person</span>
+          <div style={{ display: 'grid', gap: '18px' }}>
+            <Card hoverable={false}>
+              <div style={{ marginBottom: '14px' }}>
+                <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Fee Status</h3>
+                <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Current billing standing and next invoice date.</p>
               </div>
+              <StatusBadge variant={studentFeeIsDue ? 'error' : 'success'}>{studentProfile.feeStatus}</StatusBadge>
+              <div style={{ marginTop: '16px', color: 'var(--color-text)', fontFamily: 'var(--font-display)', fontSize: '24px', fontWeight: 600 }}>{studentFeeIsDue ? 'NPR 5,650 due' : 'All fees cleared'}</div>
+              <div style={{ marginTop: '6px', color: 'rgba(44, 62, 80, 0.62)', fontSize: '13px' }}>Next invoice date: {studentProfile.nextInvoiceDate}</div>
+              {studentFeeIsDue ? <Button style={{ marginTop: '16px', background: 'var(--color-accent)', boxShadow: 'none' }}>Pay Now</Button> : null}
+            </Card>
 
-              <div>
-                <h3 style={{ color: '#fff', fontSize: '18px', fontWeight: 700 }}>Shyam Bahadur</h3>
-                <p style={{ fontSize: '12px', color: 'rgba(255, 255, 255, 0.8)', marginTop: '2px' }}>Grade: 10 (Science)</p>
-                <p style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.7)' }}>ID: ST-01-SHYAM</p>
+            <Card hoverable={false}>
+              <div style={{ marginBottom: '18px' }}>
+                <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Announcements</h3>
+                <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Newest branch notices first.</p>
               </div>
-            </div>
-
-            <div className="barcode">
-              <div className="barcode-lines"></div>
-              <span style={{ fontSize: '10px', color: '#000', fontFamily: 'monospace' }}>*ST01SHYAM*</span>
-            </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {announcements.map((announcement) => (
+                  <div key={announcement.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(15, 76, 138, 0.1)', background: '#FFFFFF', flexWrap: 'wrap' }}>
+                    <div>
+                      <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-text)' }}>{announcement.title}</div>
+                      <div style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.62)', fontSize: '12px' }}>{announcement.dateLabel}</div>
+                    </div>
+                    {announcement.isNew ? <StatusBadge variant="gold">NEW</StatusBadge> : null}
+                  </div>
+                ))}
+              </div>
+            </Card>
           </div>
 
-          {/* Live Bus Coordinates Map */}
           <Card hoverable={false}>
-            <h3 style={{ marginBottom: '12px', fontSize: '18px', fontWeight: 600 }}>Live School Bus Routing</h3>
-            <div className="live-map-tracker">
-              <div className="live-map-pin"></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', gap: '12px', flexWrap: 'wrap' }}>
+              <div>
+                <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Digital Student ID</h3>
+                <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Branch-scoped identity card ready for download.</p>
+              </div>
+              <Button variant="outline" style={{ minHeight: '38px', height: '38px', padding: '8px 16px', borderColor: 'rgba(15, 76, 138, 0.16)' }}>
+                Download PDF
+              </Button>
             </div>
-            <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-              <span style={{ color: 'var(--text-muted-foreground)', fontWeight: 600 }}>Route: {routeName}</span>
-              <strong>Coords: {driverLat.toFixed(4)}, {driverLng.toFixed(4)}</strong>
+            <div style={{ padding: '20px', borderRadius: '18px', background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-light) 100%)', color: '#FFFFFF', boxShadow: '0 16px 34px -20px rgba(15, 76, 138, 0.6)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '18px', flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '0.08em', opacity: 0.82 }}>TMS DIGITAL ID</div>
+                  <div style={{ marginTop: '10px', fontFamily: 'var(--font-display)', fontSize: '28px', fontWeight: 600 }}>{studentProfile.name}</div>
+                  <div style={{ marginTop: '6px', fontSize: '13px', opacity: 0.82 }}>{studentProfile.grade}</div>
+                  <div style={{ marginTop: '2px', fontSize: '13px', opacity: 0.82 }}>{studentProfile.branch}</div>
+                  <div style={{ marginTop: '12px', fontSize: '12px', fontWeight: 700, opacity: 0.88 }}>Enrollment ID · {studentProfile.enrollmentId}</div>
+                </div>
+                <div style={{ width: '86px', height: '86px', borderRadius: '50%', background: 'rgba(255, 255, 255, 0.18)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: '44px' }}>person</span>
+                </div>
+              </div>
             </div>
           </Card>
         </div>
-      </div>
+      )}
     </div>
   );
 }
