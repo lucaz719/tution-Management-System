@@ -139,37 +139,6 @@ export const api = {
     }
   },
 
-  // Canteen (Cashless Canteen Wallet)
-  canteen: {
-    getBalance: async () => {
-      return request<{ balance: number }>('/canteen/wallet');
-    },
-    reload: async (amount: number) => {
-      return request<{ success: boolean; balance: number }>('/canteen/wallet/reload', {
-        method: 'POST',
-        body: JSON.stringify({ amount }),
-      });
-    },
-    debit: async (amount: number, pin: string, item: string) => {
-      return request<{ success: boolean; balance: number; message: string }>('/canteen/wallet/debit', {
-        method: 'POST',
-        body: JSON.stringify({ amount, pin, item }),
-      });
-    }
-  },
-
-  // Vehicle Tracking
-  vehicles: {
-    getRoute: async () => {
-      return request<{ routeName: string; driverName: string; status: string; coords: { lat: number; lng: number } }>('/vehicles/route');
-    },
-    updateLocation: async (lat: number, lng: number) => {
-      return request<{ success: boolean }>('/vehicles/location', {
-        method: 'POST',
-        body: JSON.stringify({ latitude: lat, longitude: lng }),
-      });
-    }
-  },
 
   // Parent-Teacher Communication Chat
   chat: {

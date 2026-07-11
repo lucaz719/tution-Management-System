@@ -509,7 +509,6 @@ router.get(
   async (req: TenantRequest, res: Response) => {
     try {
       let totalPaidInvoices = 0;
-      let totalCanteenReloads = 0;
       let totalExpenses = 0;
       let totalPaidPayrolls = 0;
       let totalPettyCashExpenses = 0;
@@ -536,13 +535,12 @@ router.get(
         totalPettyCashExpenses = pettyCash.reduce((sum, pc) => sum + Number(pc.amount), 0);
       } catch (dbErr) {
         totalPaidInvoices = 250000;
-        totalCanteenReloads = 15000;
         totalExpenses = 85000;
         totalPaidPayrolls = 120000;
         totalPettyCashExpenses = 12000;
       }
 
-      const totalRevenue = totalPaidInvoices + totalCanteenReloads;
+      const totalRevenue = totalPaidInvoices;
       const totalOutflow = totalExpenses + totalPaidPayrolls + totalPettyCashExpenses;
       const netProfit = totalRevenue - totalOutflow;
 
@@ -552,7 +550,6 @@ router.get(
           currency: 'NPR',
           revenues: {
             studentTuitionPaid: totalPaidInvoices,
-            canteenReloads: totalCanteenReloads,
             totalRevenues: totalRevenue,
           },
           expenses: {

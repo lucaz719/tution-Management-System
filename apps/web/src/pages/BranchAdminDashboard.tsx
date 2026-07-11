@@ -15,29 +15,12 @@ interface PettyCashRequest {
   branch?: string;
 }
 
-interface TransitRoute {
-  routeName: string;
-  driverName: string;
-  status: string;
-  coords: {
-    lat: number;
-    lng: number;
-  };
-}
-
 interface ResourceLogItem {
   id: string;
   label: string;
   detail: string;
   state: 'Logged' | 'Pending' | 'Overdue';
 }
-
-const defaultTransitRoute: TransitRoute = {
-  routeName: 'Baneshwor - Tinkune - Koteshwor',
-  driverName: 'Ram Prasad',
-  status: 'In Transit',
-  coords: { lat: 27.6931, lng: 85.3445 },
-};
 
 const todaysTimetable: TimetableListItem[] = [
   { id: 'tt-1', time: '07:30', title: 'Grade 8 Mathematics', room: 'Room 204', detail: 'Rina Karki', status: 'Scheduled', statusVariant: 'info' },
@@ -69,20 +52,14 @@ function getIndicatorColor(state: ResourceLogItem['state']) {
 
 export function BranchAdminDashboard() {
   const [pettyCashRequests, setPettyCashRequests] = useState<PettyCashRequest[]>([]);
-  const [transitRoute, setTransitRoute] = useState<TransitRoute>(defaultTransitRoute);
   const [isLoading, setIsLoading] = useState(true);
 
   const loadBranchData = async () => {
     setIsLoading(true);
 
     try {
-      const [pettyCash, route] = await Promise.all([
-        api.finances.getPettyCash() as Promise<PettyCashRequest[]>,
-        api.vehicles.getRoute() as Promise<TransitRoute>,
-      ]);
-
+      const pettyCash = await api.finances.getPettyCash() as PettyCashRequest[];
       setPettyCashRequests(pettyCash);
-      setTransitRoute(route);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       console.warn('API error, using local mocks:', message);
@@ -90,7 +67,6 @@ export function BranchAdminDashboard() {
         { id: 'pc-101', amount: 4500, purpose: 'Classroom Whiteboards', status: 'PENDING', branch: 'Baneshwor Branch' },
         { id: 'pc-102', amount: 1500, purpose: 'Science Lab Beakers', status: 'PENDING', branch: 'Baneshwor Branch' },
       ]);
-      setTransitRoute(defaultTransitRoute);
     } finally {
       window.setTimeout(() => setIsLoading(false), 700);
     }
@@ -98,24 +74,6 @@ export function BranchAdminDashboard() {
 
   useEffect(() => {
     void loadBranchData();
-  }, []);
-
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      setTransitRoute((previous) => {
-        const nextLat = previous.coords.lat + (Math.random() - 0.5) * 0.0005;
-        const nextLng = previous.coords.lng + (Math.random() - 0.5) * 0.0005;
-
-        void api.vehicles.updateLocation(nextLat, nextLng).catch(() => undefined);
-
-        return {
-          ...previous,
-          coords: { lat: nextLat, lng: nextLng },
-        };
-      });
-    }, 4000);
-
-    return () => window.clearInterval(intervalId);
   }, []);
 
   const handleL1Approve = async (id: string) => {
@@ -192,65 +150,37 @@ export function BranchAdminDashboard() {
         </Card>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '18px' }}>
-        <Card hoverable={false}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '12px', flexWrap: 'wrap' }}>
-            <div>
-              <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Petty Cash Level 1 Approvals Queue</h3>
-              <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Existing finance workflow preserved.</p>
-            </div>
-            <StatusBadge variant="info">{pettyCashRequests.length} requests</StatusBadge>
+      <Card hoverable={false}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '12px', flexWrap: 'wrap' }}>
+          <div>
+            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Petty Cash Level 1 Approvals Queue</h3>
+            <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Existing finance workflow preserved.</p>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {pettyCashRequests.length === 0 ? (
-              <p style={{ color: 'rgba(44, 62, 80, 0.64)', fontSize: '14px', textAlign: 'center', padding: '24px 0' }}>No active petty cash requests.</p>
-            ) : (
-              pettyCashRequests.map((request) => (
-                <div key={request.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(15, 76, 138, 0.1)', background: '#FFFFFF', flexWrap: 'wrap' }}>
-                  <div>
-                    <p style={{ fontWeight: 700, fontSize: '15px', color: 'var(--color-text)' }}>{request.purpose}</p>
-                    <p style={{ marginTop: '4px', fontSize: '12px', color: 'rgba(44, 62, 80, 0.68)' }}>ID: {request.id} · Amount: NPR {request.amount.toLocaleString()} · Branch: {request.branch ?? 'Baneshwor'}</p>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <StatusBadge variant={getPettyCashVariant(request.status)}>{request.status}</StatusBadge>
-                    {request.status === 'PENDING' ? (
-                      <Button variant="outline" onClick={() => void handleL1Approve(request.id)} style={{ minHeight: '36px', height: '36px', padding: '8px 16px', borderColor: 'rgba(15, 76, 138, 0.18)' }}>
-                        Approve L1
-                      </Button>
-                    ) : null}
-                  </div>
+          <StatusBadge variant="info">{pettyCashRequests.length} requests</StatusBadge>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {pettyCashRequests.length === 0 ? (
+            <p style={{ color: 'rgba(44, 62, 80, 0.64)', fontSize: '14px', textAlign: 'center', padding: '24px 0' }}>No active petty cash requests.</p>
+          ) : (
+            pettyCashRequests.map((request) => (
+              <div key={request.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(15, 76, 138, 0.1)', background: '#FFFFFF', flexWrap: 'wrap' }}>
+                <div>
+                  <p style={{ fontWeight: 700, fontSize: '15px', color: 'var(--color-text)' }}>{request.purpose}</p>
+                  <p style={{ marginTop: '4px', fontSize: '12px', color: 'rgba(44, 62, 80, 0.68)' }}>ID: {request.id} · Amount: NPR {request.amount.toLocaleString()} · Branch: {request.branch ?? 'Baneshwor'}</p>
                 </div>
-              ))
-            )}
-          </div>
-        </Card>
-
-        <Card hoverable={false}>
-          <div style={{ marginBottom: '16px' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Active Student Transit GPS Tracking</h3>
-            <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Route: {transitRoute.routeName} · Driver: {transitRoute.driverName}</p>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: '18px' }}>
-            <div className="live-map-tracker">
-              <div className="live-map-pin" style={{ top: '50%', left: '50%' }} />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '12px' }}>
-              <div style={{ padding: '16px', borderRadius: '12px', border: '1px solid rgba(15, 76, 138, 0.1)', background: '#FFFFFF' }}>
-                <p style={{ fontSize: '12px', fontWeight: 700, color: 'rgba(44, 62, 80, 0.62)' }}>GPS COORDINATES</p>
-                <p style={{ marginTop: '6px', fontFamily: 'var(--font-display)', fontSize: '22px', fontWeight: 600, color: 'var(--color-text)' }}>{transitRoute.coords.lat.toFixed(5)}° N</p>
-                <p style={{ color: 'rgba(44, 62, 80, 0.7)', fontSize: '14px' }}>{transitRoute.coords.lng.toFixed(5)}° E</p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <StatusBadge variant={getPettyCashVariant(request.status)}>{request.status}</StatusBadge>
+                  {request.status === 'PENDING' ? (
+                    <Button variant="outline" onClick={() => void handleL1Approve(request.id)} style={{ minHeight: '36px', height: '36px', padding: '8px 16px', borderColor: 'rgba(15, 76, 138, 0.18)' }}>
+                      Approve L1
+                    </Button>
+                  ) : null}
+                </div>
               </div>
-              <div style={{ padding: '16px', borderRadius: '12px', border: '1px solid rgba(15, 76, 138, 0.1)', background: '#FFFFFF' }}>
-                <p style={{ fontSize: '12px', fontWeight: 700, color: 'rgba(44, 62, 80, 0.62)' }}>CONNECTION STATUS</p>
-                <p style={{ marginTop: '6px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: 700, color: 'var(--color-success)' }}>
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--color-success)' }} />
-                  {transitRoute.status}
-                </p>
-              </div>
-            </div>
-          </div>
-        </Card>
-      </div>
+            ))
+          )}
+        </div>
+      </Card>
     </div>
   );
 }

@@ -227,7 +227,7 @@ export function TenantAdminDashboard() {
             <div style={{ padding: '18px', borderRadius: '12px', background: 'rgba(46, 158, 91, 0.08)', border: '1px solid rgba(46, 158, 91, 0.18)' }}>
               <p style={{ color: 'rgba(44, 62, 80, 0.7)', fontSize: '12px', fontWeight: 700 }}>AGGREGATED REVENUE</p>
               <p style={{ marginTop: '8px', fontFamily: 'var(--font-display)', fontSize: '24px', fontWeight: 600, color: 'var(--color-success)' }}>NPR {pl.revenue.toLocaleString()}</p>
-              <p style={{ marginTop: '6px', color: 'rgba(44, 62, 80, 0.62)', fontSize: '11px' }}>Invoices + canteen reloads</p>
+              <p style={{ marginTop: '6px', color: 'rgba(44, 62, 80, 0.62)', fontSize: '11px' }}>Aggregated tuition invoices</p>
             </div>
             <div style={{ padding: '18px', borderRadius: '12px', background: 'rgba(214, 69, 69, 0.08)', border: '1px solid rgba(214, 69, 69, 0.18)' }}>
               <p style={{ color: 'rgba(44, 62, 80, 0.7)', fontSize: '12px', fontWeight: 700 }}>OPERATING COSTS</p>

@@ -311,14 +311,7 @@ h1, h2, h3, h4 {
   background: repeating-linear-gradient(90deg, #000, #000 2px, #fff 2px, #fff 8px);
 }
 
-/* Canteen Wallet reloading and PIN panel */
-.canteen-wallet-card {
-  background: var(--accent-gradient);
-  color: #fff;
-  border-radius: var(--radius-lg);
-  padding: 24px;
-  box-shadow: 0 10px 25px rgba(0, 106, 96, 0.35);
-}
+
 
 /* Billing Calendar Grid */
 .payment-calendar-grid {
@@ -350,37 +343,7 @@ h1, h2, h3, h4 {
 .status-due { background: #f59f00; }
 .status-overdue { background: #d63031; }
 
-/* Live Driver Transit GPS Mock Map */
-.live-map-tracker {
-  height: 300px;
-  background: #dfe4ea;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border);
-  position: relative;
-  overflow: hidden;
-  background-image: radial-gradient(#ced6e0 20%, transparent 20%),
-                    radial-gradient(#ced6e0 20%, transparent 20%);
-  background-size: 20px 20px;
-  background-position: 0 0, 10px 10px;
-}
 
-.live-map-pin {
-  width: 16px;
-  height: 16px;
-  background: var(--danger-gradient);
-  border-radius: 50%;
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  box-shadow: 0 0 0 10px rgba(214, 48, 49, 0.25);
-  animation: pulse 1.5s infinite;
-}
-
-@keyframes pulse {
-  0% { box-shadow: 0 0 0 0px rgba(214, 48, 49, 0.4); }
-  100% { box-shadow: 0 0 0 12px rgba(214, 48, 49, 0); }
-}
 
 /* Animations */
 .fade-in {
