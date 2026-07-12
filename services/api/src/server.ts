@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express, { Response } from 'express';
 import cors from 'cors';
 import { tenantMiddleware, TenantRequest } from './middleware/tenant';
@@ -14,6 +15,8 @@ import certificatesRouter from './routes/certificates';
 import financesRouter from './routes/finances';
 import staticRouter from './routes/static';
 import authRouter from './routes/auth';
+import branchesRouter from './routes/branches';
+import usersRouter from './routes/users';
 import leavesRouter from './routes/leaves';
 import communicationRouter from './routes/communication';
 import appointmentsRouter from './routes/appointments';
@@ -45,6 +48,8 @@ app.use(tenantMiddleware);
 // Bind domain routers
 app.use('/api/auth', authRouter);
 app.use('/api/onboarding', onboardingRouter);
+app.use('/api/branches', branchesRouter);
+app.use('/api/users', usersRouter);
 app.use('/api/courses', coursesRouter);
 app.use('/api/attendance', attendanceRouter);
 app.use('/api/homework', homeworkRouter);

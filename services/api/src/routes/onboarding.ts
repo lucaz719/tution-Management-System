@@ -33,25 +33,6 @@ router.post('/request', async (req: TenantRequest, res: Response) => {
       request,
     });
   } catch (error: any) {
-    // Graceful fallback for demo/offline mock DB scenarios
-    if (
-      error.code === 'P2002' ||
-      error.message?.toLowerCase().includes('database') ||
-      error.message?.includes('DATABASE_URL')
-    ) {
-      return res.status(201).json({
-        message: 'Your onboarding request has been submitted successfully for administrative review (Simulated).',
-        request: {
-          id: 'simulated-request-' + Date.now(),
-          name,
-          email,
-          phone,
-          panNumber,
-          remarks,
-          status: 'PENDING'
-        }
-      });
-    }
     return res.status(500).json({ error: 'Failed to process request.', details: error.message });
   }
 });
@@ -68,21 +49,7 @@ router.get(
       });
       return res.json({ requests });
     } catch (error: any) {
-      return res.status(500).json({
-        error: 'Database offline. Standard simulated requests returned.',
-        requests: [
-          {
-            id: 'demo-req-123',
-            name: 'Kathmandu Tuition Center',
-            email: 'admin@ktmtuition.com.np',
-            phone: '9841234567',
-            panNumber: '601234567',
-            remarks: 'Grade 8 to 12 regular and personalized classes.',
-            status: 'PENDING',
-            createdAt: new Date(),
-          },
-        ],
-      });
+      return res.status(500).json({ error: 'Failed to list onboarding requests.', details: error.message });
     }
   }
 );
@@ -94,7 +61,23 @@ router.post(
   hasPermission('super_admin_manage_tenants'),
   async (req: TenantRequest, res: Response) => {
     const { id } = req.params;
-    const { defaultBranchName } = req.body;
+    const { defaultBranchName, branchAddress, latitude, longitude } = req.body;
+
+    // White-label license enforcement: when WHITE_LABEL_TENANT_LIMIT is set,
+    // refuse to provision beyond that many client tenants. Internal tenants
+    // (platform + demo, identified by reserved PANs) are not counted.
+    const RESERVED_PANS = ['000000000', '111111111'];
+    const tenantLimit = Number(process.env.WHITE_LABEL_TENANT_LIMIT);
+    if (Number.isFinite(tenantLimit) && tenantLimit > 0) {
+      const clientTenantCount = await prisma.tenant.count({
+        where: { panNumber: { notIn: RESERVED_PANS } },
+      });
+      if (clientTenantCount >= tenantLimit) {
+        return res.status(403).json({
+          error: `White-label license limit reached (${tenantLimit} client tenant${tenantLimit === 1 ? '' : 's'}). This deployment is licensed exclusively; additional institutions cannot be provisioned.`,
+        });
+      }
+    }
 
     let onboardingRequest: any = null;
     try {
@@ -141,10 +124,10 @@ router.post(
       const branch = await prisma.branch.create({
         data: {
           tenantId: tenant.id,
-          name: defaultBranchName || 'Main Center Kathmandu',
-          address: 'New Baneshwor, Kathmandu, Nepal',
-          latitude: 27.6915,
-          longitude: 85.3422,
+          name: defaultBranchName || 'Main Center',
+          address: branchAddress || 'Address pending — update in Branch settings',
+          latitude: Number.isFinite(Number(latitude)) ? Number(latitude) : 27.6915,
+          longitude: Number.isFinite(Number(longitude)) ? Number(longitude) : 85.3422,
           radiusMeters: 100,
         },
       });
@@ -192,24 +175,76 @@ router.post(
         },
       });
     } catch (error: any) {
-      if (
-        error.code === 'P2002' ||
-        error.message?.toLowerCase().includes('database') ||
-        error.message?.includes('DATABASE_URL')
-      ) {
-        // Simulation mode response if DB connection is unavailable
-        return res.status(200).json({
-          message: 'Simulation Mode: Request approved successfully (In-Memory).',
-          provisioned: {
-            tenantId: 'simulated-tenant-999',
-            tenantName: onboardingRequest?.name || 'Kathmandu Tuition Center',
-            primaryAdminUser: onboardingRequest?.email || 'admin@ktmtuition.com.np',
-            defaultBranch: defaultBranchName || 'Main Center Kathmandu',
-            temporaryPassword: 'TMSWelcome9876!',
-          },
+      if (error.code === 'P2002') {
+        return res.status(409).json({
+          error: 'A tenant or user with this PAN/email already exists. Verify the request details.',
         });
       }
       return res.status(500).json({ error: 'Failed to provision tenant.', details: error.message });
+    }
+  }
+);
+
+// 3b. Super Admin only: Reject onboarding request
+router.post(
+  '/reject/:id',
+  authMiddleware,
+  hasPermission('super_admin_manage_tenants'),
+  async (req: TenantRequest, res: Response) => {
+    const { id } = req.params;
+
+    try {
+      const onboardingRequest = await prisma.tenantRequest.findUnique({ where: { id } });
+
+      if (!onboardingRequest) {
+        return res.status(404).json({ error: 'Onboarding request not found.' });
+      }
+
+      if (onboardingRequest.status !== 'PENDING') {
+        return res.status(400).json({ error: 'Request is already processed.' });
+      }
+
+      const updated = await prisma.tenantRequest.update({
+        where: { id },
+        data: { status: 'REJECTED' },
+      });
+
+      return res.status(200).json({ message: 'Onboarding request rejected.', request: updated });
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Failed to reject request.', details: error.message });
+    }
+  }
+);
+
+// 3c. Super Admin only: List provisioned tenants with headline counts
+router.get(
+  '/tenants',
+  authMiddleware,
+  hasPermission('super_admin_manage_tenants'),
+  async (req: TenantRequest, res: Response) => {
+    try {
+      const tenants = await prisma.tenant.findMany({
+        orderBy: { createdAt: 'desc' },
+        include: {
+          _count: {
+            select: { branches: true, users: true },
+          },
+        },
+      });
+
+      return res.json({
+        tenants: tenants.map(tenant => ({
+          id: tenant.id,
+          name: tenant.name,
+          panNumber: tenant.panNumber,
+          status: tenant.status,
+          createdAt: tenant.createdAt,
+          branchCount: tenant._count.branches,
+          userCount: tenant._count.users,
+        })),
+      });
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Failed to list tenants.', details: error.message });
     }
   }
 );
@@ -220,41 +255,47 @@ router.get(
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
     try {
-      let studentCount = 0;
-      let teacherCount = 0;
-      let overdueAmount = 15000;
-      let pendingLeaves = 2;
+      const studentCount = await prisma.student.count({
+        where: { user: { tenantId: req.tenantId! } },
+      });
+      const teacherCount = await prisma.userRole.count({
+        where: {
+          user: { tenantId: req.tenantId! },
+          role: { name: 'Teacher' },
+        },
+      });
+      const overdueInvoices = await prisma.invoice.findMany({
+        where: { tenantId: req.tenantId!, status: 'OVERDUE' },
+      });
+      const overdueAmount = overdueInvoices.reduce((sum: number, inv: any) => sum + Number(inv.netPayable), 0);
+      const pendingLeaves = await prisma.leave.count({
+        where: { tenantId: req.tenantId!, status: 'PENDING' },
+      });
 
-      try {
-        studentCount = await prisma.student.count({
-          where: { user: { tenantId: req.tenantId! } },
-        });
-        teacherCount = await prisma.userRole.count({
-          where: {
-            user: { tenantId: req.tenantId! },
-            role: { name: 'Teacher' },
-          },
-        });
-        const overdueInvoices = await prisma.invoice.findMany({
-          where: { tenantId: req.tenantId!, status: 'OVERDUE' },
-        });
-        overdueAmount = overdueInvoices.reduce((sum, inv) => sum + Number(inv.netPayable), 0);
-        pendingLeaves = await prisma.leave.count({
-          where: { tenantId: req.tenantId!, status: 'PENDING' },
-        });
-      } catch (dbErr) {
-        studentCount = 120;
-        teacherCount = 15;
-      }
+      // Per-branch summary: students are linked to branches through their UserRole scope.
+      const branches = await prisma.branch.findMany({
+        where: { tenantId: req.tenantId! },
+        orderBy: { createdAt: 'asc' },
+      });
+      const branchSummary = await Promise.all(
+        branches.map(async (branch) => ({
+          branchId: branch.id,
+          branchName: branch.name,
+          activeStudents: await prisma.userRole.count({
+            where: { branchId: branch.id, role: { name: 'Student' } },
+          }),
+          staffRoles: await prisma.userRole.count({
+            where: { branchId: branch.id, role: { name: { not: 'Student' } } },
+          }),
+        }))
+      );
 
       return res.status(200).json({
         activeStudentsCount: studentCount,
         activeTeachersCount: teacherCount,
         totalOverdueAmountNpr: overdueAmount,
         pendingLeaveRequestsCount: pendingLeaves,
-        branchSummary: [
-          { branchName: 'Baneshwor Center', activeStudents: studentCount },
-        ],
+        branchSummary,
       });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to retrieve dashboard summaries.', details: error.message });

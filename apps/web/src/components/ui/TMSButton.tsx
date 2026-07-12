@@ -104,7 +104,9 @@ export function TMSButton({
           <path d='M12 3a9 9 0 0 1 9 9' fill='none' stroke='currentColor' strokeLinecap='round' strokeWidth='3' />
         </svg>
       ) : null}
-      <span>{children}</span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+        {children}
+      </span>
     </button>
   );
 }

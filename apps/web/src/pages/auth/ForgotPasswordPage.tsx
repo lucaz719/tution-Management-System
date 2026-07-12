@@ -8,7 +8,6 @@ import {
   requestPasswordResetOtp,
   resendPasswordResetOtp,
   verifyPasswordResetOtp,
-  isRegisteredAccount,
 } from '../../features/auth/service';
 import { isValidEmailAddress, maskEmail } from '../../features/auth/utils';
 
@@ -23,10 +22,6 @@ function validateRecoveryEmail(email: string): string {
 
   if (!isValidEmailAddress(email)) {
     return 'Enter a valid email address.';
-  }
-
-  if (!isRegisteredAccount(email)) {
-    return 'We could not find a registered account with that email address.';
   }
 
   return '';

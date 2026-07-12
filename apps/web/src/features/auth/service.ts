@@ -2,23 +2,10 @@ import { api } from '../../services/api';
 import type { AuthErrorCode, AuthSession, AuthUser, UserRole } from './types';
 import { normalizeEmail } from './utils';
 
-interface MockAccount extends AuthUser {
-  password: string;
-  tenantId?: string | null;
-  phoneHint?: string;
-}
-
-interface PasswordResetRequest {
+interface PendingPasswordReset {
   email: string;
+  token: string;
   expiresAt: number;
-  otp: string;
-  token?: string;
-}
-
-interface TwoFactorChallenge {
-  email: string;
-  expiresAt: number;
-  code: string;
 }
 
 interface ApiLoginPayload {
@@ -28,15 +15,14 @@ interface ApiLoginPayload {
 }
 
 const RESET_DURATION_MS = 5 * 60 * 1000;
-const TWO_FACTOR_DURATION_MS = 5 * 60 * 1000;
-const FIXED_DEMO_CODE = '123456';
 
 const STORAGE_KEYS = {
-  mockAccounts: 'tms_mock_accounts',
   passwordReset: 'tms_password_reset_request',
-  twoFactor: 'tms_two_factor_challenge',
   trustedDevices: 'tms_trusted_devices',
 } as const;
+
+// Keys written by earlier builds that shipped a local mock account directory.
+const LEGACY_STORAGE_KEYS = ['tms_mock_accounts', 'tms_two_factor_challenge'] as const;
 
 export const ROLE_DEFAULT_PATHS: Record<UserRole, string> = {
   SUPER_ADMIN: '/super-admin/dashboard',
@@ -49,83 +35,6 @@ export const ROLE_DEFAULT_PATHS: Record<UserRole, string> = {
   STUDENT: '/student/home',
   PARENT: '/parent/home',
 };
-
-const DEFAULT_ACCOUNTS: readonly MockAccount[] = [
-  {
-    id: 'user-super-admin',
-    name: 'System Director',
-    email: 'superadmin@tms.edu.np',
-    password: 'SystemAdmin999!',
-    role: 'SUPER_ADMIN',
-    requiresTwoFactor: true,
-    phoneHint: '••••45',
-  },
-  {
-    id: 'user-tenant-admin',
-    name: 'Pinnacle Tenant Admin',
-    email: 'admin@pinnacle.edu.np',
-    password: 'PinnacleAdmin777!',
-    role: 'TENANT_ADMIN',
-    requiresTwoFactor: true,
-    phoneHint: '••••27',
-  },
-  {
-    id: 'user-branch-admin',
-    name: 'Baneshwor Branch Admin',
-    email: 'branch-admin@pinnacle.edu.np',
-    password: 'BaneshworAdmin888!',
-    role: 'BRANCH_ADMIN',
-    phoneHint: '••••14',
-  },
-  {
-    id: 'user-teacher',
-    name: 'Shyam Adhikari',
-    email: 'shyam@pinnacle.edu.np',
-    password: 'PhysicsPass999!',
-    role: 'TEACHER',
-    phoneHint: '••••63',
-  },
-  {
-    id: 'user-accountant',
-    name: 'Finance Officer',
-    email: 'accounts@pinnacle.edu.np',
-    password: 'FinanceDesk555!',
-    role: 'ACCOUNTANT',
-    phoneHint: '••••38',
-  },
-  {
-    id: 'user-reception',
-    name: 'Reception Desk',
-    email: 'reception@pinnacle.edu.np',
-    password: 'FrontDesk444!',
-    role: 'RECEPTIONIST',
-    phoneHint: '••••80',
-  },
-  {
-    id: 'user-janitor',
-    name: 'Facilities Staff',
-    email: 'janitor@pinnacle.edu.np',
-    password: 'TaskBoard333!',
-    role: 'JANITOR',
-    phoneHint: '••••09',
-  },
-  {
-    id: 'user-student',
-    name: 'Anisha Student',
-    email: 'student.anisha@pinnacle.edu.np',
-    password: 'StudentPortal222!',
-    role: 'STUDENT',
-    phoneHint: '••••19',
-  },
-  {
-    id: 'user-parent',
-    name: 'Parent Account',
-    email: 'parent.shyam@gmail.com',
-    password: 'ShyamParent123!',
-    role: 'PARENT',
-    phoneHint: '••••52',
-  },
-] as const;
 
 export class AuthFlowError extends Error {
   readonly code: AuthErrorCode;
@@ -141,14 +50,11 @@ function hasWindow(): boolean {
   return typeof window !== 'undefined';
 }
 
-function delay(durationMs: number): Promise<void> {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, durationMs);
-  });
-}
-
-function createToken(prefix: string): string {
-  return `${prefix}-${globalThis.crypto.randomUUID()}`;
+if (hasWindow()) {
+  for (const legacyKey of LEGACY_STORAGE_KEYS) {
+    localStorage.removeItem(legacyKey);
+    sessionStorage.removeItem(legacyKey);
+  }
 }
 
 function readStorageItem(storageKey: string): string | null {
@@ -191,75 +97,47 @@ function readSessionItem(storageKey: string): string | null {
   return sessionStorage.getItem(storageKey);
 }
 
-function toMockUser(account: MockAccount): AuthUser {
-  return {
-    id: account.id,
-    email: account.email,
-    name: account.name,
-    role: account.role,
-    firstLogin: account.firstLogin ?? false,
-    requiresTwoFactor: account.requiresTwoFactor ?? false,
-  };
-}
-
-function isMockAccount(value: unknown): value is MockAccount {
-  if (!value || typeof value !== 'object') {
-    return false;
+function toAuthFlowError(error: unknown, code: AuthErrorCode, fallbackMessage: string): AuthFlowError {
+  if (error instanceof AuthFlowError) {
+    return error;
   }
 
-  const candidate = value as Record<string, unknown>;
-  return (
-    typeof candidate.id === 'string' &&
-    typeof candidate.email === 'string' &&
-    typeof candidate.name === 'string' &&
-    typeof candidate.password === 'string' &&
-    typeof candidate.role === 'string'
-  );
+  const message =
+    error instanceof Error && error.message.trim().length > 0 && !/failed to fetch/i.test(error.message)
+      ? error.message
+      : fallbackMessage;
+
+  return new AuthFlowError(code, message);
 }
 
-function getStoredAccounts(): MockAccount[] {
-  const stored = readStorageItem(STORAGE_KEYS.mockAccounts);
-  if (!stored) {
-    writeStorageItem(STORAGE_KEYS.mockAccounts, JSON.stringify(DEFAULT_ACCOUNTS));
-    return DEFAULT_ACCOUNTS.map((account) => ({ ...account }));
-  }
-
-  try {
-    const parsed = JSON.parse(stored) as unknown;
-    if (Array.isArray(parsed)) {
-      const validAccounts = parsed.filter(isMockAccount);
-      if (validAccounts.length > 0) {
-        return validAccounts.map((account) => ({
-          ...account,
-          email: normalizeEmail(account.email),
-        }));
-      }
-    }
-  } catch {
-    // Fall through to reseed accounts.
-  }
-
-  writeStorageItem(STORAGE_KEYS.mockAccounts, JSON.stringify(DEFAULT_ACCOUNTS));
-  return DEFAULT_ACCOUNTS.map((account) => ({ ...account }));
-}
-
-function saveAccounts(accounts: MockAccount[]): void {
-  writeStorageItem(STORAGE_KEYS.mockAccounts, JSON.stringify(accounts));
-}
-
-function findAccountByEmail(email: string): MockAccount | undefined {
-  const normalizedEmail = normalizeEmail(email);
-  return getStoredAccounts().find((account) => normalizeEmail(account.email) === normalizedEmail);
-}
-
-function normalizeApiRole(role: unknown, fallbackRole: UserRole): UserRole {
+function normalizeApiRole(role: unknown): UserRole | null {
   const candidate = typeof role === 'string' ? role.toUpperCase().replace(/\s+/g, '_') : '';
 
   if (candidate in ROLE_DEFAULT_PATHS) {
     return candidate as UserRole;
   }
 
-  return fallbackRole;
+  return null;
+}
+
+function resolveApiRole(payload: Record<string, unknown>): UserRole | null {
+  const directRole = normalizeApiRole(payload.role);
+  if (directRole) {
+    return directRole;
+  }
+
+  if (Array.isArray(payload.roles)) {
+    for (const entry of payload.roles) {
+      const roleName =
+        entry && typeof entry === 'object' ? (entry as Record<string, unknown>).roleName : entry;
+      const normalized = normalizeApiRole(roleName);
+      if (normalized) {
+        return normalized;
+      }
+    }
+  }
+
+  return null;
 }
 
 function normalizeApiUser(email: string, user: unknown): AuthUser | null {
@@ -268,26 +146,31 @@ function normalizeApiUser(email: string, user: unknown): AuthUser | null {
   }
 
   const payload = user as Record<string, unknown>;
-  const fallbackAccount = findAccountByEmail(email);
-  const fallbackRole = fallbackAccount?.role ?? 'PARENT';
   const normalizedEmail = typeof payload.email === 'string' ? normalizeEmail(payload.email) : normalizeEmail(email);
 
+  const role = resolveApiRole(payload);
+  if (!role) {
+    return null;
+  }
+
+  const fullName = [payload.firstName, payload.lastName]
+    .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+    .join(' ');
+
   return {
-    id: typeof payload.id === 'string' ? payload.id : createToken('user'),
+    id: typeof payload.id === 'string' ? payload.id : normalizedEmail,
     email: normalizedEmail,
     name:
       typeof payload.name === 'string' && payload.name.trim().length > 0
         ? payload.name
-        : normalizedEmail.split('@')[0],
-    role: normalizeApiRole(payload.role, fallbackRole),
+        : fullName || normalizedEmail.split('@')[0],
+    role,
     firstLogin: payload.firstLogin === true,
-    requiresTwoFactor:
-      payload.requiresTwoFactor === true ||
-      ((fallbackAccount?.requiresTwoFactor ?? false) && !isTrustedDevice(normalizedEmail)),
+    requiresTwoFactor: payload.requiresTwoFactor === true && !isTrustedDevice(normalizedEmail),
   };
 }
 
-function parsePasswordResetRequest(rawValue: string | null): PasswordResetRequest | null {
+function parsePendingPasswordReset(rawValue: string | null): PendingPasswordReset | null {
   if (!rawValue) {
     return null;
   }
@@ -301,7 +184,7 @@ function parsePasswordResetRequest(rawValue: string | null): PasswordResetReques
     const candidate = parsed as Record<string, unknown>;
     if (
       typeof candidate.email !== 'string' ||
-      typeof candidate.otp !== 'string' ||
+      typeof candidate.token !== 'string' ||
       typeof candidate.expiresAt !== 'number'
     ) {
       return null;
@@ -309,38 +192,7 @@ function parsePasswordResetRequest(rawValue: string | null): PasswordResetReques
 
     return {
       email: normalizeEmail(candidate.email),
-      otp: candidate.otp,
-      expiresAt: candidate.expiresAt,
-      token: typeof candidate.token === 'string' ? candidate.token : undefined,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function parseTwoFactorChallenge(rawValue: string | null): TwoFactorChallenge | null {
-  if (!rawValue) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(rawValue) as unknown;
-    if (!parsed || typeof parsed !== 'object') {
-      return null;
-    }
-
-    const candidate = parsed as Record<string, unknown>;
-    if (
-      typeof candidate.email !== 'string' ||
-      typeof candidate.code !== 'string' ||
-      typeof candidate.expiresAt !== 'number'
-    ) {
-      return null;
-    }
-
-    return {
-      email: normalizeEmail(candidate.email),
-      code: candidate.code,
+      token: candidate.token,
       expiresAt: candidate.expiresAt,
     };
   } catch {
@@ -375,10 +227,6 @@ function persistTrustedDevices(devices: Record<string, number>): void {
   writeStorageItem(STORAGE_KEYS.trustedDevices, JSON.stringify(devices));
 }
 
-export function isRegisteredAccount(email: string): boolean {
-  return Boolean(findAccountByEmail(email));
-}
-
 export function isTrustedDevice(email: string): boolean {
   const trustedDevices = getTrustedDevices();
   const expiration = trustedDevices[normalizeEmail(email)];
@@ -402,63 +250,36 @@ export function trustDeviceForThirtyDays(email: string): void {
   persistTrustedDevices(trustedDevices);
 }
 
-export function getTwoFactorDestinationHint(email: string): string {
-  const account = findAccountByEmail(email);
-  return account?.phoneHint ?? 'phone/email';
-}
-
-export function createTwoFactorChallenge(email: string): void {
-  const challenge: TwoFactorChallenge = {
-    email: normalizeEmail(email),
-    code: FIXED_DEMO_CODE,
-    expiresAt: Date.now() + TWO_FACTOR_DURATION_MS,
-  };
-
-  writeSessionItem(STORAGE_KEYS.twoFactor, JSON.stringify(challenge));
-}
-
-export function clearTwoFactorChallenge(): void {
-  removeSessionItem(STORAGE_KEYS.twoFactor);
+export async function requestTwoFactorCode(email: string): Promise<void> {
+  try {
+    await api.auth.requestTwoFactorCode(normalizeEmail(email));
+  } catch (error) {
+    throw toAuthFlowError(
+      error,
+      'TWO_FACTOR_EXPIRED',
+      'Unable to send a verification code right now. Please try again.'
+    );
+  }
 }
 
 export async function resendTwoFactorChallenge(email: string): Promise<void> {
-  await delay(450);
-  createTwoFactorChallenge(email);
+  await requestTwoFactorCode(email);
 }
 
-export async function verifyTwoFactorChallenge(code: string): Promise<void> {
-  await delay(450);
-  const challenge = parseTwoFactorChallenge(readSessionItem(STORAGE_KEYS.twoFactor));
-
-  if (!challenge) {
-    throw new AuthFlowError('TWO_FACTOR_EXPIRED', 'Your verification code has expired. Please request a new one.');
-  }
-
-  if (Date.now() > challenge.expiresAt) {
-    clearTwoFactorChallenge();
-    throw new AuthFlowError('TWO_FACTOR_EXPIRED', 'Your verification code has expired. Please request a new one.');
-  }
-
-  if (code !== challenge.code) {
-    throw new AuthFlowError('TWO_FACTOR_INVALID', 'The verification code you entered is incorrect.');
+export async function verifyTwoFactorChallenge(email: string, code: string): Promise<void> {
+  try {
+    await api.auth.verifyTwoFactorCode(normalizeEmail(email), code);
+  } catch (error) {
+    throw toAuthFlowError(error, 'TWO_FACTOR_INVALID', 'The verification code you entered is incorrect.');
   }
 }
 
 export async function requestPasswordResetOtp(email: string): Promise<void> {
-  await delay(450);
-  const account = findAccountByEmail(email);
-
-  if (!account) {
-    throw new AuthFlowError('EMAIL_NOT_FOUND', 'We could not find a registered account with that email address.');
+  try {
+    await api.auth.requestPasswordReset(normalizeEmail(email));
+  } catch (error) {
+    throw toAuthFlowError(error, 'EMAIL_NOT_FOUND', 'Unable to send the OTP right now. Please try again.');
   }
-
-  const request: PasswordResetRequest = {
-    email: account.email,
-    otp: FIXED_DEMO_CODE,
-    expiresAt: Date.now() + RESET_DURATION_MS,
-  };
-
-  writeSessionItem(STORAGE_KEYS.passwordReset, JSON.stringify(request));
 }
 
 export async function resendPasswordResetOtp(email: string): Promise<void> {
@@ -466,36 +287,33 @@ export async function resendPasswordResetOtp(email: string): Promise<void> {
 }
 
 export async function verifyPasswordResetOtp(email: string, otp: string): Promise<string> {
-  await delay(450);
-  const request = parsePasswordResetRequest(readSessionItem(STORAGE_KEYS.passwordReset));
+  let resetToken: unknown;
 
-  if (!request || request.email !== normalizeEmail(email)) {
-    throw new AuthFlowError('OTP_INVALID', 'The OTP you entered is not valid for this email address.');
+  try {
+    const response = await api.auth.verifyPasswordResetOtp(normalizeEmail(email), otp);
+    resetToken = response.resetToken;
+  } catch (error) {
+    throw toAuthFlowError(error, 'OTP_INVALID', 'The OTP could not be verified. Please try again.');
   }
 
-  if (Date.now() > request.expiresAt) {
-    removeSessionItem(STORAGE_KEYS.passwordReset);
-    throw new AuthFlowError('OTP_EXPIRED', 'This OTP has expired. Please request a new code.');
+  if (typeof resetToken !== 'string' || resetToken.length === 0) {
+    throw new AuthFlowError('OTP_INVALID', 'The server did not return a reset token. Please try again.');
   }
 
-  if (request.otp !== otp) {
-    throw new AuthFlowError('OTP_INVALID', 'The OTP you entered is incorrect.');
-  }
+  const pendingReset: PendingPasswordReset = {
+    email: normalizeEmail(email),
+    token: resetToken,
+    expiresAt: Date.now() + RESET_DURATION_MS,
+  };
+  writeSessionItem(STORAGE_KEYS.passwordReset, JSON.stringify(pendingReset));
 
-  const token = createToken('reset');
-  writeSessionItem(
-    STORAGE_KEYS.passwordReset,
-    JSON.stringify({
-      ...request,
-      token,
-    } satisfies PasswordResetRequest)
-  );
-
-  return token;
+  return resetToken;
 }
 
-export function getResetRequestByToken(token: string): PasswordResetRequest | null {
-  const request = parsePasswordResetRequest(readSessionItem(STORAGE_KEYS.passwordReset));
+// Client-side record of a server-verified OTP, used only to gate the reset form UI.
+// The reset token itself is validated again by the server on submission.
+export function getResetRequestByToken(token: string): PendingPasswordReset | null {
+  const request = parsePendingPasswordReset(readSessionItem(STORAGE_KEYS.passwordReset));
   if (!request || request.token !== token || Date.now() > request.expiresAt) {
     return null;
   }
@@ -504,24 +322,16 @@ export function getResetRequestByToken(token: string): PasswordResetRequest | nu
 }
 
 export async function resetPassword(token: string, nextPassword: string): Promise<void> {
-  await delay(550);
-  const request = getResetRequestByToken(token);
-  if (!request) {
-    throw new AuthFlowError('RESET_TOKEN_INVALID', 'This reset link is invalid or has expired.');
+  try {
+    await api.auth.resetPassword(token, nextPassword);
+  } catch (error) {
+    throw toAuthFlowError(
+      error,
+      'RESET_TOKEN_INVALID',
+      'Unable to reset the password right now. Please try again.'
+    );
   }
 
-  const accounts = getStoredAccounts();
-  const targetAccountIndex = accounts.findIndex((account) => normalizeEmail(account.email) === request.email);
-
-  if (targetAccountIndex < 0) {
-    throw new AuthFlowError('EMAIL_NOT_FOUND', 'We could not find a registered account with that email address.');
-  }
-
-  accounts[targetAccountIndex] = {
-    ...accounts[targetAccountIndex],
-    password: nextPassword,
-  };
-  saveAccounts(accounts);
   removeSessionItem(STORAGE_KEYS.passwordReset);
 }
 
@@ -540,35 +350,28 @@ export function getFriendlyErrorMessage(error: unknown, fallbackMessage: string)
 export async function authenticateUser(email: string, password: string): Promise<AuthSession> {
   const normalizedEmail = normalizeEmail(email);
 
+  let apiResponse: ApiLoginPayload;
   try {
-    const apiResponse = (await api.auth.login(normalizedEmail, password)) as ApiLoginPayload;
-    const fallbackAccount = findAccountByEmail(normalizedEmail);
-    const normalizedUser = normalizeApiUser(normalizedEmail, apiResponse.user);
-
-    if (apiResponse.token && normalizedUser) {
-      return {
-        token: apiResponse.token,
-        tenantId: apiResponse.tenantId ?? fallbackAccount?.tenantId ?? null,
-        user: normalizedUser,
-      };
-    }
-  } catch {
-    // Fall back to the local mock directory when the API is unavailable or incomplete.
+    apiResponse = (await api.auth.login(normalizedEmail, password)) as ApiLoginPayload;
+  } catch (error) {
+    throw toAuthFlowError(error, 'INVALID_CREDENTIALS', 'Invalid email or password.');
   }
 
-  await delay(500);
-  const account = findAccountByEmail(normalizedEmail);
+  const user = normalizeApiUser(normalizedEmail, apiResponse.user);
 
-  if (!account || account.password !== password) {
-    throw new AuthFlowError('INVALID_CREDENTIALS', 'Invalid email or password.');
+  if (!apiResponse.token || !user) {
+    throw new AuthFlowError(
+      'INVALID_CREDENTIALS',
+      'Sign-in could not be completed because the server response was incomplete. Contact your administrator.'
+    );
   }
+
+  const rawUser = apiResponse.user as Record<string, unknown>;
+  const payloadTenantId = typeof rawUser.tenantId === 'string' ? rawUser.tenantId : null;
 
   return {
-    token: createToken('mock-jwt'),
-    tenantId: account.tenantId ?? null,
-    user: {
-      ...toMockUser(account),
-      requiresTwoFactor: (account.requiresTwoFactor ?? false) && !isTrustedDevice(account.email),
-    },
+    token: apiResponse.token,
+    tenantId: apiResponse.tenantId ?? payloadTenantId,
+    user,
   };
 }

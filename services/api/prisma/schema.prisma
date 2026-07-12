@@ -91,6 +91,10 @@ model Tenant {
   name                String
   panNumber           String               @unique // Nepal 9-digit PAN/VAT
   status              UserStatus           @default(ACTIVE)
+  // Tenant-wide policy settings (editable from the Tenant Admin dashboard)
+  vatRate             Float                @default(13)
+  gracePeriodMinutes  Int                  @default(15)
+  pettyCashCapNpr     Int                  @default(20000)
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
   branches            Branch[]
@@ -160,6 +164,7 @@ model User {
   firstName         String
   lastName          String
   phone             String
+  twoFactorEnabled  Boolean             @default(false)
   status            UserStatus          @default(ACTIVE)
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
@@ -664,4 +669,19 @@ model RefundRequest {
   approvedBy      String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+}
+
+// One-time verification codes for password reset and 2FA.
+// Codes are stored as SHA-256 hashes; plaintext is only sent to the user.
+model VerificationCode {
+  id         String    @id @default(uuid())
+  identifier String    // normalized email
+  purpose    String    // PASSWORD_RESET | RESET_TOKEN | TWO_FACTOR
+  codeHash   String
+  expiresAt  DateTime
+  attempts   Int       @default(0)
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([identifier, purpose])
 }

@@ -32,18 +32,19 @@ function renderIcon(icon: ReactNode, accentColor: string) {
   return (
     <div
       style={{
-        width: '42px',
-        height: '42px',
+        width: '44px',
+        height: '44px',
         borderRadius: '12px',
         display: 'grid',
         placeItems: 'center',
-        background: 'rgba(27, 95, 167, 0.08)',
+        // Tint the badge with the card's own accent so each KPI reads as a set.
+        background: `color-mix(in srgb, ${accentColor} 12%, transparent)`,
         color: accentColor,
         flexShrink: 0,
       }}
     >
       {typeof icon === 'string' ? (
-        <span className='material-symbols-outlined' style={{ fontSize: '20px' }}>
+        <span className='material-symbols-outlined' style={{ fontSize: '22px' }}>
           {icon}
         </span>
       ) : (
@@ -70,7 +71,7 @@ export function KPICard({
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px' }}>
             <div>
-              <p style={{ fontSize: '14.5px', fontWeight: 700, color: 'rgba(44, 62, 80, 0.72)' }}>{title}</p>
+              <p style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{title}</p>
               <div
                 style={{
                   marginTop: '8px',

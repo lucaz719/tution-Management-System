@@ -7,7 +7,9 @@ export interface TenantRequest extends Request {
 
 export function tenantMiddleware(req: TenantRequest, res: Response, next: NextFunction) {
   // 1. Check path to see if it bypasses tenant constraints
-  const bypassPaths = ['/api/onboarding', '/api/health', '/api/certificates/verify'];
+  // /api/auth is exempt because the tenant is derived from the user record at login,
+  // before the client can know its tenant ID.
+  const bypassPaths = ['/api/auth', '/api/onboarding', '/api/health', '/api/certificates/verify'];
   if (bypassPaths.some(path => req.path.startsWith(path))) {
     return next();
   }

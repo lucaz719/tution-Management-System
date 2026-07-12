@@ -192,10 +192,11 @@ export function DashboardShell({ role, children }: DashboardShellProps) {
       <div
         style={{
           display: 'flex',
+          flexDirection: isCollapsed ? 'column' : 'row',
           alignItems: 'center',
           justifyContent: isCollapsed ? 'center' : 'space-between',
-          gap: '12px',
-          padding: isCollapsed ? '18px 10px' : '18px 18px 12px',
+          gap: isCollapsed ? '10px' : '12px',
+          padding: isCollapsed ? '16px 8px 14px' : '18px 18px 12px',
           borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
         }}
       >

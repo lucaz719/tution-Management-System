@@ -5,11 +5,12 @@ import { useToast } from '../../components/ui/Toast';
 import { useAuth } from '../../context/AuthContext';
 import {
   AuthFlowError,
-  getTwoFactorDestinationHint,
+  getFriendlyErrorMessage,
   resendTwoFactorChallenge,
   trustDeviceForThirtyDays,
   verifyTwoFactorChallenge,
 } from '../../features/auth/service';
+import { maskEmail } from '../../features/auth/utils';
 
 const TWO_FACTOR_DURATION_SECONDS = 5 * 60;
 
@@ -24,7 +25,7 @@ export function TwoFactorPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
 
-  const destinationHint = user ? getTwoFactorDestinationHint(user.email) : 'phone/email';
+  const destinationHint = user ? maskEmail(user.email) : 'your registered contact';
   const isOtpFilled = otp.every((digit) => digit.length === 1);
 
   const handleVerify = async (otpValue: string) => {
@@ -36,7 +37,7 @@ export function TwoFactorPage() {
     setStatusMessage('');
 
     try {
-      await verifyTwoFactorChallenge(otpValue);
+      await verifyTwoFactorChallenge(user.email, otpValue);
       if (trustDevice) {
         trustDeviceForThirtyDays(user.email);
       }
@@ -77,6 +78,11 @@ export function TwoFactorPage() {
       setStatusMessage('');
       setTimerKey((current) => current + 1);
       showToast('A new verification code has been sent.', 'success');
+    } catch (error) {
+      showToast(
+        getFriendlyErrorMessage(error, 'Unable to send a verification code right now. Please try again.'),
+        'error'
+      );
     } finally {
       setIsSubmitting(false);
     }

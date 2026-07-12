@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
+import { MockSmsSender } from '../utils/notifications';
 
 const router = Router();
 
@@ -132,7 +133,6 @@ router.post(
           // Simulation mode fallback
         }
 
-        const { MockSmsSender } = require('../utils/notifications');
         const smsSender = new MockSmsSender();
         await smsSender.sendSms(
           '98510XXXXX',
@@ -292,6 +292,23 @@ router.post(
       return res.status(201).json({ message: 'Petty cash request logged.', pettyCash: pc });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to request petty cash.', details: error.message });
+    }
+  }
+);
+
+// List petty cash requests for the tenant
+router.get(
+  '/petty-cash',
+  authMiddleware,
+  async (req: TenantRequest, res: Response) => {
+    try {
+      const requests = await prisma.pettyCash.findMany({
+        where: { tenantId: req.tenantId! },
+        orderBy: { createdAt: 'desc' },
+      });
+      return res.json(requests);
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Failed to list petty cash requests.', details: error.message });
     }
   }
 );
@@ -508,45 +525,39 @@ router.get(
   hasPermission('view_reports'),
   async (req: TenantRequest, res: Response) => {
     try {
-      let totalPaidInvoices = 0;
-      let totalExpenses = 0;
-      let totalPaidPayrolls = 0;
-      let totalPettyCashExpenses = 0;
+      const invoices = await prisma.invoice.findMany({
+        where: { tenantId: req.tenantId!, status: 'PAID' },
+      });
+      const totalPaidInvoices = invoices.reduce((sum: number, inv: any) => sum + Number(inv.netPayable), 0);
 
-      try {
-        const invoices = await prisma.invoice.findMany({
-          where: { tenantId: req.tenantId!, status: 'PAID' },
-        });
-        totalPaidInvoices = invoices.reduce((sum, inv) => sum + Number(inv.netPayable), 0);
+      const expenses = await prisma.expense.findMany({
+        where: { tenantId: req.tenantId! },
+      });
+      const totalExpenses = expenses.reduce((sum: number, exp: any) => sum + Number(exp.amount), 0);
 
-        const expenses = await prisma.expense.findMany({
-          where: { tenantId: req.tenantId! },
-        });
-        totalExpenses = expenses.reduce((sum, exp) => sum + Number(exp.amount), 0);
+      const payrolls = await prisma.payroll.findMany({
+        where: { tenantId: req.tenantId!, status: 'PAID' },
+      });
+      const totalPaidPayrolls = payrolls.reduce((sum: number, pay: any) => sum + Number(pay.netPayable), 0);
 
-        const payrolls = await prisma.payroll.findMany({
-          where: { tenantId: req.tenantId!, status: 'PAID' },
-        });
-        totalPaidPayrolls = payrolls.reduce((sum, pay) => sum + Number(pay.netPayable), 0);
-
-        const pettyCash = await prisma.pettyCash.findMany({
-          where: { tenantId: req.tenantId!, status: { in: ['RELEASED', 'RECEIPT_SUBMITTED', 'CLOSED'] } },
-        });
-        totalPettyCashExpenses = pettyCash.reduce((sum, pc) => sum + Number(pc.amount), 0);
-      } catch (dbErr) {
-        totalPaidInvoices = 250000;
-        totalExpenses = 85000;
-        totalPaidPayrolls = 120000;
-        totalPettyCashExpenses = 12000;
-      }
+      const pettyCash = await prisma.pettyCash.findMany({
+        where: { tenantId: req.tenantId!, status: { in: ['RELEASED', 'RECEIPT_SUBMITTED', 'CLOSED'] } },
+      });
+      const totalPettyCashExpenses = pettyCash.reduce((sum: number, pc: any) => sum + Number(pc.amount), 0);
 
       const totalRevenue = totalPaidInvoices;
       const totalOutflow = totalExpenses + totalPaidPayrolls + totalPettyCashExpenses;
       const netProfit = totalRevenue - totalOutflow;
+      const period = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
       return res.status(200).json({
+        // Flat fields consumed by the Tenant Admin dashboard
+        revenue: totalRevenue,
+        operatingCosts: totalOutflow,
+        netMargin: netProfit,
+        month: period,
         financialSummary: {
-          period: 'July 2026',
+          period,
           currency: 'NPR',
           revenues: {
             studentTuitionPaid: totalPaidInvoices,
@@ -567,7 +578,74 @@ router.get(
   }
 );
 
-// 8. Double-Entry Ledger Export
+// 8. Tenant policy configuration (VAT, attendance grace, petty cash cap)
+router.get(
+  '/config',
+  authMiddleware,
+  async (req: TenantRequest, res: Response) => {
+    try {
+      const tenant = await prisma.tenant.findUnique({ where: { id: req.tenantId! } });
+      if (!tenant) {
+        return res.status(404).json({ error: 'Tenant not found.' });
+      }
+
+      return res.json({
+        vatRate: tenant.vatRate,
+        gracePeriod: tenant.gracePeriodMinutes,
+        pettyCashCap: tenant.pettyCashCapNpr,
+      });
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Failed to load tenant configuration.', details: error.message });
+    }
+  }
+);
+
+router.put(
+  '/config',
+  authMiddleware,
+  hasPermission('manage_billing'),
+  async (req: TenantRequest, res: Response) => {
+    const { vatRate, gracePeriod, pettyCashCap } = req.body;
+
+    const nextVatRate = Number(vatRate);
+    const nextGracePeriod = Number(gracePeriod);
+    const nextPettyCashCap = Number(pettyCashCap);
+
+    if (!Number.isFinite(nextVatRate) || nextVatRate < 0 || nextVatRate > 100) {
+      return res.status(400).json({ error: 'VAT rate must be between 0 and 100.' });
+    }
+    if (!Number.isInteger(nextGracePeriod) || nextGracePeriod < 0 || nextGracePeriod > 240) {
+      return res.status(400).json({ error: 'Grace period must be between 0 and 240 minutes.' });
+    }
+    if (!Number.isInteger(nextPettyCashCap) || nextPettyCashCap < 0) {
+      return res.status(400).json({ error: 'Petty cash cap must be a non-negative amount.' });
+    }
+
+    try {
+      const tenant = await prisma.tenant.update({
+        where: { id: req.tenantId! },
+        data: {
+          vatRate: nextVatRate,
+          gracePeriodMinutes: nextGracePeriod,
+          pettyCashCapNpr: nextPettyCashCap,
+        },
+      });
+
+      return res.json({
+        success: true,
+        tenant: {
+          vatRate: tenant.vatRate,
+          gracePeriod: tenant.gracePeriodMinutes,
+          pettyCashCap: tenant.pettyCashCapNpr,
+        },
+      });
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Failed to update tenant configuration.', details: error.message });
+    }
+  }
+);
+
+// 9. Double-Entry Ledger Export
 router.get(
   '/ledger/export',
   authMiddleware,

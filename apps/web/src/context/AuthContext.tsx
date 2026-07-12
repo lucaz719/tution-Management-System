@@ -4,8 +4,7 @@ import {
   AuthFlowError,
   ROLE_DEFAULT_PATHS,
   authenticateUser,
-  clearTwoFactorChallenge,
-  createTwoFactorChallenge,
+  requestTwoFactorCode,
 } from '../features/auth/service';
 import type { AuthUser } from '../features/auth/types';
 
@@ -157,9 +156,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       writeStoredSession(session.token, session.user, session.tenantId, rememberMe);
 
       if (session.user.requiresTwoFactor) {
-        createTwoFactorChallenge(session.user.email);
-      } else {
-        clearTwoFactorChallenge();
+        try {
+          await requestTwoFactorCode(session.user.email);
+        } catch {
+          // The 2FA page offers a resend option if the initial send fails.
+        }
       }
 
       setToken(session.token);
@@ -183,7 +184,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     removeAuthToken();
     clearLocalStorageArtifacts();
     clearSessionStorageArtifacts();
-    clearTwoFactorChallenge();
     setUser(null);
     setToken(null);
     setAttemptCount(0);
@@ -217,7 +217,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const updatedUser: AuthUser = { ...user, requiresTwoFactor: false };
-    clearTwoFactorChallenge();
     updateStoredUser(updatedUser);
     setUser(updatedUser);
   }, [user]);

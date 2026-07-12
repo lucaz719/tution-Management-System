@@ -3,22 +3,115 @@ import prisma from '../utils/db';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { TenantRequest } from '../middleware/tenant';
+import { JWT_SECRET } from '../utils/env';
+import { sendVerificationCode } from '../utils/delivery';
+import {
+  MAX_CODE_ATTEMPTS,
+  OTP_TTL_MS,
+  RESET_TOKEN_TTL_MS,
+  generateOtpCode,
+  generateResetToken,
+  hashCode,
+  isRateLimited,
+  type VerificationPurpose,
+} from '../utils/otp';
 import { UserPayload } from '@tms/types';
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'tms_default_secret_jwt_2026';
+
+function normalizeEmail(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function rateKey(req: TenantRequest, scope: string, email: string): string {
+  return `${scope}:${email}:${req.ip ?? 'unknown'}`;
+}
+
+// Password policy mirrored from the web client (apps/web/src/features/auth/utils.ts).
+function isPasswordStrongEnough(password: string): boolean {
+  return (
+    typeof password === 'string' &&
+    password.length >= 8 &&
+    /[A-Z]/.test(password) &&
+    /[a-z]/.test(password) &&
+    /\d/.test(password) &&
+    /[^A-Za-z0-9]/.test(password)
+  );
+}
+
+async function issueCode(
+  identifier: string,
+  purpose: VerificationPurpose,
+  code: string,
+  ttlMs: number
+): Promise<void> {
+  // A new code invalidates any outstanding one for the same identifier+purpose.
+  await prisma.verificationCode.updateMany({
+    where: { identifier, purpose, consumedAt: null },
+    data: { consumedAt: new Date() },
+  });
+
+  await prisma.verificationCode.create({
+    data: {
+      identifier,
+      purpose,
+      codeHash: hashCode(code),
+      expiresAt: new Date(Date.now() + ttlMs),
+    },
+  });
+}
+
+type ConsumeResult = 'ok' | 'invalid' | 'expired' | 'locked';
+
+async function consumeCode(
+  identifier: string,
+  purpose: VerificationPurpose,
+  code: string
+): Promise<ConsumeResult> {
+  const record = await prisma.verificationCode.findFirst({
+    where: { identifier, purpose, consumedAt: null },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  if (!record) {
+    return 'invalid';
+  }
+
+  if (record.expiresAt < new Date()) {
+    return 'expired';
+  }
+
+  if (record.attempts >= MAX_CODE_ATTEMPTS) {
+    return 'locked';
+  }
+
+  if (record.codeHash !== hashCode(code)) {
+    await prisma.verificationCode.update({
+      where: { id: record.id },
+      data: { attempts: { increment: 1 } },
+    });
+    return 'invalid';
+  }
+
+  await prisma.verificationCode.update({
+    where: { id: record.id },
+    data: { consumedAt: new Date() },
+  });
+  return 'ok';
+}
 
 router.post('/login', async (req: TenantRequest, res: Response) => {
   const { email, password } = req.body;
-  const tenantId = req.tenantId;
 
-  if (!email || !password || !tenantId) {
-    return res.status(400).json({ error: 'Email, password, and tenant ID are required.' });
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required.' });
   }
 
   try {
+    // Email is globally unique, so the tenant scope is derived from the user
+    // record itself — the client cannot know its tenant before logging in.
     const user = await prisma.user.findUnique({
-      where: { email },
+      where: { email: normalizeEmail(email) },
       include: {
         userRoles: {
           include: {
@@ -28,7 +121,7 @@ router.post('/login', async (req: TenantRequest, res: Response) => {
       }
     });
 
-    if (!user || user.tenantId !== tenantId) {
+    if (!user) {
       return res.status(401).json({ error: 'Invalid credentials.' });
     }
 
@@ -56,9 +149,189 @@ router.post('/login', async (req: TenantRequest, res: Response) => {
 
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' });
 
-    return res.json({ token, user: payload });
+    return res.json({
+      token,
+      tenantId: user.tenantId,
+      user: { ...payload, requiresTwoFactor: user.twoFactorEnabled },
+    });
   } catch (error: any) {
     console.error('Login error:', error);
+    return res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+router.post('/forgot-password', async (req: TenantRequest, res: Response) => {
+  const email = normalizeEmail(req.body?.email);
+
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required.' });
+  }
+
+  if (isRateLimited(rateKey(req, 'forgot', email))) {
+    return res.status(429).json({ error: 'Too many OTP requests. Please wait a few minutes and try again.' });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({ where: { email } });
+
+    // Only issue a code for real, active accounts — but always answer success
+    // so the endpoint cannot be used to enumerate registered emails.
+    if (user && user.status === 'ACTIVE') {
+      const code = generateOtpCode();
+      await issueCode(email, 'PASSWORD_RESET', code, OTP_TTL_MS);
+      await sendVerificationCode(email, code, 'PASSWORD_RESET');
+    }
+
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('Forgot-password error:', error);
+    return res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+router.post('/verify-reset-otp', async (req: TenantRequest, res: Response) => {
+  const email = normalizeEmail(req.body?.email);
+  const otp = typeof req.body?.otp === 'string' ? req.body.otp.trim() : '';
+
+  if (!email || !otp) {
+    return res.status(400).json({ error: 'Email and OTP are required.' });
+  }
+
+  if (isRateLimited(rateKey(req, 'verify-reset', email))) {
+    return res.status(429).json({ error: 'Too many verification attempts. Please wait a few minutes and try again.' });
+  }
+
+  try {
+    const result = await consumeCode(email, 'PASSWORD_RESET', otp);
+
+    if (result === 'expired') {
+      return res.status(410).json({ error: 'This OTP has expired. Please request a new code.' });
+    }
+    if (result === 'locked') {
+      return res.status(429).json({ error: 'Too many incorrect attempts. Please request a new code.' });
+    }
+    if (result === 'invalid') {
+      return res.status(401).json({ error: 'The OTP you entered is incorrect.' });
+    }
+
+    const resetToken = generateResetToken();
+    await issueCode(email, 'RESET_TOKEN', resetToken, RESET_TOKEN_TTL_MS);
+
+    return res.json({ resetToken });
+  } catch (error: any) {
+    console.error('Verify-reset-otp error:', error);
+    return res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+router.post('/reset-password', async (req: TenantRequest, res: Response) => {
+  const resetToken = typeof req.body?.resetToken === 'string' ? req.body.resetToken : '';
+  const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
+
+  if (!resetToken || !newPassword) {
+    return res.status(400).json({ error: 'Reset token and new password are required.' });
+  }
+
+  if (!isPasswordStrongEnough(newPassword)) {
+    return res.status(400).json({
+      error: 'Password must be at least 8 characters and include uppercase, lowercase, a number, and a special character.',
+    });
+  }
+
+  try {
+    // The token is 256-bit random, so a global hash lookup is safe and lets the
+    // client avoid resending the email address.
+    const record = await prisma.verificationCode.findFirst({
+      where: { purpose: 'RESET_TOKEN', codeHash: hashCode(resetToken), consumedAt: null },
+    });
+
+    if (!record || record.expiresAt < new Date()) {
+      return res.status(410).json({ error: 'This reset link is invalid or has expired.' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { email: record.identifier } });
+    if (!user || user.status !== 'ACTIVE') {
+      return res.status(410).json({ error: 'This reset link is invalid or has expired.' });
+    }
+
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash: await bcrypt.hash(newPassword, 10) },
+      }),
+      prisma.verificationCode.update({
+        where: { id: record.id },
+        data: { consumedAt: new Date() },
+      }),
+      // Invalidate anything else outstanding for this account.
+      prisma.verificationCode.updateMany({
+        where: { identifier: record.identifier, consumedAt: null },
+        data: { consumedAt: new Date() },
+      }),
+    ]);
+
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('Reset-password error:', error);
+    return res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+router.post('/2fa/request', async (req: TenantRequest, res: Response) => {
+  const email = normalizeEmail(req.body?.email);
+
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required.' });
+  }
+
+  if (isRateLimited(rateKey(req, '2fa-request', email))) {
+    return res.status(429).json({ error: 'Too many code requests. Please wait a few minutes and try again.' });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({ where: { email } });
+
+    if (user && user.status === 'ACTIVE' && user.twoFactorEnabled) {
+      const code = generateOtpCode();
+      await issueCode(email, 'TWO_FACTOR', code, OTP_TTL_MS);
+      await sendVerificationCode(email, code, 'TWO_FACTOR');
+    }
+
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('2FA request error:', error);
+    return res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+router.post('/2fa/verify', async (req: TenantRequest, res: Response) => {
+  const email = normalizeEmail(req.body?.email);
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+
+  if (!email || !code) {
+    return res.status(400).json({ error: 'Email and verification code are required.' });
+  }
+
+  if (isRateLimited(rateKey(req, '2fa-verify', email))) {
+    return res.status(429).json({ error: 'Too many verification attempts. Please wait a few minutes and try again.' });
+  }
+
+  try {
+    const result = await consumeCode(email, 'TWO_FACTOR', code);
+
+    if (result === 'expired') {
+      return res.status(410).json({ error: 'Your verification code has expired. Please request a new one.' });
+    }
+    if (result === 'locked') {
+      return res.status(429).json({ error: 'Too many incorrect attempts. Please request a new code.' });
+    }
+    if (result === 'invalid') {
+      return res.status(401).json({ error: 'The verification code you entered is incorrect.' });
+    }
+
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('2FA verify error:', error);
     return res.status(500).json({ error: 'Internal server error.' });
   }
 });

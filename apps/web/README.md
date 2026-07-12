@@ -1,32 +1,21 @@
-# React + TypeScript + Vite
+# TMS Web (React + TypeScript + webpack)
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+The web frontend for the Tuition Management System. Pure React 19 with TypeScript, bundled by webpack 5 (`ts-loader`), linted with Oxlint.
 
-Currently, two official plugins are available:
+## Scripts
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+| Command | What it does |
+|---|---|
+| `npm run dev` | Starts `webpack-dev-server` in development mode and opens the browser. |
+| `npm run build` | Typechecks (`tsc -b`) then produces a production bundle with webpack. |
+| `npm run lint` | Runs Oxlint over the source. |
 
-## React Compiler
+## Structure
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- `src/main.tsx` — entry point; global styles come from `src/index.css` and `src/pages/auth/auth.css`.
+- `src/features/auth/` — authentication service layer (API-backed; talks to `services/api`).
+- `src/context/AuthContext.tsx` — session state, persistence, and role-based routing.
+- `src/pages/` — route-level screens per role (super admin, tenant, branch, teacher, staff, student, parent).
+- `webpack.config.*` — bundler configuration; no Vite is used in this app.
 
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
-```
-
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+The API server is expected at `http://localhost:3001/api` (see `src/services/api.ts`).

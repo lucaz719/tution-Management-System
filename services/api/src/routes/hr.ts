@@ -20,6 +20,15 @@ router.post(
     }
 
     try {
+      // Confirm the staff record belongs to the caller's tenant before writing.
+      const staffRecord = await prisma.staffRecord.findUnique({
+        where: { id: staffRecordId },
+        include: { user: true },
+      });
+      if (!staffRecord || staffRecord.user.tenantId !== req.tenantId) {
+        return res.status(404).json({ error: 'Staff record not found in your institution.' });
+      }
+
       const doc = await prisma.staffDocument.create({
         data: {
           staffRecordId,
@@ -31,17 +40,7 @@ router.post(
 
       return res.status(201).json({ message: 'Document uploaded successfully.', doc });
     } catch (error: any) {
-      return res.status(201).json({
-        message: 'Simulation Mode: Document uploaded successfully.',
-        doc: {
-          id: 'sim-doc-' + Math.floor(Math.random() * 1000),
-          staffRecordId,
-          documentType,
-          fileUrl,
-          expiryDate: expiryDate ? new Date(expiryDate) : null,
-          createdAt: new Date(),
-        },
-      });
+      return res.status(500).json({ error: 'Failed to upload document.', details: error.message });
     }
   }
 );
@@ -63,28 +62,15 @@ router.get(
             gte: today,
             lte: next30Days,
           },
+          // Scope to the caller's tenant — documents belong to staff whose user
+          // record carries the tenantId.
+          staffRecord: { user: { tenantId: req.tenantId! } },
         },
       });
 
       return res.status(200).json({ expiringDocs });
     } catch (error: any) {
-      // Simulation Mode Alerts
-      const today = new Date();
-      const expDate = new Date(today);
-      expDate.setDate(today.getDate() + 15); // Expiring in 15 days
-
-      return res.status(200).json({
-        expiringDocs: [
-          {
-            id: 'sim-doc-alert-1',
-            staffRecordId: 'staff-rec-001',
-            documentType: 'CONTRACT',
-            fileUrl: 'https://storage.tms.com.np/docs/contract_ram.pdf',
-            expiryDate: expDate,
-            daysRemaining: 15,
-          },
-        ],
-      });
+      return res.status(500).json({ error: 'Failed to load document alerts.', details: error.message });
     }
   }
 );

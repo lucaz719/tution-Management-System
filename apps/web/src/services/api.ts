@@ -26,7 +26,7 @@ export function removeAuthToken() {
 
 // Helper to get current tenantId
 export function getTenantId(): string | null {
-  return localStorage.getItem('tms_tenant_id');
+  return sessionStorage.getItem('tms_tenant_id') ?? localStorage.getItem('tms_tenant_id');
 }
 
 export function setTenantId(tenantId: string) {
@@ -75,16 +75,43 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 export const api = {
   // Authentication
   auth: {
+    // Session persistence (token/user/tenant scope) is owned by AuthContext,
+    // which honours the "remember me" choice.
     login: async (email: string, pass: string) => {
-      // Direct call to /auth/login
-      const data = await request<{ token: string; tenantId: string; user: any }>('/auth/login', {
+      return request<{ token: string; tenantId?: string; user: any }>('/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email, password: pass }),
       });
-      setAuthToken(data.token);
-      setTenantId(data.tenantId);
-      localStorage.setItem('tms_user', JSON.stringify(data.user));
-      return data;
+    },
+    requestPasswordReset: async (email: string) => {
+      return request<{ success: boolean }>('/auth/forgot-password', {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      });
+    },
+    verifyPasswordResetOtp: async (email: string, otp: string) => {
+      return request<{ resetToken: string }>('/auth/verify-reset-otp', {
+        method: 'POST',
+        body: JSON.stringify({ email, otp }),
+      });
+    },
+    resetPassword: async (resetToken: string, newPassword: string) => {
+      return request<{ success: boolean }>('/auth/reset-password', {
+        method: 'POST',
+        body: JSON.stringify({ resetToken, newPassword }),
+      });
+    },
+    requestTwoFactorCode: async (email: string) => {
+      return request<{ success: boolean }>('/auth/2fa/request', {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      });
+    },
+    verifyTwoFactorCode: async (email: string, code: string) => {
+      return request<{ success: boolean }>('/auth/2fa/verify', {
+        method: 'POST',
+        body: JSON.stringify({ email, code }),
+      });
     },
   },
 
@@ -101,10 +128,11 @@ export const api = {
     getPettyCash: async () => {
       return request<any[]>('/finances/petty-cash');
     },
-    approvePettyCash: async (id: string, action: 'APPROVE_L1' | 'APPROVE_L2') => {
-      return request<{ success: boolean; request: any }>(`/finances/petty-cash/${id}/approve`, {
+    approvePettyCash: async (id: string, action: 'APPROVE_L1' | 'APPROVE_L2', remarks?: string) => {
+      const level = action === 'APPROVE_L1' ? 'approve-l1' : 'approve-l2';
+      return request<{ message: string; pettyCash: any }>(`/finances/petty-cash/${level}/${id}`, {
         method: 'POST',
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ remarks }),
       });
     },
     updateConfig: async (vatRate: number, gracePeriod: number, pettyCashCap: number) => {
@@ -153,10 +181,104 @@ export const api = {
     }
   },
 
-  // Onboarding Requests
+  // Tenant dashboard summary (students, teachers, dues, leaves, per-branch)
+  tenant: {
+    getDashboard: async () => {
+      return request<{
+        activeStudentsCount: number;
+        activeTeachersCount: number;
+        totalOverdueAmountNpr: number;
+        pendingLeaveRequestsCount: number;
+        branchSummary: Array<{ branchId: string; branchName: string; activeStudents: number; staffRoles: number }>;
+      }>('/onboarding/dashboard');
+    },
+  },
+
+  // People / user provisioning (Tenant Admin + Branch Admin)
+  people: {
+    capabilities: async () => {
+      return request<{
+        isTenantAdmin: boolean;
+        isBranchAdmin: boolean;
+        canManagePeople: boolean;
+        creatableRoles: string[];
+        manageableBranches: Array<{ id: string; name: string }>;
+      }>('/users/me');
+    },
+    list: async () => {
+      const data = await request<{ users: any[] }>('/users');
+      return data.users ?? [];
+    },
+    createBranchAdmin: async (payload: { firstName: string; lastName: string; email: string; phone?: string; branchId: string }) => {
+      return request<{ message: string; user: any; temporaryPassword: string }>('/users/branch-admin', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    },
+    create: async (payload: { firstName: string; lastName: string; email: string; phone?: string; role: string; branchId: string }) => {
+      return request<{ message: string; user: any; temporaryPassword: string }>('/users', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    },
+  },
+
+  // Branch management (Tenant Admin)
+  branches: {
+    list: async () => {
+      const data = await request<{ branches: any[] }>('/branches');
+      return data.branches ?? [];
+    },
+    create: async (branch: {
+      name: string;
+      address: string;
+      latitude: number;
+      longitude: number;
+      radiusMeters?: number;
+      gracePeriodMinutes?: number;
+    }) => {
+      return request<{ message: string; branch: any }>('/branches', {
+        method: 'POST',
+        body: JSON.stringify(branch),
+      });
+    },
+    update: async (id: string, changes: Record<string, unknown>) => {
+      return request<{ message: string; branch: any }>(`/branches/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(changes),
+      });
+    },
+  },
+
+  // Onboarding & tenant provisioning (Super Admin)
   onboarding: {
     getRequests: async () => {
-      return request<any[]>('/onboarding/requests');
-    }
+      const data = await request<{ requests: any[] }>('/onboarding/requests');
+      return data.requests ?? [];
+    },
+    approveRequest: async (id: string, defaultBranchName?: string) => {
+      return request<{
+        message: string;
+        provisioned: {
+          tenantId: string;
+          tenantName: string;
+          primaryAdminUser: string;
+          defaultBranch: string;
+          temporaryPassword: string;
+        };
+      }>(`/onboarding/approve/${id}`, {
+        method: 'POST',
+        body: JSON.stringify({ defaultBranchName }),
+      });
+    },
+    rejectRequest: async (id: string) => {
+      return request<{ message: string; request: any }>(`/onboarding/reject/${id}`, {
+        method: 'POST',
+      });
+    },
+    getTenants: async () => {
+      const data = await request<{ tenants: any[] }>('/onboarding/tenants');
+      return data.tenants ?? [];
+    },
   }
 };

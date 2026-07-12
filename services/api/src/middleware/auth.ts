@@ -1,9 +1,8 @@
 import { Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { TenantRequest } from './tenant';
+import { JWT_SECRET } from '../utils/env';
 import { UserPayload } from '@tms/types';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'tms_default_secret_jwt_2026';
 
 export function authMiddleware(req: TenantRequest, res: Response, next: NextFunction) {
   const authHeader = req.headers['authorization'];
@@ -16,6 +15,20 @@ export function authMiddleware(req: TenantRequest, res: Response, next: NextFunc
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as UserPayload;
     req.user = decoded;
+
+    // The JWT tenant claim is authoritative. Regular users always operate in
+    // their own tenant regardless of what the X-Tenant-Id header says (spoof
+    // protection, and covers tenant-middleware bypass paths where req.tenantId
+    // would otherwise be undefined — Prisma treats an undefined filter as
+    // "match everything", which would leak cross-tenant data).
+    // Super Admin may target another tenant via the header for inspection.
+    const isSuperAdmin = decoded.roles?.some((role) => role.roleName === 'Super Admin');
+    if (isSuperAdmin) {
+      req.tenantId = req.tenantId ?? (req.headers['x-tenant-id'] as string | undefined) ?? decoded.tenantId;
+    } else {
+      req.tenantId = decoded.tenantId;
+    }
+
     next();
   } catch (error) {
     return res.status(401).json({ error: 'Invalid or expired authentication token.' });
@@ -32,14 +45,14 @@ export function hasPermission(requiredPermission: string) {
     const user = req.user as UserPayload;
 
     // 1. Super Admin global bypass
-    const isSuperAdmin = user.roles.some(r => r.roleName === 'Super Admin');
+    const isSuperAdmin = user.roles.some((r: any) => r.roleName === 'Super Admin');
     if (isSuperAdmin) {
       return next();
     }
 
     // 2. Tenant Admin global bypass (scoped to their specific tenant)
     const isTenantAdmin = user.roles.some(
-      r => r.roleName === 'Tenant Admin' && user.tenantId === req.tenantId
+      (r: any) => r.roleName === 'Tenant Admin' && user.tenantId === req.tenantId
     );
     if (isTenantAdmin) {
       return next();
@@ -54,7 +67,7 @@ export function hasPermission(requiredPermission: string) {
       (req.headers['x-branch-id'] as string);
 
     // Verify if the user has the required permission in a relevant branch context
-    const hasAccess = user.roles.some(role => {
+    const hasAccess = user.roles.some((role: any) => {
       // Must possess the exact permission
       const hasPerm = role.permissions.includes(requiredPermission);
 

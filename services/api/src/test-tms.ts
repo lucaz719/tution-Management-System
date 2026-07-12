@@ -1,9 +1,9 @@
 import app from './server';
 import jwt from 'jsonwebtoken';
 import { UserPayload } from '@tms/types';
+import { JWT_SECRET } from './utils/env';
 
 const PORT = 3001;
-const JWT_SECRET = process.env.JWT_SECRET || 'tms_default_secret_jwt_2026';
 
 // Build mock Super Admin token to approve onboarding
 const mockSuperAdminToken = jwt.sign(
