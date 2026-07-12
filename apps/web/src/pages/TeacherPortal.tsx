@@ -2,139 +2,204 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { StatusBadge } from '../components/ui/StatusBadge';
-import { TimetableList, type TimetableListItem } from '../components/ui/TimetableList';
+import { useToast } from '../components/ui/Toast';
 import { api } from '../services/api';
 
 interface TeacherChatMessage {
-  sender: 'Parent' | 'Teacher';
+  sender: string;
   text: string;
 }
 
-interface DailyLogItem {
-  id: string;
+interface TodayClass {
+  sessionId: string;
+  classId: string;
   className: string;
-  dueAt: string;
-  status: 'pending' | 'submitted';
+  courseName: string;
+  schedule: unknown;
+  status: string;
+  dailyUpdateSubmitted: boolean;
+  checkInTime: string | null;
+  checkOutTime: string | null;
 }
 
-const todaysClasses: TimetableListItem[] = [
-  { id: 'tc-1', time: '07:15', title: 'Grade 10 Physics', subtitle: 'Kinematics revision', room: 'Lab 1', detail: '36 students', status: 'Starting Soon', statusVariant: 'info' },
-  { id: 'tc-2', time: '09:00', title: 'Bridge Course Science', subtitle: 'Concept drill', room: 'Room 305', detail: '28 students', status: 'In Progress', statusVariant: 'gold' },
-  { id: 'tc-3', time: '12:10', title: 'Grade 9 Mechanics', subtitle: 'Practice session', room: 'Room 212', detail: '32 students', status: 'Completed', statusVariant: 'success' },
-];
+interface PendingUpdate {
+  sessionId: string;
+  classId: string;
+  className: string;
+  courseName: string;
+  date: string;
+}
 
-const initialDailyLogs: DailyLogItem[] = [
-  { id: 'log-1', className: 'Grade 10 Physics', dueAt: 'Before 10:30', status: 'pending' },
-  { id: 'log-2', className: 'Bridge Course Science', dueAt: 'Before 12:45', status: 'pending' },
-  { id: 'log-3', className: 'Grade 9 Mechanics', dueAt: 'Submitted 13:05', status: 'submitted' },
-];
+interface TeacherDashboard {
+  teacher: { id: string; name: string };
+  branch: { id: string; name: string; latitude: number; longitude: number; radiusMeters: number } | null;
+  attendance: { checkedIn: boolean; lastStampType: string | null; lastStampAt: string | null };
+  todayClasses: TodayClass[];
+  pendingUpdates: PendingUpdate[];
+}
+
+function readSessionStatus(status: string): { label: string; variant: 'info' | 'gold' | 'success' | 'warning' | 'error' } {
+  switch (status) {
+    case 'PRESENT_CONFIRMED':
+      return { label: 'Confirmed', variant: 'success' };
+    case 'PRESENT_UPDATE_PENDING':
+      return { label: 'Update pending', variant: 'gold' };
+    case 'PARTIAL_PRESENCE':
+      return { label: 'Partial', variant: 'warning' };
+    case 'UNSCHEDULED_PRESENCE':
+      return { label: 'Unscheduled', variant: 'info' };
+    case 'ABSENT':
+      return { label: 'Absent', variant: 'error' };
+    default:
+      return { label: status, variant: 'info' };
+  }
+}
+
+// Promise wrapper around the browser geolocation API.
+function getCurrentPosition(): Promise<GeolocationPosition> {
+  return new Promise((resolve, reject) => {
+    if (!('geolocation' in navigator)) {
+      reject(new Error('Geolocation is not available in this browser.'));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 12000,
+      maximumAge: 0,
+    });
+  });
+}
 
 export function TeacherPortal() {
-  const [teacherCheckedIn, setTeacherCheckedIn] = useState(false);
-  const [geoStatus, setGeoStatus] = useState<'IDLE' | 'CHECKING' | 'SUCCESS' | 'OUT_OF_BOUNDS'>('IDLE');
-  const [lessonSummary, setLessonSummary] = useState('');
-  const [requiresCatchUpLog, setRequiresCatchUpLog] = useState(false);
-  const [quickLogMessage, setQuickLogMessage] = useState('');
+  const { showToast } = useToast();
+  const [dashboard, setDashboard] = useState<TeacherDashboard | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [attendanceBusy, setAttendanceBusy] = useState(false);
+
+  const [activeLogSession, setActiveLogSession] = useState('');
+  const [logDraft, setLogDraft] = useState('');
+  const [logBusy, setLogBusy] = useState(false);
+
   const [teacherMessage, setTeacherMessage] = useState('');
   const [teacherChatHistory, setTeacherChatHistory] = useState<TeacherChatMessage[]>([]);
-  const [dailyLogs, setDailyLogs] = useState<DailyLogItem[]>(initialDailyLogs);
-  const [isLoading, setIsLoading] = useState(true);
+  const [chatLoading, setChatLoading] = useState(true);
 
-  const pendingLogCount = useMemo(() => dailyLogs.filter((log) => log.status === 'pending').length, [dailyLogs]);
+  const pendingCount = dashboard?.pendingUpdates.length ?? 0;
+  const checkedIn = dashboard?.attendance.checkedIn ?? false;
 
-  const loadTeacherData = async () => {
+  const loadDashboard = async () => {
     setIsLoading(true);
-
+    setErrorMsg('');
     try {
-      const messages = await api.chat.getMessages() as TeacherChatMessage[];
-      setTeacherChatHistory(messages);
+      const data = await api.teacher.getDashboard();
+      setDashboard(data);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      console.warn('API error loading messages, using local mocks:', message);
-      setTeacherChatHistory([
-        { sender: 'Parent', text: 'Namaste sir, will there be an extra math class this Friday?' },
-        { sender: 'Teacher', text: 'Namaste! Yes, we have scheduled a review session at 3 PM.' },
-      ]);
+      setErrorMsg(error instanceof Error ? error.message : 'Failed to load your workspace.');
     } finally {
-      window.setTimeout(() => setIsLoading(false), 700);
+      setIsLoading(false);
+    }
+  };
+
+  const loadChat = async () => {
+    setChatLoading(true);
+    try {
+      const messages = (await api.chat.getMessages()) as TeacherChatMessage[];
+      setTeacherChatHistory(Array.isArray(messages) ? messages : []);
+    } catch {
+      setTeacherChatHistory([]);
+    } finally {
+      setChatLoading(false);
     }
   };
 
   useEffect(() => {
-    void loadTeacherData();
+    void loadDashboard();
+    void loadChat();
   }, []);
 
-  const handleTeacherMarkIn = async () => {
-    if (requiresCatchUpLog) {
-      setQuickLogMessage('Complete the catch-up daily update before marking in.');
+  const handleMarkAttendance = async () => {
+    if (!dashboard?.branch) {
+      showToast('No branch is assigned to your account. Contact your administrator.', 'error');
+      return;
+    }
+    if (!checkedIn && pendingCount > 0) {
+      showToast('Submit your pending daily updates before marking in.', 'error');
       return;
     }
 
-    setGeoStatus('CHECKING');
+    setAttendanceBusy(true);
+    try {
+      const position = await getCurrentPosition();
+      const { latitude, longitude, accuracy } = position.coords;
+      const branchId = dashboard.branch.id;
 
-    window.setTimeout(async () => {
-      try {
-        await api.attendance.markIn(27.6931, 85.3445);
-        setGeoStatus('SUCCESS');
-        setTeacherCheckedIn(true);
-      } catch {
-        setGeoStatus('SUCCESS');
-        setTeacherCheckedIn(true);
+      if (checkedIn) {
+        await api.attendance.markOut(branchId, latitude, longitude, accuracy);
+        showToast('Marked out successfully.', 'success');
+      } else {
+        const result = await api.attendance.markIn(branchId, latitude, longitude, accuracy);
+        showToast(
+          `Marked in — ${result.geofenceMeta?.distanceFromBranchCenterMeters ?? 0}m from branch center.`,
+          'success'
+        );
       }
-    }, 900);
-  };
-
-  const handleTeacherMarkOut = async () => {
-    try {
-      await api.attendance.markOut();
-    } catch {
-      // noop: dashboard retains local state for demo mode
+      await loadDashboard();
+    } catch (error: unknown) {
+      const message =
+        error instanceof GeolocationPositionError || (error as GeolocationPositionError)?.code
+          ? 'Location permission denied or unavailable. Enable location access to mark attendance.'
+          : error instanceof Error
+            ? error.message
+            : 'Attendance could not be recorded.';
+      showToast(message, 'error');
+    } finally {
+      setAttendanceBusy(false);
     }
-
-    setTeacherCheckedIn(false);
-    setGeoStatus('IDLE');
   };
 
-  const handleLessonUpdateSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const openLog = (sessionId: string) => {
+    setActiveLogSession(sessionId);
+    setLogDraft('');
+  };
 
-    if (!lessonSummary.trim()) {
+  const submitLog = async (sessionId: string) => {
+    if (!logDraft.trim()) {
+      showToast('Write a short lesson summary first.', 'error');
       return;
     }
-
+    setLogBusy(true);
     try {
-      await api.attendance.submitDailySummary(lessonSummary);
-    } catch {
-      // noop: demo mode keeps local state only
+      await api.teacher.submitSessionUpdate(sessionId, logDraft.trim());
+      showToast('Daily update submitted.', 'success');
+      setActiveLogSession('');
+      setLogDraft('');
+      await loadDashboard();
+    } catch (error: unknown) {
+      showToast(error instanceof Error ? error.message : 'Failed to submit the update.', 'error');
+    } finally {
+      setLogBusy(false);
     }
-
-    setRequiresCatchUpLog(false);
-    setQuickLogMessage('Daily lesson summary submitted. Lockout cleared.');
-    setLessonSummary('');
   };
 
-  const handleSendTeacherMessage = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSendMessage = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-
-    if (!teacherMessage.trim()) {
-      return;
-    }
-
-    const nextMessage: TeacherChatMessage = { sender: 'Teacher', text: teacherMessage };
-    setTeacherChatHistory((previous) => [...previous, nextMessage]);
-
-    try {
-      await api.chat.sendMessage(teacherMessage);
-    } catch {
-      // noop: local echo already stored
-    }
-
+    if (!teacherMessage.trim()) return;
+    const text = teacherMessage.trim();
+    setTeacherChatHistory((prev) => [...prev, { sender: 'Teacher', text }]);
     setTeacherMessage('');
+    try {
+      await api.chat.sendMessage(text);
+    } catch (error: unknown) {
+      showToast(error instanceof Error ? error.message : 'Message could not be sent.', 'error');
+    }
   };
 
-  const handleSubmitClassLog = (id: string) => {
-    setDailyLogs((previous) => previous.map((log) => (log.id === id ? { ...log, status: 'submitted', dueAt: 'Submitted just now' } : log)));
-  };
+  const attendanceLabel = useMemo(() => {
+    if (!dashboard) return '—';
+    if (checkedIn) return 'On campus';
+    return dashboard.attendance.lastStampType === 'OUT' ? 'Marked out' : 'Not marked in';
+  }, [dashboard, checkedIn]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -142,58 +207,109 @@ export function TeacherPortal() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
           <div>
             <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '20px', fontWeight: 600, color: 'var(--color-text)' }}>Daily Academic Log</h3>
-            <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.7)', fontSize: '13px' }}>Attendance geofence, class updates, and parent communication in one workspace.</p>
+            <p style={{ marginTop: '4px', color: 'var(--text-muted)', fontSize: '13px' }}>
+              {dashboard?.branch ? `Geofenced to ${dashboard.branch.name}.` : 'Attendance, class updates, and parent communication.'}
+            </p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <StatusBadge variant={geoStatus === 'SUCCESS' ? 'success' : geoStatus === 'CHECKING' ? 'warning' : 'info'}>{geoStatus}</StatusBadge>
+            <StatusBadge variant={checkedIn ? 'success' : 'info'}>{attendanceLabel}</StatusBadge>
             <Button
-              variant={teacherCheckedIn ? 'outline' : 'primary'}
-              onClick={() => void (teacherCheckedIn ? handleTeacherMarkOut() : handleTeacherMarkIn())}
-              style={teacherCheckedIn ? { borderColor: 'rgba(15, 76, 138, 0.16)' } : { background: 'var(--color-primary-light)' }}
+              variant={checkedIn ? 'outline' : 'primary'}
+              onClick={() => void handleMarkAttendance()}
+              disabled={attendanceBusy || isLoading}
+              style={checkedIn ? { borderColor: 'rgba(21, 96, 189, 0.16)' } : { background: 'var(--color-primary-light)' }}
             >
-              <span className="material-symbols-outlined">{teacherCheckedIn ? 'logout' : 'person_pin_circle'}</span>
-              {teacherCheckedIn ? 'Mark Out' : 'Mark In'}
+              <span className="material-symbols-outlined">{checkedIn ? 'logout' : 'person_pin_circle'}</span>
+              {attendanceBusy ? 'Locating…' : checkedIn ? 'Mark Out' : 'Mark In'}
             </Button>
           </div>
         </div>
       </Card>
 
+      {errorMsg ? <StatusBadge variant="error">{errorMsg}</StatusBadge> : null}
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '18px' }}>
         <Card hoverable={false}>
-          <div style={{ marginBottom: '18px' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>My Classes Today</h3>
-            <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Time-ordered teaching plan with room and enrollment.</p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', gap: '12px' }}>
+            <div>
+              <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>My Classes Today</h3>
+              <p style={{ marginTop: '4px', color: 'var(--text-muted)', fontSize: '13px' }}>Sessions scheduled for you today.</p>
+            </div>
+            <StatusBadge variant="info">{dashboard?.todayClasses.length ?? 0}</StatusBadge>
           </div>
-          <TimetableList items={todaysClasses} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {!dashboard || dashboard.todayClasses.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: '14px', textAlign: 'center', padding: '20px 0' }}>
+                {isLoading ? 'Loading your schedule…' : 'No classes scheduled for you today.'}
+              </p>
+            ) : (
+              dashboard.todayClasses.map((cls) => {
+                const status = readSessionStatus(cls.status);
+                return (
+                  <div key={cls.sessionId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.1)', background: 'var(--color-bg)', flexWrap: 'wrap' }}>
+                    <div>
+                      <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-text)' }}>{cls.className}</div>
+                      <div style={{ marginTop: '4px', color: 'var(--text-muted)', fontSize: '12px' }}>{cls.courseName}</div>
+                    </div>
+                    <StatusBadge variant={status.variant}>{status.label}</StatusBadge>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </Card>
 
         <Card hoverable={false}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', gap: '12px' }}>
             <div>
               <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Pending Daily Update Log</h3>
-              <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Submit per-class log items before end of day.</p>
+              <p style={{ marginTop: '4px', color: 'var(--text-muted)', fontSize: '13px' }}>Submit each class summary — attendance stays locked until these are cleared.</p>
             </div>
-            <StatusBadge variant={pendingLogCount > 0 ? 'gold' : 'success'}>{pendingLogCount} pending</StatusBadge>
+            <StatusBadge variant={pendingCount > 0 ? 'gold' : 'success'}>{pendingCount} pending</StatusBadge>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {dailyLogs.map((log) => (
-              <div key={log.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(15, 76, 138, 0.1)', background: '#FFFFFF', flexWrap: 'wrap' }}>
-                <div>
-                  <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-text)' }}>{log.className}</div>
-                  <div style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.62)', fontSize: '12px' }}>{log.dueAt}</div>
-                </div>
-                {log.status === 'pending' ? (
-                  <Button variant="outline" onClick={() => handleSubmitClassLog(log.id)} style={{ minHeight: '36px', height: '36px', padding: '8px 16px', borderColor: 'rgba(15, 76, 138, 0.16)' }}>
-                    Submit
-                  </Button>
-                ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-success)', fontSize: '13px', fontWeight: 700 }}>
-                    <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>check_circle</span>
-                    Completed
+            {!dashboard || dashboard.pendingUpdates.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: '14px', textAlign: 'center', padding: '20px 0' }}>
+                {isLoading ? 'Loading…' : 'All caught up — no pending updates.'}
+              </p>
+            ) : (
+              dashboard.pendingUpdates.map((item) => (
+                <div key={item.sessionId} style={{ padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.1)', background: 'var(--color-bg)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                    <div>
+                      <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-text)' }}>{item.className}</div>
+                      <div style={{ marginTop: '4px', color: 'var(--text-muted)', fontSize: '12px' }}>
+                        {item.courseName} · {new Date(item.date).toLocaleDateString()}
+                      </div>
+                    </div>
+                    {activeLogSession !== item.sessionId ? (
+                      <Button variant="outline" onClick={() => openLog(item.sessionId)} style={{ minHeight: '36px', height: '36px', padding: '8px 16px', borderColor: 'rgba(21, 96, 189, 0.16)' }}>
+                        Add update
+                      </Button>
+                    ) : null}
                   </div>
-                )}
-              </div>
-            ))}
+                  {activeLogSession === item.sessionId ? (
+                    <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <textarea
+                        value={logDraft}
+                        onChange={(event) => setLogDraft(event.target.value)}
+                        placeholder="Summary of what was taught, homework assigned, etc."
+                        autoFocus
+                        style={{ minHeight: '84px', padding: '12px 14px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.14)', background: 'var(--color-bg)', color: 'var(--color-text)', fontFamily: 'var(--font-ui)', resize: 'vertical' }}
+                      />
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        <Button onClick={() => void submitLog(item.sessionId)} disabled={logBusy} style={{ minHeight: '38px', height: '38px', background: 'var(--color-primary-light)' }}>
+                          {logBusy ? 'Submitting…' : 'Submit update'}
+                        </Button>
+                        <Button variant="outline" onClick={() => { setActiveLogSession(''); setLogDraft(''); }} style={{ minHeight: '38px', height: '38px', borderColor: 'rgba(21, 96, 189, 0.16)' }}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ))
+            )}
           </div>
         </Card>
       </div>
@@ -204,86 +320,54 @@ export function TeacherPortal() {
             <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Homework Submissions</h3>
             <StatusBadge variant="gold">Phase 2</StatusBadge>
           </div>
-          <div style={{ filter: 'blur(2px)', opacity: 0.52, display: 'flex', flexDirection: 'column', gap: '12px', pointerEvents: 'none' }}>
-            {[
-              'Grade 10 Physics · 21/36 submitted',
-              'Bridge Course Science · 14/28 submitted',
-              'Grade 9 Mechanics · 27/32 submitted',
-            ].map((item) => (
-              <div key={item} style={{ padding: '14px 16px', borderRadius: '12px', background: '#FFFFFF', border: '1px solid rgba(15, 76, 138, 0.1)', color: 'var(--color-text)', fontSize: '14px', fontWeight: 600 }}>
-                {item}
-              </div>
-            ))}
-          </div>
-          <div style={{ position: 'absolute', inset: 'auto 20px 20px 20px', padding: '14px 16px', borderRadius: '12px', background: 'rgba(243, 156, 18, 0.12)', color: 'var(--color-accent)', fontSize: '13px', fontWeight: 700 }}>
-            Preview locked until the Phase 2 homework workspace is enabled.
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '28px 0', color: 'var(--text-muted)', textAlign: 'center' }}>
+            <span className="material-symbols-outlined" style={{ fontSize: '40px', color: 'rgba(21, 96, 189, 0.24)' }}>assignment</span>
+            <p style={{ fontSize: '13px', maxWidth: '260px' }}>The homework workspace unlocks in Phase 2. Class updates and attendance are fully active now.</p>
           </div>
         </Card>
 
         <Card hoverable={false}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: '18px' }}>
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '14px', flexWrap: 'wrap' }}>
-                <div>
-                  <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Quick Daily Summary</h3>
-                  <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Existing lesson update workflow preserved.</p>
-                </div>
-                {quickLogMessage ? <StatusBadge variant="success">Saved</StatusBadge> : null}
-              </div>
-              <form onSubmit={handleLessonUpdateSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <textarea
-                  value={lessonSummary}
-                  onChange={(event) => setLessonSummary(event.target.value)}
-                  placeholder="Today we covered Newton's laws and assigned problem set 1-5."
-                  style={{ minHeight: '112px', padding: '12px 14px', borderRadius: '12px', border: '1px solid rgba(15, 76, 138, 0.14)', background: '#FFFFFF', color: 'var(--color-text)', fontFamily: 'var(--font-ui)', resize: 'vertical' }}
-                />
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
-                  <Button type="submit" style={{ background: 'var(--color-primary-light)' }}>Submit Summary</Button>
-                  {quickLogMessage ? <span style={{ color: 'var(--color-success)', fontSize: '12px', fontWeight: 700 }}>{quickLogMessage}</span> : null}
-                </div>
-              </form>
-            </div>
-
-            <div>
-              <div style={{ marginBottom: '14px' }}>
-                <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Thread: Parent (Shyam Bahadur)</h3>
-                <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Messages stay available while homework tools are still pending.</p>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
-                {isLoading
-                  ? Array.from({ length: 3 }, (_, index) => (
-                      <div key={`chat-skeleton-${index}`} style={{ alignSelf: index % 2 === 0 ? 'flex-start' : 'flex-end', width: index % 2 === 0 ? '72%' : '60%', height: '42px', borderRadius: '12px', background: 'rgba(15, 76, 138, 0.08)' }} />
-                    ))
-                  : teacherChatHistory.map((chat, index) => (
-                      <div
-                        key={`${chat.sender}-${index}`}
-                        style={{
-                          alignSelf: chat.sender === 'Teacher' ? 'flex-end' : 'flex-start',
-                          background: chat.sender === 'Teacher' ? 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-light) 100%)' : '#FFFFFF',
-                          color: chat.sender === 'Teacher' ? '#FFFFFF' : 'var(--color-text)',
-                          padding: '10px 14px',
-                          borderRadius: '12px',
-                          maxWidth: '80%',
-                          fontSize: '13px',
-                          border: chat.sender === 'Teacher' ? 'none' : '1px solid rgba(15, 76, 138, 0.1)',
-                        }}
-                      >
-                        {chat.text}
-                      </div>
-                    ))}
-              </div>
-              <form onSubmit={handleSendTeacherMessage} style={{ display: 'flex', gap: '8px', marginTop: '14px' }}>
-                <input
-                  type="text"
-                  value={teacherMessage}
-                  onChange={(event) => setTeacherMessage(event.target.value)}
-                  placeholder="Type message..."
-                  style={{ flexGrow: 1, padding: '10px 14px', borderRadius: '999px', border: '1px solid rgba(15, 76, 138, 0.14)', background: '#FFFFFF', color: 'var(--color-text)', fontFamily: 'var(--font-ui)' }}
-                />
-                <Button variant="outline" type="submit" style={{ minHeight: '40px', height: '40px', padding: '8px 16px', borderColor: 'rgba(15, 76, 138, 0.16)' }}>Send</Button>
-              </form>
-            </div>
+          <div style={{ marginBottom: '14px' }}>
+            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Parent Messages</h3>
+            <p style={{ marginTop: '4px', color: 'var(--text-muted)', fontSize: '13px' }}>Direct thread with parents.</p>
           </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '200px', overflowY: 'auto', paddingRight: '4px' }}>
+            {chatLoading ? (
+              Array.from({ length: 3 }, (_, index) => (
+                <div key={`chat-skeleton-${index}`} style={{ alignSelf: index % 2 === 0 ? 'flex-start' : 'flex-end', width: index % 2 === 0 ? '72%' : '60%', height: '42px', borderRadius: '12px', background: 'rgba(21, 96, 189, 0.08)' }} />
+              ))
+            ) : teacherChatHistory.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: '13px', textAlign: 'center', padding: '18px 0' }}>No messages yet.</p>
+            ) : (
+              teacherChatHistory.map((chat, index) => (
+                <div
+                  key={`${chat.sender}-${index}`}
+                  style={{
+                    alignSelf: chat.sender === 'Teacher' ? 'flex-end' : 'flex-start',
+                    background: chat.sender === 'Teacher' ? 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-light) 100%)' : 'var(--color-bg)',
+                    color: chat.sender === 'Teacher' ? '#FFFFFF' : 'var(--color-text)',
+                    padding: '10px 14px',
+                    borderRadius: '12px',
+                    maxWidth: '80%',
+                    fontSize: '13px',
+                    border: chat.sender === 'Teacher' ? 'none' : '1px solid rgba(21, 96, 189, 0.1)',
+                  }}
+                >
+                  {chat.text}
+                </div>
+              ))
+            )}
+          </div>
+          <form onSubmit={handleSendMessage} style={{ display: 'flex', gap: '8px', marginTop: '14px' }}>
+            <input
+              type="text"
+              value={teacherMessage}
+              onChange={(event) => setTeacherMessage(event.target.value)}
+              placeholder="Type message…"
+              style={{ flexGrow: 1, padding: '10px 14px', borderRadius: '999px', border: '1px solid rgba(21, 96, 189, 0.14)', background: 'var(--color-bg)', color: 'var(--color-text)', fontFamily: 'var(--font-ui)' }}
+            />
+            <Button variant="outline" type="submit" style={{ minHeight: '40px', height: '40px', padding: '8px 16px', borderColor: 'rgba(21, 96, 189, 0.16)' }}>Send</Button>
+          </form>
         </Card>
       </div>
     </div>

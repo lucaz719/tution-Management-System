@@ -184,7 +184,7 @@ export function SuperAdminDashboard() {
             requests.map((request) => (
               <div
                 key={request.id}
-                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(15, 76, 138, 0.1)', background: '#FFFFFF', flexWrap: 'wrap' }}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.1)', background: '#FFFFFF', flexWrap: 'wrap' }}
               >
                 <div style={{ minWidth: '220px' }}>
                   <p style={{ fontWeight: 700, fontSize: '15px', color: 'var(--color-text)' }}>{request.name}</p>
@@ -240,7 +240,7 @@ export function SuperAdminDashboard() {
             tenants.slice(0, 5).map((tenant) => (
               <div
                 key={tenant.id}
-                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(15, 76, 138, 0.1)', background: '#FFFFFF', flexWrap: 'wrap' }}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.1)', background: '#FFFFFF', flexWrap: 'wrap' }}
               >
                 <div>
                   <p style={{ fontWeight: 700, fontSize: '15px', color: 'var(--color-text)' }}>{tenant.name}</p>
@@ -270,7 +270,7 @@ export function SuperAdminDashboard() {
               </p>
             </div>
 
-            <div style={{ marginTop: '18px', padding: '16px', borderRadius: '12px', background: 'rgba(15, 76, 138, 0.06)', border: '1px solid rgba(15, 76, 138, 0.12)' }}>
+            <div style={{ marginTop: '18px', padding: '16px', borderRadius: '12px', background: 'rgba(21, 96, 189, 0.06)', border: '1px solid rgba(21, 96, 189, 0.12)' }}>
               <p style={{ fontSize: '12px', fontWeight: 700, color: 'rgba(44, 62, 80, 0.7)' }}>PRIMARY ADMIN LOGIN</p>
               <p style={{ marginTop: '8px', fontSize: '14px', fontWeight: 700, color: 'var(--color-text)', wordBreak: 'break-all' }}>{provisioned.primaryAdminUser}</p>
               <p style={{ marginTop: '10px', fontSize: '12px', fontWeight: 700, color: 'rgba(44, 62, 80, 0.7)' }}>TEMPORARY PASSWORD (shown once)</p>

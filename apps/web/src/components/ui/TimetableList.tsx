@@ -29,7 +29,7 @@ export function TimetableList({ items }: TimetableListProps) {
               minWidth: '620px',
               padding: '14px 16px',
               borderRadius: '12px',
-              border: '1px solid rgba(15, 76, 138, 0.1)',
+              border: '1px solid rgba(21, 96, 189, 0.1)',
               background: '#FFFFFF',
             }}
           >

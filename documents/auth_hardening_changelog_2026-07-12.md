@@ -191,7 +191,27 @@ Built the browser UI for the provisioning hierarchy from §11 — a "Staff & Stu
 
 ---
 
-## 13. Remaining Work
+## 13. Teacher Portal — Real Logic Wiring (2026-07-13)
+
+Replaced the fully-mocked Teacher portal with live, backend-driven logic and fixed the bugs that would have made it non-functional.
+
+**Bugs fixed:**
+- **Permission mismatch:** attendance routes require `mark_geo_attendance` but the Teacher role only had `mark_attendance` — teachers would have been 403'd from marking in. Added `mark_geo_attendance` to the Teacher role catalogue, and made `ensureTenantRole()` re-sync permissions on every call so existing role rows aren't left stale.
+- **Wrong API paths/bodies:** the web client called `/attendance/mark-in|mark-out` (don't exist; real routes are `/attendance/in|out`) and omitted the required `branchId` + `gpsAccuracy`; daily summary posted to a nonexistent `/courses/lesson-update`. All corrected.
+
+**New backend** (`services/api/src/routes/teacher.ts`):
+- `GET /teacher/dashboard` — consolidated real data: today's sessions (class + course), the pending daily-update gate (sessions with `dailyUpdateSubmitted=false`), current attendance state (from today's stamps), and the branch geofence needed to mark in.
+- `POST /teacher/session/:id/update` — ownership-checked; submitting a summary sets `dailyUpdateSubmitted=true` / `PRESENT_CONFIRMED`, clearing it from the gate.
+
+**Frontend** (`TeacherPortal.tsx` rewritten): all mock arrays removed. "My Classes Today" and "Pending Daily Update Log" are live; each pending item has an inline update form. Mark In/Out uses the browser's real geolocation and posts to the geofenced endpoint. Homework card is an honest Phase-2 placeholder; parent chat is real.
+
+**Verified end-to-end** as the Sanskardip teacher: pending gate blocks mark-in (403) → submitting both updates clears the gate → mark-in at branch coords succeeds (0m) → a distant coordinate is rejected as a geofence violation → checked-in state tracks correctly. Seeded a Grade 10 Physics course + two classes + today's sessions in Damak so the portal is populated (reset to a clean "2 pending / not marked in" starting state).
+
+> Browser note: mark-in uses the device's actual GPS, so it will report a geofence violation unless you're physically at Damak (26.6586, 87.7025) — that's the security working as designed. The pending-gate and update-submission flows are fully testable from any location.
+
+---
+
+## 14. Remaining Work
 
 | Item | Status |
 |---|---|

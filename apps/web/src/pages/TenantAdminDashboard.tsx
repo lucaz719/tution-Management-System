@@ -194,7 +194,7 @@ export function TenantAdminDashboard() {
               </p>
             ) : (
               dashboard.branchSummary.map((branch) => (
-                <div key={branch.branchId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '12px 14px', borderRadius: '12px', border: '1px solid rgba(15, 76, 138, 0.1)', background: '#FFFFFF' }}>
+                <div key={branch.branchId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '12px 14px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.1)', background: '#FFFFFF' }}>
                   <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-text)' }}>{branch.branchName}</span>
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <StatusBadge variant="info">{branch.activeStudents} students</StatusBadge>
@@ -231,7 +231,7 @@ export function TenantAdminDashboard() {
             <StatusBadge variant="info">{pl?.month ?? '—'}</StatusBadge>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '14px' }}>
-            <div style={{ padding: '18px', borderRadius: '12px', background: 'rgba(46, 158, 91, 0.08)', border: '1px solid rgba(46, 158, 91, 0.18)' }}>
+            <div style={{ padding: '18px', borderRadius: '12px', background: 'rgba(0, 171, 102, 0.08)', border: '1px solid rgba(0, 171, 102, 0.18)' }}>
               <p style={{ color: 'rgba(44, 62, 80, 0.7)', fontSize: '12px', fontWeight: 700 }}>COLLECTED REVENUE</p>
               <p style={{ marginTop: '8px', fontFamily: 'var(--font-display)', fontSize: '24px', fontWeight: 600, color: 'var(--color-success)' }}>
                 NPR {(pl?.revenue ?? 0).toLocaleString()}
@@ -264,7 +264,7 @@ export function TenantAdminDashboard() {
                 type="number"
                 value={vatRate}
                 onChange={(event) => setVatRate(Number(event.target.value))}
-                style={{ padding: '12px 14px', borderRadius: '12px', border: '1px solid rgba(15, 76, 138, 0.14)', background: '#FFFFFF', color: 'var(--color-text)', fontFamily: 'var(--font-ui)' }}
+                style={{ padding: '12px 14px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.14)', background: '#FFFFFF', color: 'var(--color-text)', fontFamily: 'var(--font-ui)' }}
               />
               <p style={{ color: 'rgba(44, 62, 80, 0.62)', fontSize: '11px' }}>Required for Nepalese VAT compliance.</p>
             </div>
@@ -274,7 +274,7 @@ export function TenantAdminDashboard() {
                 type="number"
                 value={gracePeriod}
                 onChange={(event) => setGracePeriod(Number(event.target.value))}
-                style={{ padding: '12px 14px', borderRadius: '12px', border: '1px solid rgba(15, 76, 138, 0.14)', background: '#FFFFFF', color: 'var(--color-text)', fontFamily: 'var(--font-ui)' }}
+                style={{ padding: '12px 14px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.14)', background: '#FFFFFF', color: 'var(--color-text)', fontFamily: 'var(--font-ui)' }}
               />
               <p style={{ color: 'rgba(44, 62, 80, 0.62)', fontSize: '11px' }}>Late attendance buffer before automatic mark out.</p>
             </div>
@@ -284,7 +284,7 @@ export function TenantAdminDashboard() {
                 type="number"
                 value={pettyCashCap}
                 onChange={(event) => setPettyCashCap(Number(event.target.value))}
-                style={{ padding: '12px 14px', borderRadius: '12px', border: '1px solid rgba(15, 76, 138, 0.14)', background: '#FFFFFF', color: 'var(--color-text)', fontFamily: 'var(--font-ui)' }}
+                style={{ padding: '12px 14px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.14)', background: '#FFFFFF', color: 'var(--color-text)', fontFamily: 'var(--font-ui)' }}
               />
               <p style={{ color: 'rgba(44, 62, 80, 0.62)', fontSize: '11px' }}>Resets automatically on the first day of each month.</p>
             </div>

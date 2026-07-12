@@ -160,8 +160,8 @@ export function OTPInput(props: OTPInputProps) {
               width: 'clamp(40px, 12vw, 48px)',
               height: '56px',
               borderRadius: 'var(--radius-sm)',
-              border: `1.5px solid ${props.error ? 'var(--color-error)' : hasValue || isFocused ? 'var(--color-primary-light)' : 'rgba(15, 76, 138, 0.18)'}`,
-              background: props.disabled ? 'rgba(15, 76, 138, 0.04)' : '#FFFFFF',
+              border: `1.5px solid ${props.error ? 'var(--color-error)' : hasValue || isFocused ? 'var(--color-primary-light)' : 'rgba(21, 96, 189, 0.18)'}`,
+              background: props.disabled ? 'rgba(21, 96, 189, 0.04)' : '#FFFFFF',
               color: hasValue ? 'var(--color-primary-light)' : 'var(--color-text)',
               textAlign: 'center',
               fontFamily: 'var(--font-ui)',
@@ -171,7 +171,7 @@ export function OTPInput(props: OTPInputProps) {
               boxShadow: props.error
                 ? '0 0 0 3px rgba(214, 69, 69, 0.12)'
                 : isFocused
-                  ? '0 0 0 3px rgba(27, 95, 167, 0.12)'
+                  ? '0 0 0 3px rgba(47, 111, 237, 0.12)'
                   : 'none',
               transition: 'border-color 200ms var(--ease-silk), box-shadow 200ms var(--ease-silk), color 200ms var(--ease-silk)',
             }}

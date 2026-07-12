@@ -2,11 +2,14 @@
 <!-- Locked design decisions. The agent re-reads this every prompt and must obey it. -->
 - App domain:        SaaS Multi-tenant Tuition Management Dashboard
 - Skin:              trust-corporate
-- Primary brand:     #0F4C8A (Deep Academic Blue — sidebar, headings)
-- Primary light:     #1B5FA7 (Royal Blue — links, focus, secondary actions)
-- Accent CTA:        #F39C12 (Hover: #F7B733)
-- Surfaces/text:     #FFFFFF bg, #F5F7FA surface, #2C3E50 text
-- Status colors:     success #2E9E5B, warning #E08E00, error #D64545, info #1B5FA7
+- Primary brand:     #1560BD (Sanskardip brand blue — sidebar, headings, gradients)
+- Primary light:     #2F6FED (Bright blue — links, focus, secondary actions)
+- Primary dark:      #002D72 (Navy — gradient top)
+- Accent CTA:        #FFBC3B (brand gold, from logo sun; Hover: #FFCB63)
+- Surfaces/text:     #FFFFFF bg, #F5F7FA surface, #1B1F3B text
+- Status colors:     success #00AB66, warning #E08E00, error #E63946, info #1560BD
+- Brand source:      sanskardipshikshalaya.com.np official site (#1560BD used 35× in their style.css)
+- Rebranded:         2026-07-13 (was #0F4C8A/#F39C12 generic academic palette)
 - Typography:        Fraunces display + Roboto UI
 - Spacing scale:     4, 8, 12, 16, 24, 32, 40, 56
 - Radius personality: structured-soft (7px inputs/buttons, 12px cards, 18px modals, 20px pills)

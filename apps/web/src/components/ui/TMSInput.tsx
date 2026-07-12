@@ -68,7 +68,7 @@ export function TMSInput({
           style={{
             width: '100%',
             border: 'none',
-            borderBottom: `2px solid ${error ? 'var(--color-error)' : focused ? 'var(--color-primary-light)' : 'rgba(15, 76, 138, 0.18)'}`,
+            borderBottom: `2px solid ${error ? 'var(--color-error)' : focused ? 'var(--color-primary-light)' : 'rgba(21, 96, 189, 0.18)'}`,
             background: 'transparent',
             padding: `0 ${endAdornment ? '36px' : '0'} 8px 0`,
             color: 'var(--color-text)',

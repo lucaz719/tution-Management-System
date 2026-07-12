@@ -131,7 +131,7 @@ export function BranchAdminDashboard() {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {resourceLogItems.map((item) => (
-              <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(15, 76, 138, 0.1)', background: '#FFFFFF' }}>
+              <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.1)', background: '#FFFFFF' }}>
                 <div>
                   <div style={{ color: 'var(--color-text)', fontSize: '14px', fontWeight: 700 }}>{item.label}</div>
                   <div style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.62)', fontSize: '12px' }}>{item.detail}</div>
@@ -163,7 +163,7 @@ export function BranchAdminDashboard() {
             <p style={{ color: 'rgba(44, 62, 80, 0.64)', fontSize: '14px', textAlign: 'center', padding: '24px 0' }}>No active petty cash requests.</p>
           ) : (
             pettyCashRequests.map((request) => (
-              <div key={request.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(15, 76, 138, 0.1)', background: '#FFFFFF', flexWrap: 'wrap' }}>
+              <div key={request.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.1)', background: '#FFFFFF', flexWrap: 'wrap' }}>
                 <div>
                   <p style={{ fontWeight: 700, fontSize: '15px', color: 'var(--color-text)' }}>{request.purpose}</p>
                   <p style={{ marginTop: '4px', fontSize: '12px', color: 'rgba(44, 62, 80, 0.68)' }}>ID: {request.id} · Amount: NPR {request.amount.toLocaleString()} · Branch: {request.branch ?? 'Baneshwor'}</p>
@@ -171,7 +171,7 @@ export function BranchAdminDashboard() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                   <StatusBadge variant={getPettyCashVariant(request.status)}>{request.status}</StatusBadge>
                   {request.status === 'PENDING' ? (
-                    <Button variant="outline" onClick={() => void handleL1Approve(request.id)} style={{ minHeight: '36px', height: '36px', padding: '8px 16px', borderColor: 'rgba(15, 76, 138, 0.18)' }}>
+                    <Button variant="outline" onClick={() => void handleL1Approve(request.id)} style={{ minHeight: '36px', height: '36px', padding: '8px 16px', borderColor: 'rgba(21, 96, 189, 0.18)' }}>
                       Approve L1
                     </Button>
                   ) : null}

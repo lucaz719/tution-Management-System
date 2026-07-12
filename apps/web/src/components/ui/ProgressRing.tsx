@@ -61,7 +61,7 @@ export function ProgressRing({
           cy={size / 2}
           r={radius}
           fill='none'
-          stroke='rgba(15, 76, 138, 0.1)'
+          stroke='rgba(21, 96, 189, 0.1)'
           strokeWidth={strokeWidth}
         />
         <circle

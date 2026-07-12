@@ -8,7 +8,7 @@ export interface SkeletonCardProps {
 
 const shimmerStyle: CSSProperties = {
   borderRadius: '999px',
-  background: 'linear-gradient(90deg, rgba(15, 76, 138, 0.08) 0%, rgba(15, 76, 138, 0.18) 50%, rgba(15, 76, 138, 0.08) 100%)',
+  background: 'linear-gradient(90deg, rgba(21, 96, 189, 0.08) 0%, rgba(21, 96, 189, 0.18) 50%, rgba(21, 96, 189, 0.08) 100%)',
   backgroundSize: '220% 100%',
   animation: 'tms-dashboard-shimmer 1.2s linear infinite',
 };

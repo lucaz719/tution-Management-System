@@ -275,7 +275,7 @@ export function LoginPage() {
                       style={{
                         padding: '12px 14px',
                         borderRadius: 'var(--radius-md)',
-                        border: '1px solid rgba(15, 76, 138, 0.14)',
+                        border: '1px solid rgba(21, 96, 189, 0.14)',
                         textAlign: 'left',
                         color: 'var(--color-text)',
                       }}

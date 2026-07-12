@@ -146,25 +146,49 @@ export const api = {
     }
   },
 
-  // Attendance
+  // Teacher workspace
+  teacher: {
+    getDashboard: async () => {
+      return request<{
+        teacher: { id: string; name: string };
+        branch: { id: string; name: string; latitude: number; longitude: number; radiusMeters: number } | null;
+        attendance: { checkedIn: boolean; lastStampType: string | null; lastStampAt: string | null };
+        todayClasses: Array<{
+          sessionId: string;
+          classId: string;
+          className: string;
+          courseName: string;
+          schedule: any;
+          status: string;
+          dailyUpdateSubmitted: boolean;
+          checkInTime: string | null;
+          checkOutTime: string | null;
+        }>;
+        pendingUpdates: Array<{ sessionId: string; classId: string; className: string; courseName: string; date: string }>;
+      }>('/teacher/dashboard');
+    },
+    submitSessionUpdate: async (sessionId: string, updateContent: string) => {
+      return request<{ message: string; session: any }>(`/teacher/session/${sessionId}/update`, {
+        method: 'POST',
+        body: JSON.stringify({ updateContent }),
+      });
+    },
+  },
+
+  // Geo attendance (Teacher)
   attendance: {
-    markIn: async (lat: number, lng: number) => {
-      return request<{ success: boolean; session: any }>('/attendance/mark-in', {
+    markIn: async (branchId: string, latitude: number, longitude: number, gpsAccuracy: number) => {
+      return request<{ message: string; stamp: any; geofenceMeta: any }>('/attendance/in', {
         method: 'POST',
-        body: JSON.stringify({ latitude: lat, longitude: lng }),
+        body: JSON.stringify({ branchId, latitude, longitude, gpsAccuracy }),
       });
     },
-    markOut: async () => {
-      return request<{ success: boolean; session: any }>('/attendance/mark-out', {
+    markOut: async (branchId: string, latitude: number, longitude: number, gpsAccuracy: number) => {
+      return request<{ message: string; stamp: any }>('/attendance/out', {
         method: 'POST',
+        body: JSON.stringify({ branchId, latitude, longitude, gpsAccuracy }),
       });
     },
-    submitDailySummary: async (summary: string) => {
-      return request<{ success: boolean }>('/courses/lesson-update', {
-        method: 'POST',
-        body: JSON.stringify({ summary }),
-      });
-    }
   },
 
 

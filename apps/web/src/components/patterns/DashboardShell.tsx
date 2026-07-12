@@ -137,7 +137,7 @@ export function DashboardShell({ role, children }: DashboardShellProps) {
                 borderRadius: '12px',
                 border: 'none',
                 borderLeft: isActive ? '4px solid var(--color-accent)' : '4px solid transparent',
-                background: isActive ? 'rgba(243, 156, 18, 0.14)' : 'transparent',
+                background: isActive ? 'rgba(255, 188, 59, 0.14)' : 'transparent',
                 color: isDisabled ? 'rgba(255, 255, 255, 0.46)' : '#FFFFFF',
                 cursor: isDisabled ? 'not-allowed' : 'pointer',
                 opacity: isDisabled ? 0.82 : 1,
@@ -162,7 +162,7 @@ export function DashboardShell({ role, children }: DashboardShellProps) {
                     alignItems: 'center',
                     padding: '3px 8px',
                     borderRadius: '999px',
-                    background: 'rgba(243, 156, 18, 0.18)',
+                    background: 'rgba(255, 188, 59, 0.18)',
                     color: 'var(--color-accent-hover)',
                     fontSize: '10px',
                     fontWeight: 700,
@@ -263,7 +263,7 @@ export function DashboardShell({ role, children }: DashboardShellProps) {
             inset: '0 auto 0 0',
             width: `${sidebarWidth}px`,
             zIndex: 20,
-            boxShadow: '0 18px 38px -28px rgba(15, 76, 138, 0.65)',
+            boxShadow: '0 18px 38px -28px rgba(21, 96, 189, 0.65)',
           }}
         >
           {sidebarContent}
@@ -284,7 +284,7 @@ export function DashboardShell({ role, children }: DashboardShellProps) {
               width: '44px',
               height: '44px',
               borderRadius: '14px',
-              border: '1px solid rgba(15, 76, 138, 0.12)',
+              border: '1px solid rgba(21, 96, 189, 0.12)',
               background: '#FFFFFF',
               color: 'var(--color-primary)',
               boxShadow: 'var(--shadow-card)',
@@ -318,7 +318,7 @@ export function DashboardShell({ role, children }: DashboardShellProps) {
               transform: isDrawerOpen ? 'translateX(0)' : 'translateX(-100%)',
               transition: 'transform 220ms ease',
               zIndex: 26,
-              boxShadow: '0 18px 38px -28px rgba(15, 76, 138, 0.65)',
+              boxShadow: '0 18px 38px -28px rgba(21, 96, 189, 0.65)',
             }}
           >
             {sidebarContent}
@@ -340,7 +340,7 @@ export function DashboardShell({ role, children }: DashboardShellProps) {
             zIndex: 10,
             background: 'rgba(245, 247, 250, 0.92)',
             backdropFilter: 'blur(12px)',
-            borderBottom: '1px solid rgba(15, 76, 138, 0.08)',
+            borderBottom: '1px solid rgba(21, 96, 189, 0.08)',
             padding: isCompactViewport ? '18px 24px 18px 76px' : '22px 28px',
           }}
         >
@@ -356,13 +356,13 @@ export function DashboardShell({ role, children }: DashboardShellProps) {
                 <div style={{ color: 'var(--color-primary-light)', fontSize: '12px', fontWeight: 700 }}>{updatedLabel}</div>
                 <div style={{ color: 'rgba(44, 62, 80, 0.62)', fontSize: '11px', fontWeight: 600 }}>Auto-refresh every 5 min</div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', borderRadius: '999px', background: '#FFFFFF', boxShadow: '0 8px 20px -18px rgba(15, 76, 138, 0.8)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', borderRadius: '999px', background: '#FFFFFF', boxShadow: '0 8px 20px -18px rgba(21, 96, 189, 0.8)' }}>
                 <div
                   style={{
                     width: '38px',
                     height: '38px',
                     borderRadius: '50%',
-                    background: 'rgba(15, 76, 138, 0.1)',
+                    background: 'rgba(21, 96, 189, 0.1)',
                     color: 'var(--color-primary)',
                     display: 'grid',
                     placeItems: 'center',
@@ -384,7 +384,7 @@ export function DashboardShell({ role, children }: DashboardShellProps) {
                     height: '34px',
                     borderRadius: '50%',
                     border: 'none',
-                    background: 'rgba(15, 76, 138, 0.08)',
+                    background: 'rgba(21, 96, 189, 0.08)',
                     color: 'var(--color-primary)',
                     display: 'grid',
                     placeItems: 'center',

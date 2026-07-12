@@ -130,7 +130,7 @@ export function ParentStudentPortal() {
                       minHeight: '40px',
                       padding: '10px 16px',
                       borderRadius: '999px',
-                      border: isActive ? 'none' : '1px solid rgba(15, 76, 138, 0.12)',
+                      border: isActive ? 'none' : '1px solid rgba(21, 96, 189, 0.12)',
                       background: isActive ? 'var(--color-accent)' : '#FFFFFF',
                       color: isActive ? '#FFFFFF' : 'var(--color-text)',
                       fontSize: '13px',
@@ -186,12 +186,12 @@ export function ParentStudentPortal() {
               </div>
               <div style={{ filter: 'blur(2px)', opacity: 0.55, display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {['Physics · 91%', 'Mathematics · 88%', 'English · 93%'].map((item) => (
-                  <div key={item} style={{ padding: '14px 16px', borderRadius: '12px', background: '#FFFFFF', border: '1px solid rgba(15, 76, 138, 0.1)', fontSize: '14px', fontWeight: 600, color: 'var(--color-text)' }}>
+                  <div key={item} style={{ padding: '14px 16px', borderRadius: '12px', background: '#FFFFFF', border: '1px solid rgba(21, 96, 189, 0.1)', fontSize: '14px', fontWeight: 600, color: 'var(--color-text)' }}>
                     {item}
                   </div>
                 ))}
               </div>
-              <div style={{ position: 'absolute', inset: 'auto 20px 20px 20px', padding: '14px 16px', borderRadius: '12px', background: 'rgba(243, 156, 18, 0.12)', color: 'var(--color-accent)', fontSize: '13px', fontWeight: 700 }}>
+              <div style={{ position: 'absolute', inset: 'auto 20px 20px 20px', padding: '14px 16px', borderRadius: '12px', background: 'rgba(255, 188, 59, 0.12)', color: 'var(--color-accent)', fontSize: '13px', fontWeight: 700 }}>
                 Results unlock here once the Phase 2 results workspace is enabled.
               </div>
             </Card>
@@ -204,7 +204,7 @@ export function ParentStudentPortal() {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {announcements.map((announcement) => (
-                <div key={announcement.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(15, 76, 138, 0.1)', background: '#FFFFFF', flexWrap: 'wrap' }}>
+                <div key={announcement.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.1)', background: '#FFFFFF', flexWrap: 'wrap' }}>
                   <div>
                     <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-text)' }}>{announcement.title}</div>
                     <div style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.62)', fontSize: '12px' }}>{announcement.dateLabel}</div>
@@ -225,7 +225,7 @@ export function ParentStudentPortal() {
             {isLoading ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {Array.from({ length: 3 }, (_, index) => (
-                  <div key={`tt-skeleton-${index}`} style={{ height: '62px', borderRadius: '12px', background: 'rgba(15, 76, 138, 0.08)' }} />
+                  <div key={`tt-skeleton-${index}`} style={{ height: '62px', borderRadius: '12px', background: 'rgba(21, 96, 189, 0.08)' }} />
                 ))}
               </div>
             ) : (
@@ -252,7 +252,7 @@ export function ParentStudentPortal() {
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {announcements.map((announcement) => (
-                  <div key={announcement.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(15, 76, 138, 0.1)', background: '#FFFFFF', flexWrap: 'wrap' }}>
+                  <div key={announcement.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.1)', background: '#FFFFFF', flexWrap: 'wrap' }}>
                     <div>
                       <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-text)' }}>{announcement.title}</div>
                       <div style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.62)', fontSize: '12px' }}>{announcement.dateLabel}</div>
@@ -270,11 +270,11 @@ export function ParentStudentPortal() {
                 <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Digital Student ID</h3>
                 <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Branch-scoped identity card ready for download.</p>
               </div>
-              <Button variant="outline" style={{ minHeight: '38px', height: '38px', padding: '8px 16px', borderColor: 'rgba(15, 76, 138, 0.16)' }}>
+              <Button variant="outline" style={{ minHeight: '38px', height: '38px', padding: '8px 16px', borderColor: 'rgba(21, 96, 189, 0.16)' }}>
                 Download PDF
               </Button>
             </div>
-            <div style={{ padding: '20px', borderRadius: '18px', background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-light) 100%)', color: '#FFFFFF', boxShadow: '0 16px 34px -20px rgba(15, 76, 138, 0.6)' }}>
+            <div style={{ padding: '20px', borderRadius: '18px', background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-light) 100%)', color: '#FFFFFF', boxShadow: '0 16px 34px -20px rgba(21, 96, 189, 0.6)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '18px', flexWrap: 'wrap' }}>
                 <div>
                   <div style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '0.08em', opacity: 0.82 }}>TMS DIGITAL ID</div>

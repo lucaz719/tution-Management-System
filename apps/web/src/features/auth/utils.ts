@@ -43,7 +43,7 @@ export function getPasswordStrength(password: string): {
   const passedRules = getPasswordRuleResults(password).filter(Boolean).length;
 
   if (passedRules === 0) {
-    return { score: 0, label: '', color: 'rgba(15, 76, 138, 0.12)' };
+    return { score: 0, label: '', color: 'rgba(21, 96, 189, 0.12)' };
   }
 
   if (passedRules <= 2) {

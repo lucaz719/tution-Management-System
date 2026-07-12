@@ -18,7 +18,7 @@ const cellStyle: React.CSSProperties = {
   padding: '12px 14px',
   fontSize: '13px',
   color: 'var(--color-text)',
-  borderBottom: '1px solid rgba(15, 76, 138, 0.08)',
+  borderBottom: '1px solid rgba(21, 96, 189, 0.08)',
   textAlign: 'left',
   whiteSpace: 'nowrap',
 };
@@ -78,7 +78,7 @@ export function SuperAdminTenants() {
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr style={{ background: 'rgba(15, 76, 138, 0.04)' }}>
+              <tr style={{ background: 'rgba(21, 96, 189, 0.04)' }}>
                 <th style={headStyle}>Institution</th>
                 <th style={headStyle}>PAN</th>
                 <th style={headStyle}>Status</th>

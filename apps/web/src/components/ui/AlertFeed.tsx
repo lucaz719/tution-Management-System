@@ -35,9 +35,9 @@ export function AlertFeed({ items }: AlertFeedProps) {
             borderRadius: '12px',
             borderLeft: `4px solid ${borderColorByVariant[item.tagVariant]}`,
             background: '#FFFFFF',
-            borderTop: '1px solid rgba(15, 76, 138, 0.08)',
-            borderRight: '1px solid rgba(15, 76, 138, 0.08)',
-            borderBottom: '1px solid rgba(15, 76, 138, 0.08)',
+            borderTop: '1px solid rgba(21, 96, 189, 0.08)',
+            borderRight: '1px solid rgba(21, 96, 189, 0.08)',
+            borderBottom: '1px solid rgba(21, 96, 189, 0.08)',
           }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>

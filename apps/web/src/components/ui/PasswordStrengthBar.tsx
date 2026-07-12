@@ -16,7 +16,7 @@ export function PasswordStrengthBar({ password }: PasswordStrengthBarProps) {
             key={segment}
             className="strength-segment"
             style={{
-              backgroundColor: strength.score >= segment ? strength.color : 'rgba(15, 76, 138, 0.1)',
+              backgroundColor: strength.score >= segment ? strength.color : 'rgba(21, 96, 189, 0.1)',
             }}
           />
         ))}

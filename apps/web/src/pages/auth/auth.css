@@ -1,20 +1,21 @@
 :root {
-  --color-primary: #0f4c8a;
-  --color-primary-light: #1b5fa7;
-  --color-accent: #f39c12;
-  --color-accent-hover: #f7b733;
+  /* Brand-aligned to sanskardipshikshalaya.com.np — must mirror index.css tokens. */
+  --color-primary: #1560bd;
+  --color-primary-light: #2f6fed;
+  --color-accent: #ffbc3b;
+  --color-accent-hover: #ffcb63;
   --color-bg: #ffffff;
   --color-surface: #f5f7fa;
-  --color-text: #2c3e50;
-  --color-error: #d64545;
-  --color-success: #2e9e5b;
+  --color-text: #1b1f3b;
+  --color-error: #e63946;
+  --color-success: #00ab66;
   --color-warning: #e08e00;
   --font-display: 'Fraunces', serif;
   --font-ui: 'Roboto', sans-serif;
   --radius-sm: 7px;
   --radius-md: 12px;
   --radius-lg: 18px;
-  --shadow-modal: 0 12px 32px -12px rgba(15, 76, 138, 0.22);
+  --shadow-modal: 0 12px 32px -12px rgba(21, 96, 189, 0.22);
   --ease-silk: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -25,7 +26,7 @@
   justify-content: center;
   padding: 24px;
   background:
-    radial-gradient(circle at top left, rgba(27, 95, 167, 0.08), transparent 32%),
+    radial-gradient(circle at top left, rgba(47, 111, 237, 0.08), transparent 32%),
     linear-gradient(180deg, rgba(245, 247, 250, 0.92) 0%, #ffffff 100%);
   color: var(--color-text);
   font-family: var(--font-ui);
@@ -39,7 +40,7 @@
   border-radius: 28px;
   overflow: hidden;
   background: var(--color-bg);
-  box-shadow: 0 28px 64px -32px rgba(15, 76, 138, 0.42);
+  box-shadow: 0 28px 64px -32px rgba(21, 96, 189, 0.42);
 }
 
 .auth-hero {
@@ -48,7 +49,7 @@
   color: #ffffff;
   background:
     radial-gradient(circle at 18% 18%, rgba(255, 255, 255, 0.18), transparent 22%),
-    radial-gradient(circle at 82% 76%, rgba(243, 156, 18, 0.18), transparent 26%),
+    radial-gradient(circle at 82% 76%, rgba(255, 188, 59, 0.18), transparent 26%),
     linear-gradient(145deg, #0b3564 0%, var(--color-primary) 54%, var(--color-primary-light) 100%);
 }
 
@@ -139,7 +140,7 @@
   border-radius: 12px;
   display: grid;
   place-items: center;
-  background: rgba(243, 156, 18, 0.18);
+  background: rgba(255, 188, 59, 0.18);
   color: #ffe2a8;
 }
 
@@ -247,7 +248,7 @@
   min-height: 50px;
   padding: 0 44px 0 14px;
   border-radius: var(--radius-md);
-  border: 1px solid rgba(15, 76, 138, 0.16);
+  border: 1px solid rgba(21, 96, 189, 0.16);
   background: #ffffff;
   color: var(--color-text);
   font-size: 0.95rem;
@@ -404,7 +405,7 @@
   border-radius: 24px;
   background: var(--color-bg);
   box-shadow: var(--shadow-modal);
-  border: 1px solid rgba(15, 76, 138, 0.12);
+  border: 1px solid rgba(21, 96, 189, 0.12);
 }
 
 .auth-back-link {
@@ -448,7 +449,7 @@
 }
 
 .auth-otp-message {
-  background: rgba(15, 76, 138, 0.06);
+  background: rgba(21, 96, 189, 0.06);
   color: rgba(44, 62, 80, 0.8);
 }
 
@@ -458,7 +459,7 @@
 }
 
 .auth-success-banner {
-  background: rgba(46, 158, 91, 0.1);
+  background: rgba(0, 171, 102, 0.1);
   color: #1f7d48;
 }
 
@@ -491,7 +492,7 @@
   aspect-ratio: 1 / 1.05;
   min-height: 52px;
   border-radius: var(--radius-md);
-  border: 1px solid rgba(15, 76, 138, 0.16);
+  border: 1px solid rgba(21, 96, 189, 0.16);
   background: #ffffff;
   font-size: 1.25rem;
   font-weight: 700;
@@ -531,7 +532,7 @@
 .strength-segment {
   height: 8px;
   border-radius: 999px;
-  background: rgba(15, 76, 138, 0.1);
+  background: rgba(21, 96, 189, 0.1);
   transition: background-color 180ms var(--ease-silk);
 }
 
@@ -591,7 +592,7 @@
   border-radius: 24px;
   background: #ffffff;
   box-shadow: var(--shadow-modal);
-  border: 1px solid rgba(15, 76, 138, 0.12);
+  border: 1px solid rgba(21, 96, 189, 0.12);
 }
 
 .auth-dialog-title {
@@ -649,14 +650,14 @@
 .auth-page input:focus-visible,
 .auth-page .otp-box:focus-visible,
 .toast-close:focus-visible {
-  outline: 3px solid rgba(27, 95, 167, 0.22);
+  outline: 3px solid rgba(47, 111, 237, 0.22);
   outline-offset: 2px;
 }
 
 .auth-page .auth-input:focus,
 .auth-page .otp-box:focus {
   border-color: var(--color-primary-light);
-  box-shadow: 0 0 0 4px rgba(27, 95, 167, 0.12);
+  box-shadow: 0 0 0 4px rgba(47, 111, 237, 0.12);
 }
 
 @media (max-width: 979px) {

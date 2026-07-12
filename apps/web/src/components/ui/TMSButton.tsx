@@ -36,17 +36,17 @@ const spinnerStyle: CSSProperties = {
 function getVariantStyle(variant: TMSButtonProps['variant'], hovered: boolean, disabled: boolean): CSSProperties {
   if (variant === 'secondary') {
     return {
-      background: hovered && !disabled ? 'rgba(27, 95, 167, 0.08)' : 'transparent',
-      borderColor: hovered && !disabled ? 'rgba(27, 95, 167, 0.48)' : 'rgba(27, 95, 167, 0.28)',
-      color: disabled ? 'rgba(27, 95, 167, 0.45)' : 'var(--color-primary-light)',
+      background: hovered && !disabled ? 'rgba(47, 111, 237, 0.08)' : 'transparent',
+      borderColor: hovered && !disabled ? 'rgba(47, 111, 237, 0.48)' : 'rgba(47, 111, 237, 0.28)',
+      color: disabled ? 'rgba(47, 111, 237, 0.45)' : 'var(--color-primary-light)',
       boxShadow: 'none',
     };
   }
 
   if (variant === 'text') {
     return {
-      background: hovered && !disabled ? 'rgba(27, 95, 167, 0.06)' : 'transparent',
-      color: disabled ? 'rgba(27, 95, 167, 0.45)' : 'var(--color-primary-light)',
+      background: hovered && !disabled ? 'rgba(47, 111, 237, 0.06)' : 'transparent',
+      color: disabled ? 'rgba(47, 111, 237, 0.45)' : 'var(--color-primary-light)',
       boxShadow: 'none',
       paddingInline: '8px',
     };
