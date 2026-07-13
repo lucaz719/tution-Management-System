@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { useToast } from '../components/ui/Toast';
+import { UserProfileDrawer } from '../components/UserProfileDrawer';
+import { BulkStudentImport } from '../components/BulkStudentImport';
 import { api } from '../services/api';
 
 interface PersonRole {
@@ -82,6 +84,8 @@ export function PeopleDirectory() {
   const [isSaving, setIsSaving] = useState(false);
   const [credentials, setCredentials] = useState<CreatedCredentials | null>(null);
   const [copied, setCopied] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState('');
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   const loadData = async () => {
     setIsLoading(true);
@@ -215,10 +219,16 @@ export function PeopleDirectory() {
           </p>
         </div>
         {caps?.canManagePeople ? (
-          <Button onClick={openDrawer} style={{ height: '42px' }}>
-            <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>person_add</span>
-            Add Person
-          </Button>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <Button variant="outline" onClick={() => setBulkOpen(true)} style={{ height: '42px' }}>
+              <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>upload_file</span>
+              Bulk Import
+            </Button>
+            <Button onClick={openDrawer} style={{ height: '42px' }}>
+              <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>person_add</span>
+              Add Person
+            </Button>
+          </div>
         ) : null}
       </div>
 
@@ -307,7 +317,7 @@ export function PeopleDirectory() {
                     new Set(person.roles.map((r) => r.branchName).filter(Boolean) as string[])
                   );
                   return (
-                    <tr key={person.id}>
+                    <tr key={person.id} onClick={() => setSelectedUserId(person.id)} style={{ cursor: 'pointer' }}>
                       <td>
                         <div className="people-person">
                           <div className="people-avatar">{initials(person.name)}</div>
@@ -343,6 +353,16 @@ export function PeopleDirectory() {
           </table>
         </div>
       </div>
+
+      {selectedUserId ? <UserProfileDrawer userId={selectedUserId} onClose={() => setSelectedUserId('')} /> : null}
+
+      {bulkOpen ? (
+        <BulkStudentImport
+          branches={caps?.manageableBranches ?? []}
+          onClose={() => setBulkOpen(false)}
+          onImported={() => void loadData()}
+        />
+      ) : null}
 
       {drawerOpen ? (
         <>

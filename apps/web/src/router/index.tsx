@@ -25,6 +25,10 @@ const SuperAdminTenants = lazy(() => import('../pages/SuperAdminTenants').then((
 const TenantAdminDashboard = lazy(() => import('../pages/TenantAdminDashboard').then((module) => ({ default: module.TenantAdminDashboard })));
 const TenantBranches = lazy(() => import('../pages/TenantBranches').then((module) => ({ default: module.TenantBranches })));
 const PeopleDirectory = lazy(() => import('../pages/PeopleDirectory').then((module) => ({ default: module.PeopleDirectory })));
+const AcademicCourses = lazy(() => import('../pages/AcademicCourses').then((module) => ({ default: module.AcademicCourses })));
+const AcademicTimetables = lazy(() => import('../pages/AcademicTimetables').then((module) => ({ default: module.AcademicTimetables })));
+const AcademicStudents = lazy(() => import('../pages/AcademicRoster').then((module) => ({ default: module.AcademicStudents })));
+const AcademicTeachers = lazy(() => import('../pages/AcademicRoster').then((module) => ({ default: module.AcademicTeachers })));
 const BranchAdminDashboard = lazy(() => import('../pages/BranchAdminDashboard').then((module) => ({ default: module.BranchAdminDashboard })));
 const TeacherPortal = lazy(() => import('../pages/TeacherPortal').then((module) => ({ default: module.TeacherPortal })));
 const ParentStudentPortal = lazy(() => import('../pages/ParentStudentPortal').then((module) => ({ default: module.ParentStudentPortal })));
@@ -224,6 +228,10 @@ const router = createBrowserRouter([
               { path: '/tenant/dashboard', element: <Suspense fallback={<FullPageSpinner />}><TenantAdminDashboard /></Suspense> },
               { path: '/tenant/branches', element: <Suspense fallback={<FullPageSpinner />}><TenantBranches /></Suspense> },
               { path: '/tenant/people', element: <Suspense fallback={<FullPageSpinner />}><PeopleDirectory /></Suspense> },
+              { path: '/tenant/students', element: <Suspense fallback={<FullPageSpinner />}><AcademicStudents /></Suspense> },
+              { path: '/tenant/teachers', element: <Suspense fallback={<FullPageSpinner />}><AcademicTeachers /></Suspense> },
+              { path: '/tenant/courses', element: <Suspense fallback={<FullPageSpinner />}><AcademicCourses /></Suspense> },
+              { path: '/tenant/timetables', element: <Suspense fallback={<FullPageSpinner />}><AcademicTimetables /></Suspense> },
               { path: '/tenant/*', element: <RoleWorkspacePlaceholder role="tenant-admin" /> },
             ],
           },

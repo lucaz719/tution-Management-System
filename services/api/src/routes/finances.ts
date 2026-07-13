@@ -3,8 +3,32 @@ import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { MockSmsSender } from '../utils/notifications';
+import { getBillingPeriod } from '../utils/nepali';
 
 const router = Router();
+
+// Current Nepali (Bikram Sambat) billing period — drives billing-cycle labels.
+router.get(
+  '/billing-period',
+  authMiddleware,
+  async (_req: TenantRequest, res: Response) => {
+    try {
+      const period = await getBillingPeriod(new Date(), 10);
+      return res.json({
+        label: period.label,
+        bsYear: period.bsYear,
+        bsMonthName: period.bsMonthName,
+        bsMonthNameNp: period.bsMonthNameNp,
+        daysInMonth: period.daysInMonth,
+        cycleStart: period.cycleStart,
+        cycleEnd: period.cycleEnd,
+        dueDate: period.dueDate,
+      });
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Failed to resolve billing period.', details: error.message });
+    }
+  }
+);
 
 // 1. Get Monthly Financial Forecast (Admin only)
 router.get(

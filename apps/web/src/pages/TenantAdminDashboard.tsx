@@ -83,6 +83,7 @@ export function TenantAdminDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [billingPeriod, setBillingPeriod] = useState('');
 
   const alerts = buildAlerts(dashboard);
 
@@ -91,10 +92,11 @@ export function TenantAdminDashboard() {
     setErrorMsg('');
 
     try {
-      const [plData, config, summary] = await Promise.all([
+      const [plData, config, summary, period] = await Promise.all([
         api.finances.getPL() as Promise<ProfitLossData>,
         api.finances.getConfig() as Promise<FinanceConfig>,
         api.tenant.getDashboard(),
+        api.finances.getBillingPeriod().catch(() => null),
       ]);
 
       setPl(plData);
@@ -102,6 +104,7 @@ export function TenantAdminDashboard() {
       setGracePeriod(config.gracePeriod);
       setPettyCashCap(config.pettyCashCap);
       setDashboard(summary);
+      if (period) setBillingPeriod(period.label);
     } catch (error: unknown) {
       setErrorMsg(error instanceof Error ? error.message : 'Failed to load dashboard data.');
     } finally {
@@ -228,7 +231,10 @@ export function TenantAdminDashboard() {
         <Card hoverable={false}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
             <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Profit &amp; Loss Statement</h3>
-            <StatusBadge variant="info">{pl?.month ?? '—'}</StatusBadge>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              {billingPeriod ? <StatusBadge variant="gold">Billing: {billingPeriod} BS</StatusBadge> : null}
+              <StatusBadge variant="info">{pl?.month ?? '—'}</StatusBadge>
+            </div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '14px' }}>
             <div style={{ padding: '18px', borderRadius: '12px', background: 'rgba(0, 171, 102, 0.08)', border: '1px solid rgba(0, 171, 102, 0.18)' }}>

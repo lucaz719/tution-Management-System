@@ -143,6 +143,9 @@ export const api = {
     },
     getConfig: async () => {
       return request<{ vatRate: number; gracePeriod: number; pettyCashCap: number }>('/finances/config');
+    },
+    getBillingPeriod: async () => {
+      return request<{ label: string; bsYear: number; bsMonthName: string; bsMonthNameNp: string; daysInMonth: number; cycleStart: string; cycleEnd: string; dueDate: string }>('/finances/billing-period');
     }
   },
 
@@ -233,6 +236,9 @@ export const api = {
       const data = await request<{ users: any[] }>('/users');
       return data.users ?? [];
     },
+    getProfile: async (userId: string) => {
+      return request<any>(`/users/${userId}/profile`);
+    },
     createBranchAdmin: async (payload: { firstName: string; lastName: string; email: string; phone?: string; branchId: string }) => {
       return request<{ message: string; user: any; temporaryPassword: string }>('/users/branch-admin', {
         method: 'POST',
@@ -244,6 +250,57 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(payload),
       });
+    },
+    bulkCreateStudents: async (students: Array<Record<string, string>>) => {
+      return request<{
+        createdCount: number;
+        errorCount: number;
+        results: Array<{ row: number; name: string; email: string; status: 'created' | 'error'; temporaryPassword?: string; parentEmail?: string; parentTemporaryPassword?: string; error?: string }>;
+      }>('/users/bulk-students', {
+        method: 'POST',
+        body: JSON.stringify({ students }),
+      });
+    },
+  },
+
+  // Academics — courses & classes (Tenant Admin / Branch Admin)
+  academics: {
+    listCourses: async () => {
+      const data = await request<{ courses: any[] }>('/courses');
+      return data.courses ?? [];
+    },
+    createCourse: async (payload: {
+      branchId: string;
+      name: string;
+      description?: string;
+      type: string;
+      feeStructure: Record<string, unknown>;
+      isTaxExempt?: boolean;
+      taxPercentage?: number;
+    }) => {
+      return request<{ message: string; course: any }>('/courses', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    },
+    listClasses: async () => {
+      const data = await request<{ classes: any[] }>('/courses/classes');
+      return data.classes ?? [];
+    },
+    createClass: async (payload: { courseId: string; name: string; schedule: unknown }) => {
+      return request<{ message: string; class: any }>('/courses/classes', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    },
+    updateClass: async (id: string, changes: { name?: string; schedule?: unknown; teacherId?: string | null }) => {
+      return request<{ message: string; class: any }>(`/courses/classes/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(changes),
+      });
+    },
+    deleteClass: async (id: string) => {
+      return request<{ message: string }>(`/courses/classes/${id}`, { method: 'DELETE' });
     },
   },
 

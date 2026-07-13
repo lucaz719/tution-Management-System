@@ -192,6 +192,166 @@ router.get('/', authMiddleware, async (req: TenantRequest, res: Response) => {
   }
 });
 
+// --- Consolidated profile for any user in the tenant ---
+// Returns a role-appropriate overview: students show enrolments + fee ledger,
+// parents show their children + each child's dues, teachers show assigned classes.
+async function studentFeeSummary(studentId: string) {
+  const invoices = await prisma.invoice.findMany({
+    where: { studentId },
+    orderBy: { dueDate: 'desc' },
+  });
+  const num = (v: any) => Number(v ?? 0);
+  const totalBilled = invoices.reduce((s, i) => s + num(i.netPayable), 0);
+  const totalPaid = invoices.filter((i) => i.status === 'PAID').reduce((s, i) => s + num(i.netPayable), 0);
+  const totalDue = invoices
+    .filter((i) => i.status === 'UNPAID' || i.status === 'OVERDUE')
+    .reduce((s, i) => s + num(i.netPayable), 0);
+  const overdueCount = invoices.filter((i) => i.status === 'OVERDUE').length;
+  return {
+    totalBilled,
+    totalPaid,
+    totalDue,
+    overdueCount,
+    invoices: invoices.slice(0, 8).map((i) => ({
+      id: i.id,
+      netPayable: num(i.netPayable),
+      status: i.status,
+      dueDate: i.dueDate,
+      paymentDate: i.paymentDate,
+    })),
+  };
+}
+
+router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const caller = req.user as UserPayload;
+  const tenantAdmin = isTenantAdmin(caller);
+  const scopes = branchAdminScopes(caller);
+  if (!tenantAdmin && scopes.length === 0) {
+    return res.status(403).json({ error: 'You do not have permission to view profiles.' });
+  }
+
+  try {
+    const user = await prisma.user.findFirst({
+      where: { id: req.params.id, tenantId: req.tenantId! },
+      include: {
+        userRoles: { include: { role: true, branch: true } },
+        student: true,
+        parent: true,
+        staffRecord: true,
+      },
+    });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found in your institution.' });
+    }
+
+    // Branch admins may only view users who hold a role in one of their branches.
+    if (!tenantAdmin) {
+      const inScope = user.userRoles.some((ur) => ur.branchId && scopes.includes(ur.branchId));
+      if (!inScope) {
+        return res.status(403).json({ error: 'This user is outside the branches you manage.' });
+      }
+    }
+
+    const roleNames = user.userRoles.map((ur) => ur.role.name);
+    const base = {
+      id: user.id,
+      name: `${user.firstName} ${user.lastName}`,
+      email: user.email,
+      phone: user.phone,
+      status: user.status,
+      createdAt: user.createdAt,
+      roles: user.userRoles.map((ur) => ({ role: ur.role.name, branchName: ur.branch?.name ?? null })),
+    };
+
+    const detail: Record<string, unknown> = {};
+
+    // Student overview: enrolments + fee ledger + attendance.
+    if (user.student) {
+      const enrollments = await prisma.enrollment.findMany({
+        where: { studentId: user.student.id },
+        include: { course: { select: { name: true } }, class: { select: { name: true } } },
+        orderBy: { createdAt: 'desc' },
+      });
+      const attendance = await prisma.studentAttendance.groupBy({
+        by: ['status'],
+        where: { studentId: user.student.id },
+        _count: { _all: true },
+      });
+      detail.student = {
+        admissionDate: user.student.admissionDate,
+        emergencyContact: user.student.emergencyContact,
+        enrollments: enrollments.map((e) => ({
+          courseName: e.course.name,
+          className: e.class.name,
+          status: e.status,
+        })),
+        fees: await studentFeeSummary(user.student.id),
+        attendance: attendance.reduce<Record<string, number>>((acc, a) => {
+          acc[a.status] = a._count._all;
+          return acc;
+        }, {}),
+      };
+    }
+
+    // Parent overview: children + each child's fee summary.
+    if (user.parent) {
+      const links = await prisma.studentParent.findMany({
+        where: { parentId: user.parent.id },
+        include: { student: { include: { user: { select: { firstName: true, lastName: true } } } } },
+      });
+      const children = await Promise.all(
+        links.map(async (l) => {
+          const fees = await studentFeeSummary(l.studentId);
+          const enrollCount = await prisma.enrollment.count({ where: { studentId: l.studentId, status: 'ACTIVE' } });
+          return {
+            studentId: l.studentId,
+            studentUserId: l.student.userId,
+            name: `${l.student.user.firstName} ${l.student.user.lastName}`,
+            activeEnrollments: enrollCount,
+            totalPaid: fees.totalPaid,
+            totalDue: fees.totalDue,
+            overdueCount: fees.overdueCount,
+          };
+        })
+      );
+      detail.parent = { children };
+    }
+
+    // Teacher overview: assigned classes + session stats.
+    if (roleNames.includes('Teacher')) {
+      const assigned = await prisma.class.findMany({
+        where: { teacherId: user.id },
+        include: { course: { select: { name: true } }, branch: { select: { name: true } }, _count: { select: { enrollments: true } } },
+      });
+      const sessionCount = await prisma.teacherSession.count({ where: { teacherId: user.id } });
+      const pendingUpdates = await prisma.teacherSession.count({ where: { teacherId: user.id, dailyUpdateSubmitted: false } });
+      detail.teacher = {
+        assignedClasses: assigned.map((c) => ({
+          className: c.name,
+          courseName: c.course.name,
+          branchName: c.branch.name,
+          enrollmentCount: c._count.enrollments,
+        })),
+        totalSessions: sessionCount,
+        pendingUpdates,
+      };
+    }
+
+    // Staff overview (accountant/receptionist/janitor/teacher share StaffRecord).
+    if (user.staffRecord) {
+      detail.staff = {
+        designation: user.staffRecord.designation,
+        contractType: user.staffRecord.contractType,
+        joiningDate: user.staffRecord.joiningDate,
+      };
+    }
+
+    return res.json({ ...base, detail });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Failed to load profile.', details: error.message });
+  }
+});
+
 // --- Tenant Admin creates a Branch Admin (manager) for a branch ---
 router.post('/branch-admin', authMiddleware, async (req: TenantRequest, res: Response) => {
   const user = req.user as UserPayload;
@@ -311,6 +471,158 @@ router.post('/', authMiddleware, async (req: TenantRequest, res: Response) => {
     }
     return res.status(500).json({ error: 'Failed to create user.', details: error.message });
   }
+});
+
+// --- Bulk student import (from an Excel/CSV parsed to JSON on the client) ---
+interface BulkStudentRow {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  branchName?: string;
+  emergencyContact?: string;
+  parentFirstName?: string;
+  parentLastName?: string;
+  parentEmail?: string;
+  parentPhone?: string;
+}
+
+router.post('/bulk-students', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const caller = req.user as UserPayload;
+  const tenantAdmin = isTenantAdmin(caller);
+  const scopes = branchAdminScopes(caller);
+  if (!tenantAdmin && scopes.length === 0) {
+    return res.status(403).json({ error: 'You do not have permission to import students.' });
+  }
+
+  const rows: BulkStudentRow[] = Array.isArray(req.body?.students) ? req.body.students : [];
+  if (rows.length === 0) {
+    return res.status(400).json({ error: 'No rows provided.' });
+  }
+  if (rows.length > 500) {
+    return res.status(400).json({ error: 'Too many rows in one import (max 500). Split the file.' });
+  }
+
+  // Resolve the tenant's branches once, scoped for branch admins.
+  const branches = await prisma.branch.findMany({
+    where: { tenantId: req.tenantId!, ...(tenantAdmin ? {} : { id: { in: scopes } }) },
+    select: { id: true, name: true },
+  });
+  const branchByName = new Map(branches.map((b) => [b.name.trim().toLowerCase(), b]));
+  const soleBranch = branches.length === 1 ? branches[0] : null;
+
+  // Emails seen within this batch, to catch in-file duplicates.
+  const seenEmails = new Set<string>();
+  const results: Array<{ row: number; name: string; email: string; status: 'created' | 'error'; temporaryPassword?: string; parentEmail?: string; parentTemporaryPassword?: string; error?: string }> = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const raw = rows[i];
+    const rowNo = i + 1;
+    const firstName = typeof raw.firstName === 'string' ? raw.firstName.trim() : '';
+    const lastName = typeof raw.lastName === 'string' ? raw.lastName.trim() : '';
+    const email = normalizeEmail(raw.email);
+    const phone = typeof raw.phone === 'string' ? raw.phone.trim() : '';
+    const emergencyContact = typeof raw.emergencyContact === 'string' ? raw.emergencyContact.trim() : '';
+
+    const fail = (error: string) => results.push({ row: rowNo, name: `${firstName} ${lastName}`.trim(), email, status: 'error', error });
+
+    if (!firstName || !lastName || !email) {
+      fail('First name, last name, and email are required.');
+      continue;
+    }
+    if (seenEmails.has(email)) {
+      fail('Duplicate email within this file.');
+      continue;
+    }
+
+    // Resolve branch: by name, or the sole branch if the column was left blank.
+    const branchKey = typeof raw.branchName === 'string' ? raw.branchName.trim().toLowerCase() : '';
+    const branch = branchKey ? branchByName.get(branchKey) : soleBranch;
+    if (!branch) {
+      fail(branchKey ? `Branch "${raw.branchName}" not found or outside your access.` : 'Branch is required (multiple branches exist).');
+      continue;
+    }
+
+    try {
+      const existing = await prisma.user.findUnique({ where: { email } });
+      if (existing) {
+        fail('A user with this email already exists.');
+        continue;
+      }
+
+      seenEmails.add(email);
+      const created = await provisionUser({
+        tenantId: req.tenantId!,
+        firstName,
+        lastName,
+        email,
+        phone: phone || emergencyContact,
+        roleName: 'Student',
+        branchId: branch.id,
+      });
+
+      const result: (typeof results)[number] = {
+        row: rowNo,
+        name: `${firstName} ${lastName}`,
+        email,
+        status: 'created',
+        temporaryPassword: created.temporaryPassword,
+      };
+
+      // Optional emergency contact on the Student record.
+      if (emergencyContact) {
+        await prisma.student.updateMany({ where: { userId: created.userId }, data: { emergencyContact } });
+      }
+
+      // Optional parent: create-or-link and connect to this student.
+      const parentEmail = normalizeEmail(raw.parentEmail);
+      if (parentEmail) {
+        const student = await prisma.student.findUnique({ where: { userId: created.userId } });
+        let parentRecord = await prisma.parent.findFirst({
+          where: { user: { email: parentEmail, tenantId: req.tenantId! } },
+        });
+
+        if (!parentRecord) {
+          const existingParentUser = await prisma.user.findUnique({ where: { email: parentEmail } });
+          if (existingParentUser) {
+            result.error = 'Parent email belongs to a non-parent account; student created without parent link.';
+          } else {
+            const parentProvision = await provisionUser({
+              tenantId: req.tenantId!,
+              firstName: (typeof raw.parentFirstName === 'string' && raw.parentFirstName.trim()) || firstName,
+              lastName: (typeof raw.parentLastName === 'string' && raw.parentLastName.trim()) || lastName,
+              email: parentEmail,
+              phone: typeof raw.parentPhone === 'string' ? raw.parentPhone.trim() : '',
+              roleName: 'Parent',
+              branchId: branch.id,
+            });
+            parentRecord = await prisma.parent.findUnique({ where: { userId: parentProvision.userId } });
+            result.parentEmail = parentEmail;
+            result.parentTemporaryPassword = parentProvision.temporaryPassword;
+          }
+        } else {
+          result.parentEmail = parentEmail;
+        }
+
+        if (student && parentRecord) {
+          const linked = await prisma.studentParent.findUnique({
+            where: { studentId_parentId: { studentId: student.id, parentId: parentRecord.id } },
+          }).catch(() => null);
+          if (!linked) {
+            await prisma.studentParent.create({ data: { studentId: student.id, parentId: parentRecord.id } });
+          }
+        }
+      }
+
+      results.push(result);
+    } catch (error: any) {
+      seenEmails.delete(email);
+      fail(error.code === 'P2002' ? 'A user with this email already exists.' : 'Failed to create student.');
+    }
+  }
+
+  const createdCount = results.filter((r) => r.status === 'created').length;
+  return res.json({ createdCount, errorCount: results.length - createdCount, results });
 });
 
 export default router;

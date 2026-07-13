@@ -14,7 +14,10 @@
     "seed": "ts-node prisma/seed.ts"
   },
   "nodemonConfig": {
-    "watch": ["src", ".env"],
+    "watch": [
+      "src",
+      ".env"
+    ],
     "ext": "ts,json,env"
   },
   "dependencies": {
@@ -24,7 +27,8 @@
     "cors": "^2.8.5",
     "dotenv": "^16.0.3",
     "express": "^4.18.2",
-    "jsonwebtoken": "^9.0.0"
+    "jsonwebtoken": "^9.0.0",
+    "nepali-date-library": "^1.1.11"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.2",

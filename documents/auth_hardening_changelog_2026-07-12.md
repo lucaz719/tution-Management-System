@@ -211,7 +211,74 @@ Replaced the fully-mocked Teacher portal with live, backend-driven logic and fix
 
 ---
 
-## 14. Remaining Work
+## 14. Academic Section — API Integration (2026-07-13)
+
+Wired the tenant dashboard's Academic nav group (Students, Teachers, Timetables, Courses) to real endpoints; these were placeholder routes before.
+
+**Backend** (`services/api/src/routes/courses.ts`):
+- `GET /courses` now returns branch name + class/enrollment counts (removed the fake simulation course list).
+- `GET /courses/classes` (new) — lists all tenant classes with course/branch names and enrollment/session counts.
+- `POST /courses` and `POST /courses/classes` — removed simulation fallbacks; both now validate the target branch/course belongs to the caller's tenant (course/class creation is tenant-scoped; a class inherits its course's branch).
+
+**Frontend** — new `api.academics` client (list/create courses & classes) and four pages built on the shared HR-grade design language:
+- `AcademicCourses` — course table (type, branch, monthly fee, tax-exempt, class/enrolment counts) + "Add Course" drawer.
+- `AcademicTimetables` — class cards with human-readable schedules + "Add Class" drawer (course picker, day chips, start/end time).
+- `AcademicStudents` / `AcademicTeachers` — role-filtered rosters from `/api/users` (`AcademicRoster` shared component).
+- Routed under `/tenant/{students,teachers,courses,timetables}`, role-guarded to Tenant Admin.
+
+**Verified end-to-end** as the Sanskardip account: list/create course, list/create class all work; creating a course in another tenant's branch is blocked (404). Seeded Grade 10 Physics (2 classes) + Grade 9 Mathematics so the pages are populated — demo data, removable before handover.
+
+---
+
+## 15. Timetable CRUD, Teacher Assignment & User Profile Cards (2026-07-13)
+
+**Timetable management (full CRUD + assignment):**
+- Schema: added `Class.teacherId` (assignable teacher) via migration `add_class_teacher_assignment`.
+- `PUT /courses/classes/:id` — rename, reschedule, or (re)assign a teacher; assigning a teacher auto-generates their `TeacherSession` for today when the class is scheduled today (the per-day generation a cron would do), so the teacher portal populates immediately.
+- `DELETE /courses/classes/:id` — blocked when students are enrolled (409); otherwise cascades sessions + attendance.
+- `GET /courses/classes` now includes the assigned teacher's name.
+- Frontend Timetables page: each class card shows its schedule + assigned teacher, with Manage (edit name/days/times/teacher) and Delete actions; assigned/unassigned counts in the stat strip.
+
+**User profile cards (`GET /users/:id/profile`):** role-appropriate overview for any user in the tenant (branch admins limited to their branch's users):
+- Student → fee ledger (billed / paid / due), enrolments, attendance breakdown.
+- Parent → each child with paid / due / overdue and active class count — the admin↔parent connection.
+- Teacher → assigned classes, session totals, pending-update count.
+- Staff → designation, contract, joining date.
+- Frontend: clicking any row in People, Students, or Teachers opens a `UserProfileDrawer` with these cards.
+
+**Verified end-to-end:** teacher assignment sets the class + generates today's session; rename and delete work; delete is blocked with enrolments. Seeded a parent (Rajesh Koirala) ↔ student (Aarav Koirala) with an enrolment and two invoices (one paid NPR 2,825, one overdue NPR 2,825). Profiles return correctly: student shows billed 5,650 / paid 2,825 / due 2,825 / 1 overdue; parent shows the child with the same paid/due and 1 active class.
+
+---
+
+## 16. Nepali (Bikram Sambat) Billing (2026-07-13)
+
+Monthly billing now aligns to the Nepali calendar, so parents and admins are billed per BS month (e.g. Asar 2083), not Gregorian.
+
+- Installed `nepali-date-library` (v1.1.14, zero deps, TS types) in `services/api` and `apps/web`.
+- **Gotcha:** the package's CommonJS build is broken (empty exports); only its ESM build works. The web app (webpack/ESM) imports it directly. The API compiles to CommonJS, so `utils/nepali.ts` loads the ESM build via a `Function`-wrapped dynamic import (which TypeScript does not downlevel to `require`) and caches it.
+- **Backend** (`utils/nepali.ts`): `getBillingPeriod(ref, graceDays)` returns the BS month containing `ref` with its AD boundaries + due date; `formatBsDate()` for labels. Wired into `POST /courses/enroll` — invoices now use BS-month-aligned `billingCycleStart/End` and a due date `graceDays` after cycle start. New `GET /finances/billing-period` returns the current BS period.
+- **Frontend** (`utils/nepaliDate.ts`): `toBsLabel` / `toBsMonthLabel`. Student profile invoice ledger shows due dates in BS ("Due Asar 25, 2083 BS"); tenant dashboard P&L card shows a "Billing: Asar 2083 BS" badge.
+- **Also fixed** (surfaced once BS wiring removed the mask): the enroll endpoint still had simulation fallbacks that swallowed the real error when `studentId` was a User id instead of a Student id — an invoice FK violation was silently faked. Removed all three sims and added tenant-ownership checks for course/student/class; the endpoint now fails honestly (404) on a bad id.
+- **Verified:** `GET /finances/billing-period` → "Asar 2083 (32 days), AD 2026-06-15→2026-07-16, due 2026-06-25". A real enrollment created a persisted invoice (NPR 2,486 = 2,200 + 13% VAT) with those exact BS-aligned AD dates. Both typecheck; web production build bundles the ESM library cleanly.
+
+> Contract note surfaced: `/courses/enroll` expects the **Student record id**, not the user id — the future Fee & Billing UI must map user→student.
+
+---
+
+## 17. Bulk Student Import via Excel (2026-07-13)
+
+Institutions can prepare a spreadsheet matching the schema and import students in bulk.
+
+- Installed `exceljs` in `apps/web` (client-side template generation + parsing; no server multipart needed).
+- **Template** (`BulkStudentImport.tsx` → "Download Excel Template"): a branded `.xlsx` with the exact columns — First/Last Name, Email, Phone, Branch, Emergency Contact, and optional Parent First/Last Name, Parent Email, Parent Phone — plus an example row and a second sheet listing the tenant's valid branch names.
+- **Upload flow**: parses the uploaded `.xlsx` in the browser (header-name mapped, so column order is flexible), shows a preview table, then POSTs JSON rows to the backend. Results view shows each student's generated temp password (with a "Download Credentials" CSV) and per-row errors.
+- **Backend** `POST /api/users/bulk-students`: tenant/branch-admin scoped, max 500 rows. Per row: validates, resolves branch by name (defaults to the sole branch), creates the student (+ Student record), and when a Parent Email is present, creates-or-links a parent account. Independent per-row results — one bad row never rolls back the good ones; catches missing fields, unknown/out-of-scope branch, existing email, in-file duplicates.
+- Wired a "Bulk Import" button into the People directory.
+- **Verified** with a 6-row batch: 3 created (one with an auto-created + linked parent, confirmed via the parent's profile showing the child), 3 correctly skipped (unknown branch, missing name, in-file duplicate). Test rows removed afterward.
+
+---
+
+## 18. Remaining Work
 
 | Item | Status |
 |---|---|
