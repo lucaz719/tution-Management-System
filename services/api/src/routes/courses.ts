@@ -12,7 +12,7 @@ router.post(
   authMiddleware,
   hasPermission('manage_courses'),
   async (req: TenantRequest, res: Response) => {
-    const { branchId, name, description, type, feeStructure, isTaxExempt, taxPercentage } = req.body;
+    const { branchId, gradeId, name, description, type, feeStructure, isTaxExempt, taxPercentage } = req.body;
 
     if (!branchId || !name || !type || !feeStructure) {
       return res.status(400).json({
@@ -27,10 +27,21 @@ router.post(
         return res.status(404).json({ error: 'Branch not found in your institution.' });
       }
 
+      // Optional grade must belong to the tenant.
+      let resolvedGradeId: string | null = null;
+      if (typeof gradeId === 'string' && gradeId) {
+        const grade = await prisma.grade.findFirst({ where: { id: gradeId, tenantId: req.tenantId! } });
+        if (!grade) {
+          return res.status(404).json({ error: 'Grade not found in your institution.' });
+        }
+        resolvedGradeId = grade.id;
+      }
+
       const course = await prisma.course.create({
         data: {
           tenantId: req.tenantId!,
           branchId,
+          gradeId: resolvedGradeId,
           name,
           description,
           type,
@@ -58,6 +69,7 @@ router.get(
         orderBy: { createdAt: 'desc' },
         include: {
           branch: { select: { name: true } },
+          grade: { select: { id: true, name: true } },
           _count: { select: { classes: true, enrollments: true } },
         },
       });
@@ -69,6 +81,8 @@ router.get(
           type: c.type,
           branchId: c.branchId,
           branchName: c.branch.name,
+          gradeId: c.gradeId,
+          gradeName: c.grade?.name ?? null,
           feeStructure: c.feeStructure,
           isTaxExempt: c.isTaxExempt,
           taxPercentage: Number(c.taxPercentage),

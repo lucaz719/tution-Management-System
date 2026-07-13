@@ -11,6 +11,8 @@ interface Course {
   type: string;
   branchId: string;
   branchName: string;
+  gradeId: string | null;
+  gradeName: string | null;
   feeStructure: { monthlyBase?: number } & Record<string, unknown>;
   isTaxExempt: boolean;
   taxPercentage: number;
@@ -24,18 +26,20 @@ const COURSE_TYPES = ['REGULAR', 'MUSIC', 'SHORT_TERM', 'LONG_TERM', 'PERSONALIZ
 interface FormState {
   name: string;
   branchId: string;
+  gradeId: string;
   type: string;
   monthlyBase: string;
   isTaxExempt: boolean;
   description: string;
 }
 
-const EMPTY_FORM: FormState = { name: '', branchId: '', type: 'REGULAR', monthlyBase: '', isTaxExempt: false, description: '' };
+const EMPTY_FORM: FormState = { name: '', branchId: '', gradeId: '', type: 'REGULAR', monthlyBase: '', isTaxExempt: false, description: '' };
 
 export function AcademicCourses() {
   const { showToast } = useToast();
   const [courses, setCourses] = useState<Course[]>([]);
   const [branches, setBranches] = useState<Array<{ id: string; name: string }>>([]);
+  const [grades, setGrades] = useState<Array<{ id: string; name: string }>>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
   const [search, setSearch] = useState('');
@@ -49,9 +53,10 @@ export function AcademicCourses() {
     setIsLoading(true);
     setErrorMsg('');
     try {
-      const [courseList, branchList] = await Promise.all([api.academics.listCourses(), api.branches.list()]);
+      const [courseList, branchList, gradeList] = await Promise.all([api.academics.listCourses(), api.branches.list(), api.grades.list().catch(() => [])]);
       setCourses(courseList as Course[]);
       setBranches((branchList as Array<{ id: string; name: string }>).map((b) => ({ id: b.id, name: b.name })));
+      setGrades((gradeList as Array<{ id: string; name: string }>).map((g) => ({ id: g.id, name: g.name })));
     } catch (error: unknown) {
       setErrorMsg(error instanceof Error ? error.message : 'Failed to load courses.');
     } finally {
@@ -92,6 +97,7 @@ export function AcademicCourses() {
     try {
       await api.academics.createCourse({
         branchId: form.branchId,
+        gradeId: form.gradeId || undefined,
         name: form.name.trim(),
         description: form.description.trim() || undefined,
         type: form.type,
@@ -163,6 +169,7 @@ export function AcademicCourses() {
             <thead>
               <tr>
                 <th>Course</th>
+                <th>Grade</th>
                 <th>Type</th>
                 <th>Branch</th>
                 <th>Monthly Fee</th>
@@ -173,7 +180,7 @@ export function AcademicCourses() {
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6}>
+                  <td colSpan={7}>
                     <div className="people-empty">
                       <span className="material-symbols-outlined">menu_book</span>
                       {isLoading ? 'Loading courses…' : courses.length === 0 ? 'No courses yet. Add your first programme.' : 'No matches for your filters.'}
@@ -187,6 +194,7 @@ export function AcademicCourses() {
                       <div className="people-person-name">{course.name}</div>
                       {course.description ? <div className="people-person-email">{course.description}</div> : null}
                     </td>
+                    <td>{course.gradeName ? <span className="people-role-tag">{course.gradeName}</span> : <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>—</span>}</td>
                     <td><span className="people-role-tag">{course.type.replace('_', ' ')}</span></td>
                     <td><span style={{ fontSize: '13.5px' }}>{course.branchName}</span></td>
                     <td>
@@ -236,18 +244,29 @@ export function AcademicCourses() {
                     <input value={form.monthlyBase} onChange={(e) => setField('monthlyBase', e.target.value)} placeholder="2500" inputMode="numeric" required />
                   </div>
                 </div>
-                <div className="people-field">
-                  <label>Branch</label>
-                  {singleBranch && branches[0] ? (
-                    <input value={branches[0].name} disabled />
-                  ) : (
-                    <select value={form.branchId} onChange={(e) => setField('branchId', e.target.value)} required>
-                      <option value="">Select a branch…</option>
-                      {branches.map((b) => (
-                        <option key={b.id} value={b.id}>{b.name}</option>
+                <div className="people-field-row">
+                  <div className="people-field">
+                    <label>Branch</label>
+                    {singleBranch && branches[0] ? (
+                      <input value={branches[0].name} disabled />
+                    ) : (
+                      <select value={form.branchId} onChange={(e) => setField('branchId', e.target.value)} required>
+                        <option value="">Select a branch…</option>
+                        {branches.map((b) => (
+                          <option key={b.id} value={b.id}>{b.name}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                  <div className="people-field">
+                    <label>Grade <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>(optional)</span></label>
+                    <select value={form.gradeId} onChange={(e) => setField('gradeId', e.target.value)}>
+                      <option value="">Any / not set</option>
+                      {grades.map((g) => (
+                        <option key={g.id} value={g.id}>{g.name}</option>
                       ))}
                     </select>
-                  )}
+                  </div>
                 </div>
                 <div className="people-field">
                   <label>Description <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>(optional)</span></label>

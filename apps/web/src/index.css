@@ -1902,17 +1902,237 @@ h1, h2, h3, h4 {
 [data-theme="dark"] .people-role-tag { background: rgba(138, 184, 232, 0.14); color: #8AB8E8; }
 .people-role-tag--branch { color: var(--text-muted); font-weight: 500; }
 
-.people-empty {
+/* ── People Directory: Dashboard Card Grid ────────────────────── */
+.pd-dashboard {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 18px;
+}
+
+/* Individual category card */
+.pd-card {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--color-surface);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+  transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+}
+.pd-card--clickable {
+  cursor: pointer;
+}
+.pd-card--clickable:hover {
+  box-shadow: 0 4px 16px rgba(15, 76, 138, 0.08);
+  border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+}
+[data-theme="dark"] .pd-card--clickable:hover {
+  box-shadow: 0 4px 16px rgba(138, 184, 232, 0.08);
+}
+.pd-card--clickable:focus-visible {
+  outline: 2px solid var(--color-primary-light);
+  outline-offset: 2px;
+}
+
+/* Card header */
+.pd-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, rgba(15, 76, 138, 0.06) 0%, rgba(47, 111, 237, 0.03) 100%);
+  border-bottom: 1px solid var(--border);
+}
+[data-theme="dark"] .pd-card-head {
+  background: linear-gradient(135deg, rgba(138, 184, 232, 0.08) 0%, rgba(138, 184, 232, 0.03) 100%);
+}
+.pd-card-head .material-symbols-outlined {
+  font-size: 18px;
+  color: var(--color-primary-light);
+}
+.pd-card-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.pd-card-count {
+  margin-left: auto;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  color: var(--color-primary);
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Scrollable card body */
+.pd-card-body {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 320px;
+  padding: 4px 0;
+}
+
+/* Person row inside card */
+.pd-person {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 35%, transparent);
+  transition: background 0.12s ease;
+}
+.pd-person:last-child { border-bottom: none; }
+.pd-person:hover {
+  background: color-mix(in srgb, var(--color-primary) 4%, transparent);
+}
+[data-theme="dark"] .pd-person:hover {
+  background: color-mix(in srgb, var(--color-primary) 7%, transparent);
+}
+.pd-person:focus-visible {
+  outline: 2px solid var(--color-primary-light);
+  outline-offset: -2px;
+}
+
+/* Compact avatar */
+.pd-av {
+  width: 32px !important;
+  height: 32px !important;
+  font-size: 11px !important;
+  flex-shrink: 0;
+}
+
+/* Name + meta line */
+.pd-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.pd-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+.pd-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+/* Empty state */
+.pd-empty {
   text-align: center;
-  padding: 44px 24px;
+  padding: 48px 24px;
   color: var(--text-muted);
   font-size: 14px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
 }
-.people-empty .material-symbols-outlined { font-size: 40px; color: var(--border); }
+.pd-empty .material-symbols-outlined { font-size: 40px; color: var(--border); }
+
+/* Back button in header */
+.pd-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  cursor: pointer;
+  margin-right: 10px;
+  transition: all 0.15s ease;
+  color: var(--color-primary);
+  vertical-align: middle;
+}
+.pd-back:hover {
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+  border-color: var(--color-primary-light);
+}
+.pd-back .material-symbols-outlined { font-size: 20px; }
+
+/* Card footer CTA — "View all X →" */
+.pd-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-primary);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.pd-card-footer:hover {
+  background: color-mix(in srgb, var(--color-primary) 5%, transparent);
+}
+
+/* Drilled-in full list container */
+.pd-full-list {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--color-surface);
+  overflow: hidden;
+}
+
+/* Full-list person rows — wider, with branch & date columns */
+.pd-full-list .pd-person {
+  display: grid;
+  grid-template-columns: 32px minmax(120px, 1.2fr) auto auto 72px;
+  gap: 12px;
+  padding: 8px 16px;
+  min-height: 44px;
+}
+
+.pd-branch-pill {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--border) 30%, transparent);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+}
+
+.pd-date {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Mobile: single column */
+@media (max-width: 640px) {
+  .pd-dashboard {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+  .pd-card-body { max-height: 260px; }
+}
 
 /* Slide-over drawer */
 .people-drawer-overlay {

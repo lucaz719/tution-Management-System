@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { AlertFeed, type AlertFeedItem } from '../components/ui/AlertFeed';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -47,7 +48,8 @@ function buildAlerts(dashboard: TenantDashboardData | null): AlertFeedItem[] {
       tag: 'Fee',
       tagVariant: 'gold',
       description: `NPR ${dashboard.totalOverdueAmountNpr.toLocaleString()} in overdue invoices needs follow-up.`,
-      timestamp: 'live',
+      timestamp: 'Collect',
+      href: '/tenant/fees',
     });
   }
 
@@ -57,7 +59,8 @@ function buildAlerts(dashboard: TenantDashboardData | null): AlertFeedItem[] {
       tag: 'Leave',
       tagVariant: 'warning',
       description: `${dashboard.pendingLeaveRequestsCount} leave request${dashboard.pendingLeaveRequestsCount === 1 ? '' : 's'} awaiting approval.`,
-      timestamp: 'live',
+      timestamp: 'Review',
+      href: '/tenant/leave-management',
     });
   }
 
@@ -67,7 +70,8 @@ function buildAlerts(dashboard: TenantDashboardData | null): AlertFeedItem[] {
       tag: 'Setup',
       tagVariant: 'info',
       description: 'No students enrolled yet. Add students to start attendance and billing.',
-      timestamp: 'live',
+      timestamp: 'Add',
+      href: '/tenant/people',
     });
   }
 
@@ -75,6 +79,7 @@ function buildAlerts(dashboard: TenantDashboardData | null): AlertFeedItem[] {
 }
 
 export function TenantAdminDashboard() {
+  const navigate = useNavigate();
   const [pl, setPl] = useState<ProfitLossData | null>(null);
   const [dashboard, setDashboard] = useState<TenantDashboardData | null>(null);
   const [vatRate, setVatRate] = useState(13);
@@ -130,31 +135,30 @@ export function TenantAdminDashboard() {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      <Card hoverable={false} style={{ padding: '18px 20px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-          <div>
-            <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '20px', fontWeight: 600, color: 'var(--color-text)' }}>Institution Overview</h3>
-            <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.7)', fontSize: '13px' }}>
-              Live academic, finance, and operations snapshot across all branches.
-            </p>
-          </div>
-          <Button variant="outline" onClick={() => void loadDashboardData()} disabled={isLoading} style={{ height: '40px' }}>
-            <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>refresh</span>
-            Refresh
-          </Button>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '16px', flexWrap: 'wrap' }}>
+        <div>
+          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '22px', fontWeight: 600, color: 'var(--color-text)', letterSpacing: '-0.2px' }}>Institution Overview</h2>
+          <p style={{ marginTop: '3px', color: 'var(--text-muted)', fontSize: '13px' }}>
+            Live snapshot across all branches.
+          </p>
         </div>
-      </Card>
+        <Button variant="outline" onClick={() => void loadDashboardData()} disabled={isLoading} style={{ height: '38px' }}>
+          <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>refresh</span>
+          Refresh
+        </Button>
+      </div>
 
       {errorMsg ? <StatusBadge variant="error">{errorMsg}</StatusBadge> : null}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '18px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
         <KPICard
           title="Active Students"
           value={dashboard ? dashboard.activeStudentsCount.toLocaleString() : '—'}
           delta="Enrolled across branches"
           icon="school"
           loading={isLoading}
+          onClick={() => navigate('/tenant/students')}
         />
         <KPICard
           title="Active Teachers"
@@ -162,6 +166,7 @@ export function TenantAdminDashboard() {
           delta="Teaching staff"
           icon="badge"
           loading={isLoading}
+          onClick={() => navigate('/tenant/teachers')}
         />
         <KPICard
           title="Overdue Fees"
@@ -170,6 +175,7 @@ export function TenantAdminDashboard() {
           icon="payments"
           accentColor={dashboard && dashboard.totalOverdueAmountNpr > 0 ? 'var(--color-warning)' : 'var(--color-success)'}
           loading={isLoading}
+          onClick={() => navigate('/tenant/fees')}
         />
         <KPICard
           title="Pending Leaves"
@@ -178,6 +184,7 @@ export function TenantAdminDashboard() {
           icon="event_busy"
           accentColor={dashboard && dashboard.pendingLeaveRequestsCount > 0 ? 'var(--color-warning)' : 'var(--color-success)'}
           loading={isLoading}
+          onClick={() => navigate('/tenant/leave-management')}
         />
       </div>
 
@@ -186,20 +193,34 @@ export function TenantAdminDashboard() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', gap: '12px' }}>
             <div>
               <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Branch Network</h3>
-              <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Students and staff by center</p>
+              <p style={{ marginTop: '4px', color: 'var(--text-muted)', fontSize: '13px' }}>Students and staff by center</p>
             </div>
-            <StatusBadge variant="info">{dashboard?.branchSummary.length ?? 0} branch{(dashboard?.branchSummary.length ?? 0) === 1 ? '' : 'es'}</StatusBadge>
+            <Button variant="outline" onClick={() => navigate('/tenant/branches')} style={{ minHeight: '34px', height: '34px', padding: '6px 12px', borderColor: 'rgba(21, 96, 189, 0.16)' }}>
+              Manage
+            </Button>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {!dashboard || dashboard.branchSummary.length === 0 ? (
-              <p style={{ color: 'rgba(44, 62, 80, 0.64)', fontSize: '14px', textAlign: 'center', padding: '18px 0' }}>
+              <p style={{ color: 'var(--text-muted)', fontSize: '14px', textAlign: 'center', padding: '18px 0' }}>
                 {isLoading ? 'Loading branches…' : 'No branches yet.'}
               </p>
             ) : (
               dashboard.branchSummary.map((branch) => (
-                <div key={branch.branchId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '12px 14px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.1)', background: '#FFFFFF' }}>
-                  <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-text)' }}>{branch.branchName}</span>
-                  <div style={{ display: 'flex', gap: '8px' }}>
+                <div
+                  key={branch.branchId}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => navigate('/tenant/branches')}
+                  onKeyDown={(e) => { if (e.key === 'Enter') navigate('/tenant/branches'); }}
+                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '13px 15px', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--color-bg)', cursor: 'pointer' }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+                    <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'color-mix(in srgb, var(--color-primary) 10%, transparent)', color: 'var(--color-primary)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+                      <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>domain</span>
+                    </div>
+                    <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-text)' }}>{branch.branchName}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
                     <StatusBadge variant="info">{branch.activeStudents} students</StatusBadge>
                     <StatusBadge variant="gold">{branch.staffRoles} staff</StatusBadge>
                   </div>
@@ -213,16 +234,17 @@ export function TenantAdminDashboard() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
             <div>
               <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Action Queue</h3>
-              <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Items needing tenant attention</p>
+              <p style={{ marginTop: '4px', color: 'var(--text-muted)', fontSize: '13px' }}>Items needing tenant attention</p>
             </div>
             <StatusBadge variant={alerts.length > 0 ? 'gold' : 'success'}>{alerts.length}</StatusBadge>
           </div>
           {alerts.length === 0 ? (
-            <p style={{ color: 'rgba(44, 62, 80, 0.64)', fontSize: '14px', textAlign: 'center', padding: '18px 0' }}>
-              {isLoading ? 'Checking…' : 'Nothing needs attention right now.'}
-            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '28px 0', color: 'var(--text-muted)' }}>
+              <span className="material-symbols-outlined" style={{ fontSize: '36px', color: 'var(--color-success)' }}>task_alt</span>
+              <p style={{ fontSize: '14px' }}>{isLoading ? 'Checking…' : 'Nothing needs attention right now.'}</p>
+            </div>
           ) : (
-            <AlertFeed items={alerts} />
+            <AlertFeed items={alerts} onSelect={(href) => navigate(href)} />
           )}
         </Card>
       </div>

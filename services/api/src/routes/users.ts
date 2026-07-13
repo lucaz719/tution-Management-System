@@ -66,6 +66,7 @@ async function provisionUser(params: {
   phone: string;
   roleName: CanonicalRoleName;
   branchId: string | null;
+  gradeId?: string | null;
 }): Promise<CreateUserResult> {
   const temporaryPassword = generateTempPassword();
   const passwordHash = await bcrypt.hash(temporaryPassword, 10);
@@ -100,7 +101,7 @@ async function provisionUser(params: {
       });
     } else if (params.roleName === 'Student') {
       await tx.student.create({
-        data: { userId: created.id, admissionDate: new Date(), emergencyContact: params.phone || '' },
+        data: { userId: created.id, admissionDate: new Date(), emergencyContact: params.phone || '', gradeId: params.gradeId ?? null },
       });
     } else if (params.roleName === 'Parent') {
       await tx.parent.create({ data: { userId: created.id } });
@@ -235,7 +236,7 @@ router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Respo
       where: { id: req.params.id, tenantId: req.tenantId! },
       include: {
         userRoles: { include: { role: true, branch: true } },
-        student: true,
+        student: { include: { grade: true } },
         parent: true,
         staffRecord: true,
       },
@@ -280,6 +281,7 @@ router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Respo
       detail.student = {
         admissionDate: user.student.admissionDate,
         emergencyContact: user.student.emergencyContact,
+        grade: user.student.grade?.name ?? null,
         enrollments: enrollments.map((e) => ({
           courseName: e.course.name,
           className: e.class.name,
@@ -317,21 +319,37 @@ router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Respo
       detail.parent = { children };
     }
 
-    // Teacher overview: assigned classes + session stats.
+    // Teacher overview: assigned classes + grades taught + session stats.
     if (roleNames.includes('Teacher')) {
       const assigned = await prisma.class.findMany({
         where: { teacherId: user.id },
-        include: { course: { select: { name: true } }, branch: { select: { name: true } }, _count: { select: { enrollments: true } } },
+        include: {
+          course: { select: { name: true, grade: { select: { name: true, sortOrder: true } } } },
+          branch: { select: { name: true } },
+          _count: { select: { enrollments: true } },
+        },
       });
       const sessionCount = await prisma.teacherSession.count({ where: { teacherId: user.id } });
       const pendingUpdates = await prisma.teacherSession.count({ where: { teacherId: user.id, dailyUpdateSubmitted: false } });
+
+      // Distinct grades taught, ordered by the grade ladder.
+      const gradeMap = new Map<string, number>();
+      for (const c of assigned) {
+        if (c.course.grade) gradeMap.set(c.course.grade.name, c.course.grade.sortOrder);
+      }
+      const gradesTaught = Array.from(gradeMap.entries())
+        .sort((a, b) => a[1] - b[1])
+        .map(([name]) => name);
+
       detail.teacher = {
         assignedClasses: assigned.map((c) => ({
           className: c.name,
           courseName: c.course.name,
           branchName: c.branch.name,
+          gradeName: c.course.grade?.name ?? null,
           enrollmentCount: c._count.enrollments,
         })),
+        gradesTaught,
         totalSessions: sessionCount,
         pendingUpdates,
       };
@@ -447,6 +465,16 @@ router.post('/', authMiddleware, async (req: TenantRequest, res: Response) => {
     return res.status(403).json({ error: 'You can only add users to a branch you manage.' });
   }
 
+  // Optional grade for students — must belong to the tenant.
+  let gradeId: string | null = null;
+  if (roleName === 'Student' && typeof req.body?.gradeId === 'string' && req.body.gradeId) {
+    const grade = await prisma.grade.findFirst({ where: { id: req.body.gradeId, tenantId: req.tenantId! } });
+    if (!grade) {
+      return res.status(404).json({ error: 'Grade not found in your institution.' });
+    }
+    gradeId = grade.id;
+  }
+
   try {
     const existing = await prisma.user.findUnique({ where: { email: fields.email } });
     if (existing) {
@@ -458,6 +486,7 @@ router.post('/', authMiddleware, async (req: TenantRequest, res: Response) => {
       ...fields,
       roleName,
       branchId,
+      gradeId,
     });
 
     return res.status(201).json({
@@ -480,6 +509,7 @@ interface BulkStudentRow {
   email?: string;
   phone?: string;
   branchName?: string;
+  grade?: string;
   emergencyContact?: string;
   parentFirstName?: string;
   parentLastName?: string;
@@ -510,6 +540,10 @@ router.post('/bulk-students', authMiddleware, async (req: TenantRequest, res: Re
   });
   const branchByName = new Map(branches.map((b) => [b.name.trim().toLowerCase(), b]));
   const soleBranch = branches.length === 1 ? branches[0] : null;
+
+  // Resolve the tenant's grades once, matched by name.
+  const gradeList = await prisma.grade.findMany({ where: { tenantId: req.tenantId! }, select: { id: true, name: true } });
+  const gradeByName = new Map(gradeList.map((g) => [g.name.trim().toLowerCase(), g]));
 
   // Emails seen within this batch, to catch in-file duplicates.
   const seenEmails = new Set<string>();
@@ -543,6 +577,14 @@ router.post('/bulk-students', authMiddleware, async (req: TenantRequest, res: Re
       continue;
     }
 
+    // Resolve grade by name (optional). Unknown grade names are reported.
+    const gradeKey = typeof raw.grade === 'string' ? raw.grade.trim().toLowerCase() : '';
+    const grade = gradeKey ? gradeByName.get(gradeKey) : null;
+    if (gradeKey && !grade) {
+      fail(`Grade "${raw.grade}" does not exist. Create it under Grades first.`);
+      continue;
+    }
+
     try {
       const existing = await prisma.user.findUnique({ where: { email } });
       if (existing) {
@@ -559,6 +601,7 @@ router.post('/bulk-students', authMiddleware, async (req: TenantRequest, res: Re
         phone: phone || emergencyContact,
         roleName: 'Student',
         branchId: branch.id,
+        gradeId: grade?.id ?? null,
       });
 
       const result: (typeof results)[number] = {

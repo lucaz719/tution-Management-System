@@ -7,6 +7,239 @@ import { getBillingPeriod } from '../utils/nepali';
 
 const router = Router();
 
+// ── Fee aggregation helpers ────────────────────────────────────────────────
+const num = (v: any) => Number(v ?? 0);
+
+// An invoice counts as overdue if explicitly OVERDUE, or unpaid past its due date.
+function invoiceOverdue(inv: { status: string; dueDate: Date }): boolean {
+  return inv.status === 'OVERDUE' || (inv.status === 'UNPAID' && new Date(inv.dueDate) < new Date());
+}
+
+interface FeeSummary {
+  totalBilled: number;
+  totalPaid: number;
+  totalDue: number;
+  overdueCount: number;
+  overdueAmount: number;
+  invoiceCount: number;
+}
+
+function summarizeInvoices(invoices: Array<{ status: string; netPayable: any; dueDate: Date }>): FeeSummary {
+  let totalBilled = 0, totalPaid = 0, totalDue = 0, overdueCount = 0, overdueAmount = 0;
+  for (const inv of invoices) {
+    const amt = num(inv.netPayable);
+    totalBilled += amt;
+    if (inv.status === 'PAID') {
+      totalPaid += amt;
+    } else if (inv.status === 'UNPAID' || inv.status === 'OVERDUE') {
+      totalDue += amt;
+      if (invoiceOverdue(inv)) {
+        overdueCount += 1;
+        overdueAmount += amt;
+      }
+    }
+  }
+  return { totalBilled, totalPaid, totalDue, overdueCount, overdueAmount, invoiceCount: invoices.length };
+}
+
+// Branch ids a branch-admin caller manages (empty for tenant admins = all).
+function billingBranchScopes(user: any): { isTenantAdmin: boolean; scopes: string[] } {
+  const roles = Array.isArray(user?.roles) ? user.roles : [];
+  const isTenantAdmin = roles.some((r: any) => r.roleName === 'Tenant Admin' && r.branchId === null);
+  const scopes = roles.filter((r: any) => r.roleName === 'Branch Admin' && r.branchId).map((r: any) => r.branchId);
+  return { isTenantAdmin, scopes };
+}
+
+// Tenant-wide fee overview: collected, outstanding, overdue, current BS period.
+router.get(
+  '/overview',
+  authMiddleware,
+  async (req: TenantRequest, res: Response) => {
+    try {
+      const invoices = await prisma.invoice.findMany({ where: { tenantId: req.tenantId! } });
+      const summary = summarizeInvoices(invoices);
+      const overdueStudentIds = new Set(invoices.filter(invoiceOverdue).map((i) => i.studentId));
+      const period = await getBillingPeriod(new Date(), 10);
+      return res.json({
+        collected: summary.totalPaid,
+        outstanding: summary.totalDue,
+        overdueAmount: summary.overdueAmount,
+        overdueStudents: overdueStudentIds.size,
+        invoiceCount: summary.invoiceCount,
+        billingPeriod: period.label,
+      });
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Failed to compute fee overview.', details: error.message });
+    }
+  }
+);
+
+// Per-student fee status, ordered by dues owed (highest first).
+router.get(
+  '/students',
+  authMiddleware,
+  async (req: TenantRequest, res: Response) => {
+    const { isTenantAdmin, scopes } = billingBranchScopes(req.user);
+    if (!isTenantAdmin && scopes.length === 0) {
+      return res.status(403).json({ error: 'You do not have access to fee records.' });
+    }
+
+    try {
+      const students = await prisma.student.findMany({
+        where: { user: { tenantId: req.tenantId! } },
+        include: { user: { include: { userRoles: { include: { branch: true } } } } },
+      });
+      const invoices = await prisma.invoice.findMany({ where: { tenantId: req.tenantId! } });
+
+      const byStudent = new Map<string, typeof invoices>();
+      for (const inv of invoices) {
+        const list = byStudent.get(inv.studentId) ?? [];
+        list.push(inv);
+        byStudent.set(inv.studentId, list);
+      }
+
+      const rows = students
+        .map((s) => {
+          const scopedRole = s.user.userRoles.find((ur) => ur.branchId);
+          const branchId = scopedRole?.branchId ?? null;
+          const branchName = scopedRole?.branch?.name ?? null;
+          const summary = summarizeInvoices(byStudent.get(s.id) ?? []);
+          return {
+            studentId: s.id,
+            userId: s.userId,
+            name: `${s.user.firstName} ${s.user.lastName}`,
+            email: s.user.email,
+            branchId,
+            branchName,
+            ...summary,
+          };
+        })
+        .filter((r) => isTenantAdmin || (r.branchId && scopes.includes(r.branchId)))
+        .sort((a, b) => b.totalDue - a.totalDue);
+
+      return res.json({ students: rows });
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Failed to load student fees.', details: error.message });
+    }
+  }
+);
+
+// Invoices for one student.
+router.get(
+  '/students/:studentId/invoices',
+  authMiddleware,
+  async (req: TenantRequest, res: Response) => {
+    try {
+      const invoices = await prisma.invoice.findMany({
+        where: { studentId: req.params.studentId, tenantId: req.tenantId! },
+        orderBy: { dueDate: 'desc' },
+      });
+      return res.json({
+        invoices: invoices.map((i) => ({
+          id: i.id,
+          netPayable: num(i.netPayable),
+          status: i.status,
+          overdue: invoiceOverdue(i),
+          dueDate: i.dueDate,
+          billingCycleStart: i.billingCycleStart,
+          billingCycleEnd: i.billingCycleEnd,
+          paymentDate: i.paymentDate,
+        })),
+      });
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Failed to load invoices.', details: error.message });
+    }
+  }
+);
+
+// Record a payment against an invoice (cash/bank or a gateway reference).
+router.post(
+  '/invoices/:id/pay',
+  authMiddleware,
+  hasPermission('manage_billing'),
+  async (req: TenantRequest, res: Response) => {
+    const { id } = req.params;
+    const transactionId = typeof req.body?.transactionId === 'string' && req.body.transactionId.trim()
+      ? req.body.transactionId.trim()
+      : 'CASH';
+    try {
+      const invoice = await prisma.invoice.findUnique({ where: { id } });
+      if (!invoice || invoice.tenantId !== req.tenantId) {
+        return res.status(404).json({ error: 'Invoice not found in your institution.' });
+      }
+      if (invoice.status === 'PAID') {
+        return res.status(400).json({ error: 'This invoice is already paid.' });
+      }
+      const updated = await prisma.invoice.update({
+        where: { id },
+        data: { status: 'PAID', paymentDate: new Date(), transactionId },
+      });
+      return res.json({ message: 'Payment recorded.', invoice: { id: updated.id, status: updated.status, paymentDate: updated.paymentDate } });
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Failed to record payment.', details: error.message });
+    }
+  }
+);
+
+// Monthly billing run: generate this BS month's invoice for each active student
+// who doesn't already have one for the cycle (one invoice per student per month,
+// summing their active enrolments' fees).
+router.post(
+  '/generate-invoices',
+  authMiddleware,
+  hasPermission('manage_billing'),
+  async (req: TenantRequest, res: Response) => {
+    try {
+      const period = await getBillingPeriod(new Date(), 10);
+
+      const enrollments = await prisma.enrollment.findMany({
+        where: { status: 'ACTIVE', course: { tenantId: req.tenantId! } },
+        include: { course: true },
+      });
+
+      // Sum fees per student across their active enrolments.
+      const feeByStudent = new Map<string, number>();
+      for (const e of enrollments) {
+        const fee = (e.course.feeStructure ?? {}) as { monthlyBase?: number };
+        const base = Number(fee.monthlyBase || 0);
+        const net = e.course.isTaxExempt ? base : base * (1 + Number(e.course.taxPercentage || 13) / 100);
+        feeByStudent.set(e.studentId, (feeByStudent.get(e.studentId) ?? 0) + net);
+      }
+
+      // Students already invoiced for this cycle.
+      const existing = await prisma.invoice.findMany({
+        where: { tenantId: req.tenantId!, billingCycleStart: period.cycleStart },
+        select: { studentId: true },
+      });
+      const alreadyBilled = new Set(existing.map((i) => i.studentId));
+
+      let created = 0;
+      for (const [studentId, net] of feeByStudent) {
+        if (alreadyBilled.has(studentId) || net <= 0) continue;
+        await prisma.invoice.create({
+          data: {
+            tenantId: req.tenantId!,
+            studentId,
+            amount: Math.round(net * 100) / 100,
+            discount: 0,
+            fine: 0,
+            netPayable: Math.round(net * 100) / 100,
+            billingCycleStart: period.cycleStart,
+            billingCycleEnd: period.cycleEnd,
+            dueDate: period.dueDate,
+            status: 'UNPAID',
+          },
+        });
+        created += 1;
+      }
+
+      return res.json({ message: `Generated ${created} invoice(s) for ${period.label}.`, created, billingPeriod: period.label, skipped: feeByStudent.size - created });
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Failed to generate invoices.', details: error.message });
+    }
+  }
+);
+
 // Current Nepali (Bikram Sambat) billing period — drives billing-cycle labels.
 router.get(
   '/billing-period',

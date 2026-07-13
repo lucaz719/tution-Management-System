@@ -8,22 +8,23 @@ export interface TMSButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElem
 }
 
 const baseStyle: CSSProperties = {
-  minHeight: '44px',
-  minWidth: '44px',
+  minHeight: '40px',
+  minWidth: '40px',
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  gap: '8px',
-  padding: '12px 24px',
-  borderRadius: 'var(--radius-sm)',
+  gap: '7px',
+  padding: '9px 16px',
+  borderRadius: '10px',
   border: '1px solid transparent',
   fontFamily: 'var(--font-ui)',
   fontSize: '14px',
-  fontWeight: 700,
+  fontWeight: 600,
   lineHeight: 1,
+  letterSpacing: '0',
   textDecoration: 'none',
   cursor: 'pointer',
-  transition: 'background-color 200ms var(--ease-silk), border-color 200ms var(--ease-silk), color 200ms var(--ease-silk), box-shadow 200ms var(--ease-silk), transform 200ms var(--ease-silk), opacity 200ms var(--ease-silk)',
+  transition: 'background-color 180ms var(--ease-silk), border-color 180ms var(--ease-silk), color 180ms var(--ease-silk), box-shadow 180ms var(--ease-silk), transform 180ms var(--ease-silk), opacity 180ms var(--ease-silk)',
 };
 
 const spinnerStyle: CSSProperties = {
@@ -34,29 +35,31 @@ const spinnerStyle: CSSProperties = {
 };
 
 function getVariantStyle(variant: TMSButtonProps['variant'], hovered: boolean, disabled: boolean): CSSProperties {
+  // Secondary: quiet, tinted-fill button (Apple's soft grey/blue secondary).
   if (variant === 'secondary') {
     return {
-      background: hovered && !disabled ? 'rgba(47, 111, 237, 0.08)' : 'transparent',
-      borderColor: hovered && !disabled ? 'rgba(47, 111, 237, 0.48)' : 'rgba(47, 111, 237, 0.28)',
-      color: disabled ? 'rgba(47, 111, 237, 0.45)' : 'var(--color-primary-light)',
+      background: hovered && !disabled ? 'color-mix(in srgb, var(--color-primary) 12%, transparent)' : 'color-mix(in srgb, var(--color-primary) 7%, transparent)',
+      borderColor: 'transparent',
+      color: disabled ? 'color-mix(in srgb, var(--color-primary) 45%, transparent)' : 'var(--color-primary)',
       boxShadow: 'none',
     };
   }
 
   if (variant === 'text') {
     return {
-      background: hovered && !disabled ? 'rgba(47, 111, 237, 0.06)' : 'transparent',
-      color: disabled ? 'rgba(47, 111, 237, 0.45)' : 'var(--color-primary-light)',
+      background: hovered && !disabled ? 'color-mix(in srgb, var(--color-primary) 8%, transparent)' : 'transparent',
+      color: disabled ? 'color-mix(in srgb, var(--color-primary) 45%, transparent)' : 'var(--color-primary)',
       boxShadow: 'none',
-      paddingInline: '8px',
+      paddingInline: '10px',
     };
   }
 
+  // Primary: solid brand blue, flat and modern (not the gold accent).
   return {
-    background: disabled ? 'rgba(203, 169, 111, 0.55)' : hovered ? 'var(--color-accent-hover)' : 'var(--color-accent)',
+    background: disabled ? 'color-mix(in srgb, var(--color-primary) 45%, transparent)' : hovered ? 'var(--color-primary-light)' : 'var(--color-primary)',
     color: '#FFFFFF',
-    boxShadow: disabled ? 'none' : hovered ? 'var(--shadow-btn-accent)' : 'none',
-    borderColor: disabled ? 'rgba(203, 169, 111, 0.55)' : hovered ? 'var(--color-accent-hover)' : 'var(--color-accent)',
+    boxShadow: disabled ? 'none' : hovered ? '0 4px 14px -4px color-mix(in srgb, var(--color-primary) 60%, transparent)' : '0 1px 2px rgba(16, 24, 40, 0.08)',
+    borderColor: 'transparent',
   };
 }
 

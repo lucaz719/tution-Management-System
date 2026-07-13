@@ -19,37 +19,63 @@ interface Person {
   createdAt: string;
 }
 
+interface FeeSummary {
+  totalDue: number;
+  overdueAmount: number;
+  overdueCount: number;
+}
+
 interface AcademicRosterProps {
   role: 'Student' | 'Teacher';
   title: string;
   subtitle: string;
   emptyText: string;
+  showFees?: boolean;
 }
 
 function initials(name: string): string {
-  return (
-    name
-      .split(' ')
-      .filter(Boolean)
-      .map((part) => part[0]?.toUpperCase())
-      .join('')
-      .slice(0, 2) || '??'
-  );
+  return name.split(' ').filter(Boolean).map((p) => p[0]?.toUpperCase()).join('').slice(0, 2) || '??';
 }
 
-export function AcademicRoster({ role, title, subtitle, emptyText }: AcademicRosterProps) {
+function money(n: number): string {
+  return `NPR ${n.toLocaleString()}`;
+}
+
+// Fee badge for a student row: overdue > due > cleared.
+function FeeBadge({ fee }: { fee: FeeSummary | undefined }) {
+  if (!fee) return <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>—</span>;
+  if (fee.overdueAmount > 0) {
+    return <StatusBadge variant="error">Overdue {money(fee.overdueAmount)}</StatusBadge>;
+  }
+  if (fee.totalDue > 0) {
+    return <StatusBadge variant="warning">Due {money(fee.totalDue)}</StatusBadge>;
+  }
+  return <StatusBadge variant="success">Cleared</StatusBadge>;
+}
+
+export function AcademicRoster({ role, title, subtitle, emptyText, showFees = false }: AcademicRosterProps) {
   const [people, setPeople] = useState<Person[]>([]);
+  const [feeMap, setFeeMap] = useState<Map<string, FeeSummary>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
   const [search, setSearch] = useState('');
+  const [feeFilter, setFeeFilter] = useState<'ALL' | 'OVERDUE' | 'DUE'>('ALL');
   const [selectedUserId, setSelectedUserId] = useState('');
 
   const loadPeople = async () => {
     setIsLoading(true);
     setErrorMsg('');
     try {
-      const list = (await api.people.list()) as Person[];
+      const [list, fees] = await Promise.all([
+        api.people.list() as Promise<Person[]>,
+        showFees ? api.finances.getStudentFees() : Promise.resolve([]),
+      ]);
       setPeople(list.filter((p) => p.roles.some((r) => r.role === role)));
+      const map = new Map<string, FeeSummary>();
+      for (const f of fees) {
+        map.set(f.userId, { totalDue: f.totalDue, overdueAmount: f.overdueAmount, overdueCount: f.overdueCount });
+      }
+      setFeeMap(map);
     } catch (error: unknown) {
       setErrorMsg(error instanceof Error ? error.message : 'Failed to load the roster.');
     } finally {
@@ -64,15 +90,29 @@ export function AcademicRoster({ role, title, subtitle, emptyText }: AcademicRos
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return people;
-    return people.filter((p) => p.name.toLowerCase().includes(term) || p.email.toLowerCase().includes(term));
-  }, [people, search]);
+    return people.filter((p) => {
+      const matchesSearch = !term || p.name.toLowerCase().includes(term) || p.email.toLowerCase().includes(term);
+      if (!matchesSearch) return false;
+      if (!showFees || feeFilter === 'ALL') return true;
+      const fee = feeMap.get(p.id);
+      if (feeFilter === 'OVERDUE') return (fee?.overdueAmount ?? 0) > 0;
+      if (feeFilter === 'DUE') return (fee?.totalDue ?? 0) > 0;
+      return true;
+    });
+  }, [people, search, showFees, feeFilter, feeMap]);
 
   const branchesRepresented = useMemo(() => {
     const names = new Set<string>();
     people.forEach((p) => p.roles.forEach((r) => r.branchName && names.add(r.branchName)));
     return names.size;
   }, [people]);
+
+  const overdueStudents = useMemo(
+    () => (showFees ? people.filter((p) => (feeMap.get(p.id)?.overdueAmount ?? 0) > 0).length : 0),
+    [people, feeMap, showFees]
+  );
+
+  const colCount = showFees ? 5 : 4;
 
   return (
     <div className="people-page">
@@ -98,10 +138,17 @@ export function AcademicRoster({ role, title, subtitle, emptyText }: AcademicRos
           <span className="people-stat-value">{branchesRepresented}</span>
           <span className="people-stat-label">Branches</span>
         </div>
-        <div className="people-stat" style={{ ['--stat-accent' as string]: 'var(--color-success)' }}>
-          <span className="people-stat-value">{people.filter((p) => p.status === 'ACTIVE').length}</span>
-          <span className="people-stat-label">Active</span>
-        </div>
+        {showFees ? (
+          <div className="people-stat" style={{ ['--stat-accent' as string]: overdueStudents > 0 ? 'var(--color-error)' : 'var(--color-success)' }}>
+            <span className="people-stat-value">{overdueStudents}</span>
+            <span className="people-stat-label">Fee Overdue</span>
+          </div>
+        ) : (
+          <div className="people-stat" style={{ ['--stat-accent' as string]: 'var(--color-success)' }}>
+            <span className="people-stat-value">{people.filter((p) => p.status === 'ACTIVE').length}</span>
+            <span className="people-stat-label">Active</span>
+          </div>
+        )}
       </div>
 
       <div className="people-toolbar">
@@ -109,6 +156,13 @@ export function AcademicRoster({ role, title, subtitle, emptyText }: AcademicRos
           <span className="material-symbols-outlined">search</span>
           <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name or email…" />
         </div>
+        {showFees ? (
+          <select className="people-filter" value={feeFilter} onChange={(e) => setFeeFilter(e.target.value as 'ALL' | 'OVERDUE' | 'DUE')}>
+            <option value="ALL">All fee status</option>
+            <option value="OVERDUE">Overdue only</option>
+            <option value="DUE">Any dues</option>
+          </select>
+        ) : null}
       </div>
 
       <div className="people-table-wrap">
@@ -118,6 +172,7 @@ export function AcademicRoster({ role, title, subtitle, emptyText }: AcademicRos
               <tr>
                 <th>{role}</th>
                 <th>Branch</th>
+                {showFees ? <th>Fees</th> : null}
                 <th>Status</th>
                 <th>Added</th>
               </tr>
@@ -125,18 +180,16 @@ export function AcademicRoster({ role, title, subtitle, emptyText }: AcademicRos
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={4}>
+                  <td colSpan={colCount}>
                     <div className="people-empty">
                       <span className="material-symbols-outlined">{role === 'Student' ? 'school' : 'badge'}</span>
-                      {isLoading ? 'Loading…' : people.length === 0 ? emptyText : 'No matches for your search.'}
+                      {isLoading ? 'Loading…' : people.length === 0 ? emptyText : 'No matches for your filters.'}
                     </div>
                   </td>
                 </tr>
               ) : (
                 filtered.map((person) => {
-                  const branchNames = Array.from(
-                    new Set(person.roles.map((r) => r.branchName).filter(Boolean) as string[])
-                  );
+                  const branchNames = Array.from(new Set(person.roles.map((r) => r.branchName).filter(Boolean) as string[]));
                   return (
                     <tr key={person.id} onClick={() => setSelectedUserId(person.id)} style={{ cursor: 'pointer' }}>
                       <td>
@@ -153,6 +206,7 @@ export function AcademicRoster({ role, title, subtitle, emptyText }: AcademicRos
                           {branchNames.length ? branchNames.join(', ') : '—'}
                         </span>
                       </td>
+                      {showFees ? <td><FeeBadge fee={feeMap.get(person.id)} /></td> : null}
                       <td>
                         <StatusBadge variant={person.status === 'ACTIVE' ? 'success' : 'warning'}>{person.status}</StatusBadge>
                       </td>
@@ -178,8 +232,9 @@ export function AcademicStudents() {
     <AcademicRoster
       role="Student"
       title="Students"
-      subtitle="Every enrolled student across your branches."
+      subtitle="Every enrolled student across your branches — with fee status at a glance."
       emptyText="No students yet. Add them from Staff & Students or a branch manager can enrol them."
+      showFees
     />
   );
 }

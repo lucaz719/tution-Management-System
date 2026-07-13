@@ -7,6 +7,7 @@ import { api } from '../services/api';
 
 interface BulkStudentImportProps {
   branches: Array<{ id: string; name: string }>;
+  grades?: string[];
   onClose: () => void;
   onImported: () => void;
 }
@@ -18,6 +19,7 @@ const COLUMNS = [
   { header: 'Email', key: 'email', width: 28, required: true },
   { header: 'Phone', key: 'phone', width: 16, required: false },
   { header: 'Branch', key: 'branchName', width: 22, required: false },
+  { header: 'Grade', key: 'grade', width: 14, required: false },
   { header: 'Emergency Contact', key: 'emergencyContact', width: 18, required: false },
   { header: 'Parent First Name', key: 'parentFirstName', width: 18, required: false },
   { header: 'Parent Last Name', key: 'parentLastName', width: 18, required: false },
@@ -38,7 +40,7 @@ interface ImportResult {
   error?: string;
 }
 
-export function BulkStudentImport({ branches, onClose, onImported }: BulkStudentImportProps) {
+export function BulkStudentImport({ branches, grades = [], onClose, onImported }: BulkStudentImportProps) {
   const { showToast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const [rows, setRows] = useState<RowRecord[]>([]);
@@ -64,6 +66,7 @@ export function BulkStudentImport({ branches, onClose, onImported }: BulkStudent
       email: 'aarav.koirala@example.com',
       phone: '9800000001',
       branchName: branches[0]?.name ?? 'Damak Main Center',
+      grade: grades[0] ?? 'Class 10',
       emergencyContact: '9800000002',
       parentFirstName: 'Rajesh',
       parentLastName: 'Koirala',
@@ -71,11 +74,17 @@ export function BulkStudentImport({ branches, onClose, onImported }: BulkStudent
       parentPhone: '9800000002',
     });
 
-    // Reference sheet listing valid branch names.
-    const ref = wb.addWorksheet('Branches (reference)');
-    ref.columns = [{ header: 'Valid branch names', key: 'name', width: 32 }];
+    // Reference sheet listing valid branch and grade names.
+    const ref = wb.addWorksheet('Reference');
+    ref.columns = [
+      { header: 'Valid branch names', key: 'branch', width: 32 },
+      { header: 'Valid grade names', key: 'grade', width: 24 },
+    ];
     ref.getRow(1).font = { bold: true };
-    branches.forEach((b) => ref.addRow({ name: b.name }));
+    const maxRows = Math.max(branches.length, grades.length);
+    for (let i = 0; i < maxRows; i++) {
+      ref.addRow({ branch: branches[i]?.name ?? '', grade: grades[i] ?? '' });
+    }
 
     const buffer = await wb.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });

@@ -278,7 +278,66 @@ Institutions can prepare a spreadsheet matching the schema and import students i
 
 ---
 
-## 18. Remaining Work
+## 18. Fee & Billing Module + Overdue Flagging (2026-07-13)
+
+Wired the previously-placeholder Finance section and surfaced fee status in the student roster so overdue students are visible without opening each profile.
+
+**Backend** (`finances.ts`): overdue = explicitly OVERDUE or unpaid past due date.
+- `GET /finances/overview` — collected, outstanding, overdue amount, overdue student count, invoice count, current BS period.
+- `GET /finances/students` — per-student fee summary (billed/paid/due/overdue), branch-scoped for branch admins, sorted by dues owed.
+- `GET /finances/students/:id/invoices` — a student's invoice ledger.
+- `POST /finances/invoices/:id/pay` — record a cash/bank payment (marks PAID, sets paymentDate/transactionId); rejects double-payment (400).
+- `POST /finances/generate-invoices` — monthly billing run: one BS-month invoice per active student (summing their active enrolments' fees), deduped by (student, cycle start) so re-running is idempotent.
+
+**Frontend:**
+- **Students roster** now shows a Fees column (Overdue NPR x / Due NPR x / Cleared), a "Fee Overdue" count stat, and an "Overdue only" filter — the effective flagging requested.
+- **New Fee & Billing page** (`/tenant/fees`): overview KPIs, a student fee table sorted by dues with a Collect/View action, a payment drawer listing invoices (BS due dates) with per-invoice "Mark Paid", and a "Generate [BS month] Invoices" button.
+- Dashboard's Overdue Fees KPI and the "Fee" action-queue alert now deep-link to `/tenant/fees`.
+
+**Verified:** overview + per-student flagging (Aarav flagged NPR 5,311 overdue across 2 invoices, sorted top); recording a payment moved collected 2,825→5,650 and reduced outstanding; double-pay blocked (400); billing run deduped correctly (0 created / 1 skipped on re-run).
+
+---
+
+## 19. Grade Levels (UKG–Class 12) + CRUD (2026-07-13)
+
+Students can now be assigned a grade level, and the grade list is fully manageable. Note: modelled as a new `Grade` entity (grade *level*) distinct from the existing `Class` model (a course's timetable section) to avoid terminology collision.
+
+**Backend:**
+- Schema: new `Grade` model (`tenantId`, `name`, `sortOrder`, unique per tenant) + `Student.gradeId` (migration `add_grades`).
+- `routes/grades.ts`: list, create, rename/reorder (PUT), delete, and `POST /grades/seed-defaults` (idempotent — seeds Nursery, LKG, UKG, Class 1–12). Delete is blocked (409) when students are assigned. All gated by `manage_students`.
+- Student creation (`POST /users`) and bulk import both accept a grade (by id / by name); the profile endpoint returns the student's grade.
+
+**Frontend:**
+- New **Grades** page under Academic (`/tenant/grades`): "Add Standard Grades" one-click seed, inline add/rename/delete, per-grade student counts.
+- **Add Person** drawer shows a Grade dropdown when the role is Student.
+- **Bulk import** template gains a Grade column, with valid grade names listed on the reference sheet; unknown grades are reported per-row.
+- Student's grade shows as a tag on their profile card.
+
+**Verified:** seed produced the 15-grade ladder; a student created with Class 10 shows "Class 10" on their profile and bumps that grade's student count; deleting an in-use grade is blocked (409); rename works. (Sanskardip's grades were already seeded via the seed script, so seed-defaults added 0.)
+
+---
+
+## 20. Grades as a First-Class Link Across Courses, Teachers & Students (2026-07-13)
+
+Made grade a real cross-cutting dimension rather than a student label. Engineering note: the key link is **Course → Grade**; teachers-per-grade is *derived* (course → class → assigned teacher) rather than a redundant join table — one source of truth, no denormalization.
+
+**Backend:**
+- Schema: `Course.gradeId` (optional FK) via migration `link_course_to_grade`.
+- `POST /courses` accepts + validates `gradeId`; `GET /courses` returns `gradeName`.
+- `GET /grades` now includes `courseCount`.
+- New `GET /grades/:id` — the aggregation endpoint: the grade's students, its courses (with class/enrolment counts), and the distinct teachers who teach those courses' classes.
+- Teacher profile (`/users/:id/profile`) now returns `gradesTaught` (distinct, ladder-ordered) and each assigned class's `gradeName`.
+
+**Frontend:**
+- Courses: grade selector in the create drawer + a Grade column in the table.
+- Grades page: a Courses count column, and clicking a grade opens a detail drawer showing its courses, teachers, and students.
+- Teacher profile card shows the grades they teach; student profile already shows their grade.
+
+**Verified end-to-end:** created a course linked to Class 10 (list shows the grade); after linking Grade 10 Physics → Class 10 and a student → Class 10, `GET /grades/:id` returned students=1, courses=2, teachers=1 (Bishnu, derived from his class assignment), and Bishnu's profile listed "Class 10" under gradesTaught. Both sides typecheck; production build clean.
+
+---
+
+## 21. Remaining Work
 
 | Item | Status |
 |---|---|

@@ -10,6 +10,7 @@ export interface KPICardProps {
   icon?: ReactNode;
   accentColor?: string;
   children?: ReactNode;
+  onClick?: () => void;
 }
 
 function resolveDeltaStyle(delta: string | undefined, accentColor: string): CSSProperties | undefined {
@@ -32,9 +33,9 @@ function renderIcon(icon: ReactNode, accentColor: string) {
   return (
     <div
       style={{
-        width: '44px',
-        height: '44px',
-        borderRadius: '12px',
+        width: '38px',
+        height: '38px',
+        borderRadius: '11px',
         display: 'grid',
         placeItems: 'center',
         // Tint the badge with the card's own accent so each KPI reads as a set.
@@ -44,7 +45,7 @@ function renderIcon(icon: ReactNode, accentColor: string) {
       }}
     >
       {typeof icon === 'string' ? (
-        <span className='material-symbols-outlined' style={{ fontSize: '22px' }}>
+        <span className='material-symbols-outlined' style={{ fontSize: '20px' }}>
           {icon}
         </span>
       ) : (
@@ -62,22 +63,31 @@ export function KPICard({
   icon,
   accentColor = 'var(--color-primary-light)',
   children,
+  onClick,
 }: KPICardProps) {
+  const clickable = Boolean(onClick);
   return (
-    <Card hoverable={false} style={{ padding: '24px', minHeight: '148px', background: 'var(--color-bg)', boxShadow: 'var(--shadow-card)' }}>
+    <Card
+      hoverable={clickable}
+      onClick={onClick}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick?.(); } } : undefined}
+      style={{ padding: '18px', minHeight: '112px', background: 'var(--color-bg)', boxShadow: 'var(--shadow-card)' }}
+    >
       {loading ? (
         <SkeletonCard rows={3} height={16} />
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', height: '100%' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '14px' }}>
             <div>
-              <p style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{title}</p>
+              <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{title}</p>
               <div
                 style={{
                   marginTop: '8px',
                   color: 'var(--color-text)',
                   fontFamily: 'var(--font-display)',
-                  fontSize: '24px',
+                  fontSize: '23px',
                   fontWeight: 600,
                   lineHeight: 1.1,
                 }}
@@ -88,11 +98,16 @@ export function KPICard({
             {icon ? renderIcon(icon, accentColor) : null}
           </div>
           {children}
-          {delta ? (
-            <div style={{ fontSize: '12px', fontWeight: 700, ...resolveDeltaStyle(delta, accentColor) }}>
-              {delta}
-            </div>
-          ) : null}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginTop: 'auto' }}>
+            {delta ? (
+              <div style={{ fontSize: '12px', fontWeight: 700, ...resolveDeltaStyle(delta, accentColor) }}>
+                {delta}
+              </div>
+            ) : <span />}
+            {clickable ? (
+              <span className="material-symbols-outlined" style={{ fontSize: '18px', color: 'var(--text-muted)' }}>chevron_right</span>
+            ) : null}
+          </div>
         </div>
       )}
     </Card>

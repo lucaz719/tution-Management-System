@@ -20,6 +20,7 @@ interface Profile {
     student?: {
       admissionDate: string;
       emergencyContact: string;
+      grade: string | null;
       enrollments: Array<{ courseName: string; className: string; status: string }>;
       fees: { totalBilled: number; totalPaid: number; totalDue: number; overdueCount: number; invoices: Array<{ id: string; netPayable: number; status: string; dueDate: string }> };
       attendance: Record<string, number>;
@@ -28,7 +29,8 @@ interface Profile {
       children: Array<{ studentId: string; name: string; activeEnrollments: number; totalPaid: number; totalDue: number; overdueCount: number }>;
     };
     teacher?: {
-      assignedClasses: Array<{ className: string; courseName: string; branchName: string; enrollmentCount: number }>;
+      assignedClasses: Array<{ className: string; courseName: string; branchName: string; gradeName: string | null; enrollmentCount: number }>;
+      gradesTaught: string[];
       totalSessions: number;
       pendingUpdates: number;
     };
@@ -106,6 +108,7 @@ export function UserProfileDrawer({ userId, onClose }: UserProfileDrawerProps) {
                   {profile.roles.map((r, i) => (
                     <span key={i} className="people-role-tag">{r.role}{r.branchName ? ` · ${r.branchName}` : ''}</span>
                   ))}
+                  {profile.detail.student?.grade ? <span className="people-role-tag">{profile.detail.student.grade}</span> : null}
                   <StatusBadge variant={profile.status === 'ACTIVE' ? 'success' : 'warning'}>{profile.status}</StatusBadge>
                 </div>
                 <div style={{ ...rowCard, display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px' }}>
@@ -198,6 +201,13 @@ export function UserProfileDrawer({ userId, onClose }: UserProfileDrawerProps) {
               {profile.detail.teacher ? (
                 <div>
                   <div style={sectionTitle}>Teaching</div>
+                  {profile.detail.teacher.gradesTaught.length > 0 ? (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
+                      {profile.detail.teacher.gradesTaught.map((g) => (
+                        <span key={g} className="people-role-tag">{g}</span>
+                      ))}
+                    </div>
+                  ) : null}
                   <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
                     <FeeStat label="Classes" value={String(profile.detail.teacher.assignedClasses.length)} />
                     <FeeStat label="Sessions" value={String(profile.detail.teacher.totalSessions)} />

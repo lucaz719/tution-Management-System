@@ -104,6 +104,7 @@ model Tenant {
   invoices            Invoice[]
   leaves              Leave[]
   pettyCash           PettyCash[]
+  grades              Grade[]
   // Phase 2 relations
   academicEvents      AcademicEvent[]
   socialConfigs       TenantSocialConfig[]
@@ -212,11 +213,28 @@ model StaffRecord {
   payrolls         Payroll[]
 }
 
+// Grade level (Nursery, LKG, UKG, Class 1..12) — CRUD-managed per tenant.
+model Grade {
+  id        String    @id @default(uuid())
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  name      String
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  students  Student[]
+  courses   Course[]
+
+  @@unique([tenantId, name])
+}
+
 // 7. Student Records
 model Student {
   id                    String              @id @default(uuid())
   userId                String              @unique
   user                  User                @relation(fields: [userId], references: [id])
+  gradeId               String?
+  grade                 Grade?              @relation(fields: [gradeId], references: [id])
   admissionDate         DateTime
   emergencyContact      String
   createdAt             DateTime            @default(now())
@@ -258,6 +276,8 @@ model Course {
   tenant        Tenant       @relation(fields: [tenantId], references: [id])
   branchId      String
   branch        Branch       @relation(fields: [branchId], references: [id])
+  gradeId       String?      // Grade level this course targets (Class 10, etc.)
+  grade         Grade?       @relation(fields: [gradeId], references: [id])
   name          String
   description   String?
   type          CourseType   @default(REGULAR)

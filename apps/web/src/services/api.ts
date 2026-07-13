@@ -146,6 +146,28 @@ export const api = {
     },
     getBillingPeriod: async () => {
       return request<{ label: string; bsYear: number; bsMonthName: string; bsMonthNameNp: string; daysInMonth: number; cycleStart: string; cycleEnd: string; dueDate: string }>('/finances/billing-period');
+    },
+    getOverview: async () => {
+      return request<{ collected: number; outstanding: number; overdueAmount: number; overdueStudents: number; invoiceCount: number; billingPeriod: string }>('/finances/overview');
+    },
+    getStudentFees: async () => {
+      const data = await request<{ students: Array<{ studentId: string; userId: string; name: string; email: string; branchId: string | null; branchName: string | null; totalBilled: number; totalPaid: number; totalDue: number; overdueCount: number; overdueAmount: number; invoiceCount: number }> }>('/finances/students');
+      return data.students ?? [];
+    },
+    getStudentInvoices: async (studentId: string) => {
+      const data = await request<{ invoices: Array<{ id: string; netPayable: number; status: string; overdue: boolean; dueDate: string; billingCycleStart: string; billingCycleEnd: string; paymentDate: string | null }> }>(`/finances/students/${studentId}/invoices`);
+      return data.invoices ?? [];
+    },
+    payInvoice: async (invoiceId: string, transactionId?: string) => {
+      return request<{ message: string; invoice: any }>(`/finances/invoices/${invoiceId}/pay`, {
+        method: 'POST',
+        body: JSON.stringify({ transactionId }),
+      });
+    },
+    generateInvoices: async () => {
+      return request<{ message: string; created: number; billingPeriod: string; skipped: number }>('/finances/generate-invoices', {
+        method: 'POST',
+      });
     }
   },
 
@@ -245,7 +267,7 @@ export const api = {
         body: JSON.stringify(payload),
       });
     },
-    create: async (payload: { firstName: string; lastName: string; email: string; phone?: string; role: string; branchId: string }) => {
+    create: async (payload: { firstName: string; lastName: string; email: string; phone?: string; role: string; branchId: string; gradeId?: string }) => {
       return request<{ message: string; user: any; temporaryPassword: string }>('/users', {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -263,6 +285,38 @@ export const api = {
     },
   },
 
+  // Grade levels (Nursery … Class 12)
+  grades: {
+    list: async () => {
+      const data = await request<{ grades: Array<{ id: string; name: string; sortOrder: number; studentCount: number }> }>('/grades');
+      return data.grades ?? [];
+    },
+    seedDefaults: async () => {
+      return request<{ message: string; created: number }>('/grades/seed-defaults', { method: 'POST' });
+    },
+    create: async (name: string, sortOrder?: number) => {
+      return request<{ message: string; grade: any }>('/grades', { method: 'POST', body: JSON.stringify({ name, sortOrder }) });
+    },
+    update: async (id: string, changes: { name?: string; sortOrder?: number }) => {
+      return request<{ message: string; grade: any }>(`/grades/${id}`, { method: 'PUT', body: JSON.stringify(changes) });
+    },
+    remove: async (id: string) => {
+      return request<{ message: string }>(`/grades/${id}`, { method: 'DELETE' });
+    },
+    getDetail: async (id: string) => {
+      return request<{
+        id: string;
+        name: string;
+        studentCount: number;
+        courseCount: number;
+        teacherCount: number;
+        students: Array<{ studentId: string; userId: string; name: string; email: string }>;
+        courses: Array<{ id: string; name: string; branchName: string; classCount: number; enrollmentCount: number }>;
+        teachers: Array<{ id: string; name: string }>;
+      }>(`/grades/${id}`);
+    },
+  },
+
   // Academics — courses & classes (Tenant Admin / Branch Admin)
   academics: {
     listCourses: async () => {
@@ -271,6 +325,7 @@ export const api = {
     },
     createCourse: async (payload: {
       branchId: string;
+      gradeId?: string;
       name: string;
       description?: string;
       type: string;

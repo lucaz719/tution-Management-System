@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { useToast } from '../components/ui/Toast';
@@ -44,9 +45,10 @@ interface FormState {
   phone: string;
   role: string;
   branchId: string;
+  gradeId: string;
 }
 
-const EMPTY_FORM: FormState = { firstName: '', lastName: '', email: '', phone: '', role: '', branchId: '' };
+const EMPTY_FORM: FormState = { firstName: '', lastName: '', email: '', phone: '', role: '', branchId: '', gradeId: '' };
 
 // Categorize a role for the stat strip.
 const STAFF_ROLES = ['Teacher', 'Accountant', 'Receptionist', 'Janitor'];
@@ -68,8 +70,32 @@ function primaryRole(person: Person): string {
   return order.find((r) => names.includes(r)) ?? names[0] ?? '';
 }
 
+// Ordered role groups for the sectioned directory view.
+interface RoleGroup {
+  label: string;
+  icon: string;
+  roles: string[];
+  link?: string;
+}
+const ROLE_GROUPS: RoleGroup[] = [
+  { label: 'Administration', icon: 'shield_person', roles: ['Tenant Admin'] },
+  { label: 'Branch Managers', icon: 'manage_accounts', roles: ['Branch Admin'] },
+  { label: 'Teachers', icon: 'badge', roles: ['Teacher'], link: '/tenant/teachers' },
+  { label: 'Support Staff', icon: 'engineering', roles: ['Accountant', 'Receptionist', 'Janitor'] },
+  { label: 'Students', icon: 'school', roles: ['Student'], link: '/tenant/students' },
+  { label: 'Parents', icon: 'family_restroom', roles: ['Parent'] },
+];
+
+function groupPeople(list: Person[]): Array<{ group: RoleGroup; members: Person[] }> {
+  return ROLE_GROUPS.map((group) => ({
+    group,
+    members: list.filter((person) => group.roles.includes(primaryRole(person))),
+  })).filter((section) => section.members.length > 0);
+}
+
 export function PeopleDirectory() {
   const { showToast } = useToast();
+  const navigate = useNavigate();
   const [caps, setCaps] = useState<Capabilities | null>(null);
   const [people, setPeople] = useState<Person[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -86,14 +112,22 @@ export function PeopleDirectory() {
   const [copied, setCopied] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState('');
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [grades, setGrades] = useState<Array<{ id: string; name: string }>>([]);
+
+  const PREVIEW_LIMIT = 5;
 
   const loadData = async () => {
     setIsLoading(true);
     setErrorMsg('');
     try {
-      const [capabilities, list] = await Promise.all([api.people.capabilities(), api.people.list()]);
+      const [capabilities, list, gradeList] = await Promise.all([
+        api.people.capabilities(),
+        api.people.list(),
+        api.grades.list().catch(() => []),
+      ]);
       setCaps(capabilities);
       setPeople(list as Person[]);
+      setGrades((gradeList as Array<{ id: string; name: string }>).map((g) => ({ id: g.id, name: g.name })));
     } catch (error: unknown) {
       setErrorMsg(error instanceof Error ? error.message : 'Failed to load the directory.');
     } finally {
@@ -132,6 +166,8 @@ export function PeopleDirectory() {
     const set = new Set(people.flatMap((p) => p.roles.map((r) => r.role)));
     return Array.from(set);
   }, [people]);
+
+  const grouped = useMemo(() => groupPeople(filtered), [filtered]);
 
   const openDrawer = () => {
     const branches = caps?.manageableBranches ?? [];
@@ -172,7 +208,7 @@ export function PeopleDirectory() {
       const result =
         form.role === 'Branch Admin'
           ? await api.people.createBranchAdmin(payload)
-          : await api.people.create({ ...payload, role: form.role });
+          : await api.people.create({ ...payload, role: form.role, gradeId: form.role === 'Student' && form.gradeId ? form.gradeId : undefined });
 
       const branchName = caps?.manageableBranches.find((b) => b.id === form.branchId)?.name ?? '';
       setCredentials({
@@ -289,76 +325,61 @@ export function PeopleDirectory() {
         </Button>
       </div>
 
-      <div className="people-table-wrap">
-        <div className="people-table-scroll">
-          <table className="people-table">
-            <thead>
-              <tr>
-                <th>Person</th>
-                <th>Role</th>
-                <th>Branch</th>
-                <th>Status</th>
-                <th>Added</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={5}>
-                    <div className="people-empty">
-                      <span className="material-symbols-outlined">group_off</span>
-                      {isLoading ? 'Loading directory…' : people.length === 0 ? 'No people yet. Add your first staff member or student.' : 'No matches for your filters.'}
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((person) => {
-                  const branchNames = Array.from(
-                    new Set(person.roles.map((r) => r.branchName).filter(Boolean) as string[])
-                  );
-                  return (
-                    <tr key={person.id} onClick={() => setSelectedUserId(person.id)} style={{ cursor: 'pointer' }}>
-                      <td>
-                        <div className="people-person">
-                          <div className="people-avatar">{initials(person.name)}</div>
-                          <div>
-                            <div className="people-person-name">{person.name}</div>
-                            <div className="people-person-email">{person.email}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td>
-                        <div className="people-role-tags">
-                          <span className="people-role-tag">{primaryRole(person)}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <span style={{ fontSize: '13.5px', color: branchNames.length ? 'var(--text)' : 'var(--text-muted)' }}>
-                          {branchNames.length ? branchNames.join(', ') : 'Tenant-wide'}
-                        </span>
-                      </td>
-                      <td>
-                        <StatusBadge variant={person.status === 'ACTIVE' ? 'success' : 'warning'}>{person.status}</StatusBadge>
-                      </td>
-                      <td>
-                        <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                          {new Date(person.createdAt).toLocaleDateString()}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+      {filtered.length === 0 ? (
+        <div className="pd-empty">
+          <span className="material-symbols-outlined">group_off</span>
+          <p>{isLoading ? 'Loading directory…' : people.length === 0 ? 'No people yet. Add your first staff member or student.' : 'No matches for your filters.'}</p>
         </div>
-      </div>
+      ) : (
+        <div className="pd-dashboard">
+          {grouped.map(({ group, members }) => {
+            const preview = members.slice(0, PREVIEW_LIMIT);
+            const overflow = members.length - PREVIEW_LIMIT;
+            const isClickable = !!group.link;
+            return (
+              <div
+                key={group.label}
+                className={`pd-card ${isClickable ? 'pd-card--clickable' : ''}`}
+                onClick={() => { if (isClickable) navigate(group.link!); }}
+                role={isClickable ? "button" : undefined}
+                tabIndex={isClickable ? 0 : undefined}
+                onKeyDown={(e) => { if (isClickable && e.key === 'Enter') navigate(group.link!); }}
+              >
+                <div className="pd-card-head">
+                  <span className="material-symbols-outlined">{group.icon}</span>
+                  <span className="pd-card-title">{group.label}</span>
+                  <span className="pd-card-count">{members.length}</span>
+                </div>
+                <div className="pd-card-body">
+                  {preview.map((person) => (
+                    <div key={person.id} className="pd-person pd-person--preview" onClick={(e) => { e.stopPropagation(); setSelectedUserId(person.id); }}>
+                      <div className="people-avatar pd-av">{initials(person.name)}</div>
+                      <div className="pd-info">
+                        <span className="pd-name">{person.name}</span>
+                        <span className="pd-meta">{person.email}</span>
+                      </div>
+                      <StatusBadge variant={person.status === 'ACTIVE' ? 'success' : 'warning'}>{person.status}</StatusBadge>
+                    </div>
+                  ))}
+                </div>
+                {isClickable && (
+                  <div className="pd-card-footer">
+                    <span>{overflow > 0 ? `View all ${members.length} ${group.label.toLowerCase()}` : `Open ${group.label.toLowerCase()}`}</span>
+                    <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>arrow_forward</span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {selectedUserId ? <UserProfileDrawer userId={selectedUserId} onClose={() => setSelectedUserId('')} /> : null}
 
       {bulkOpen ? (
         <BulkStudentImport
           branches={caps?.manageableBranches ?? []}
+          grades={grades.map((g) => g.name)}
           onClose={() => setBulkOpen(false)}
           onImported={() => void loadData()}
         />
@@ -430,6 +451,22 @@ export function PeopleDirectory() {
                     </select>
                   )}
                 </div>
+
+                {form.role === 'Student' ? (
+                  <div className="people-field">
+                    <label>Grade <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>(class level)</span></label>
+                    {grades.length === 0 ? (
+                      <input value="No grades set up — add them under Academics › Grades" disabled />
+                    ) : (
+                      <select value={form.gradeId} onChange={(e) => setField('gradeId', e.target.value)}>
+                        <option value="">Not assigned</option>
+                        {grades.map((g) => (
+                          <option key={g.id} value={g.id}>{g.name}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                ) : null}
               </div>
 
               <div className="people-drawer-foot">
