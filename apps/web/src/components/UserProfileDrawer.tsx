@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react';
 import { StatusBadge } from './ui/StatusBadge';
+import { Button } from './ui/Button';
+import { useToast } from './ui/Toast';
+import { StudentAnalytics } from './StudentAnalytics';
 import { api } from '../services/api';
 import { toBsLabel } from '../utils/nepaliDate';
 
 interface UserProfileDrawerProps {
   userId: string;
   onClose: () => void;
+  onChanged?: () => void;
 }
 
 interface Profile {
@@ -20,8 +24,11 @@ interface Profile {
     student?: {
       admissionDate: string;
       emergencyContact: string;
+      studentId: string;
       grade: string | null;
-      enrollments: Array<{ courseName: string; className: string; status: string }>;
+      gradeTuition: number;
+      monthlyFee: number;
+      enrollments: Array<{ id: string; courseName: string; className: string; status: string }>;
       fees: { totalBilled: number; totalPaid: number; totalDue: number; overdueCount: number; invoices: Array<{ id: string; netPayable: number; status: string; dueDate: string }> };
       attendance: Record<string, number>;
     };
@@ -48,6 +55,7 @@ function money(n: number): string {
 
 const sectionTitle: React.CSSProperties = { fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '10px' };
 const rowCard: React.CSSProperties = { padding: '12px 14px', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--color-bg)' };
+const editInput: React.CSSProperties = { flex: 1, width: '100%', padding: '9px 12px', borderRadius: 'var(--radius-sm)', border: '1.5px solid var(--border)', background: 'var(--bg-background)', color: 'var(--text-foreground)', fontFamily: 'inherit', fontSize: '13.5px', outline: 'none' };
 
 function FeeStat({ label, value, tone }: { label: string; value: string; tone?: 'due' | 'paid' }) {
   const color = tone === 'due' ? 'var(--color-error)' : tone === 'paid' ? 'var(--color-success)' : 'var(--text)';
@@ -59,22 +67,129 @@ function FeeStat({ label, value, tone }: { label: string; value: string; tone?: 
   );
 }
 
-export function UserProfileDrawer({ userId, onClose }: UserProfileDrawerProps) {
+export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDrawerProps) {
+  const { showToast } = useToast();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [grades, setGrades] = useState<Array<{ id: string; name: string }>>([]);
+  const [form, setForm] = useState({ firstName: '', lastName: '', phone: '', gradeName: '' });
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [enrollOpen, setEnrollOpen] = useState(false);
+  const [activities, setActivities] = useState<Array<{ id: string; name: string; classes: Array<{ id: string; name: string }> }>>([]);
+  const [enrollCourse, setEnrollCourse] = useState('');
+  const [enrollClass, setEnrollClass] = useState('');
+
+  const openEnroll = async () => {
+    setEnrollOpen(true);
+    if (activities.length === 0) {
+      try {
+        const [courses, classes] = await Promise.all([api.academics.listCourses(), api.academics.listClasses()]);
+        // Extra activities = courses without a grade (opt-in, e.g. Drum Class).
+        const extra = (courses as Array<{ id: string; name: string; gradeId: string | null }>).filter((c) => !c.gradeId);
+        setActivities(extra.map((c) => ({
+          id: c.id, name: c.name,
+          classes: (classes as Array<{ id: string; name: string; courseId: string }>).filter((k) => k.courseId === c.id).map((k) => ({ id: k.id, name: k.name })),
+        })));
+      } catch { /* ignore */ }
+    }
+  };
+
+  const doEnroll = async () => {
+    if (!profile?.detail.student || !enrollCourse || !enrollClass) return;
+    setBusy(true);
+    try {
+      const r = await api.academics.enroll(profile.detail.student.studentId, enrollCourse, enrollClass);
+      showToast(`Enrolled — +${money(r.monthlyDelta)}/mo.`, 'success');
+      setEnrollOpen(false); setEnrollCourse(''); setEnrollClass('');
+      reload(); onChanged?.();
+    } catch (error: unknown) {
+      showToast(error instanceof Error ? error.message : 'Failed to enroll.', 'error');
+    } finally { setBusy(false); }
+  };
+
+  const isStudent = Boolean(profile?.detail.student);
+
+  const reload = () => {
+    setIsLoading(true);
+    api.people.getProfile(userId)
+      .then((data) => setProfile(data as Profile))
+      .catch((error: unknown) => setErrorMsg(error instanceof Error ? error.message : 'Failed to load profile.'))
+      .finally(() => setIsLoading(false));
+  };
 
   useEffect(() => {
     let active = true;
     setIsLoading(true);
     setErrorMsg('');
-    api.people
-      .getProfile(userId)
+    api.people.getProfile(userId)
       .then((data) => { if (active) setProfile(data as Profile); })
       .catch((error: unknown) => { if (active) setErrorMsg(error instanceof Error ? error.message : 'Failed to load profile.'); })
       .finally(() => { if (active) setIsLoading(false); });
     return () => { active = false; };
   }, [userId]);
+
+  const startEdit = () => {
+    if (!profile) return;
+    const [firstName, ...rest] = profile.name.split(' ');
+    setForm({ firstName, lastName: rest.join(' '), phone: profile.phone, gradeName: profile.detail.student?.grade ?? '' });
+    if (isStudent && grades.length === 0) api.grades.list().then((g) => setGrades(g as Array<{ id: string; name: string }>)).catch(() => {});
+    setEditing(true);
+  };
+
+  const saveEdit = async () => {
+    setBusy(true);
+    try {
+      const changes: { firstName: string; lastName: string; phone: string; gradeId?: string | null } = {
+        firstName: form.firstName.trim(), lastName: form.lastName.trim(), phone: form.phone.trim(),
+      };
+      if (isStudent) {
+        const g = grades.find((x) => x.name === form.gradeName);
+        changes.gradeId = form.gradeName ? (g?.id ?? null) : null;
+      }
+      const result = await api.people.update(userId, changes);
+      if (result.droppedEnrollments && result.droppedEnrollments > 0) {
+        showToast(`Grade updated — ${result.droppedEnrollments} old-grade enrolment(s) completed. Enrol in new-grade courses to set the new monthly fee.`, 'info');
+      } else {
+        showToast('Profile updated.', 'success');
+      }
+      setEditing(false);
+      reload();
+      onChanged?.();
+    } catch (error: unknown) {
+      showToast(error instanceof Error ? error.message : 'Failed to update.', 'error');
+    } finally { setBusy(false); }
+  };
+
+  const toggleActive = async () => {
+    if (!profile) return;
+    const reactivate = profile.status !== 'ACTIVE';
+    if (!reactivate && !window.confirm(`Deactivate ${profile.name}? They lose access and active enrolments are dropped.`)) return;
+    setBusy(true);
+    try {
+      if (reactivate) await api.people.update(userId, { status: 'ACTIVE' });
+      else await api.people.deactivate(userId);
+      showToast(reactivate ? 'User reactivated.' : 'User deactivated.', 'success');
+      reload();
+      onChanged?.();
+    } catch (error: unknown) {
+      showToast(error instanceof Error ? error.message : 'Failed to change status.', 'error');
+    } finally { setBusy(false); }
+  };
+
+  const unenroll = async (enrollmentId: string) => {
+    setBusy(true);
+    try {
+      await api.academics.unenroll(enrollmentId);
+      showToast('Student unenrolled.', 'success');
+      reload();
+      onChanged?.();
+    } catch (error: unknown) {
+      showToast(error instanceof Error ? error.message : 'Failed to unenroll.', 'error');
+    } finally { setBusy(false); }
+  };
 
   return (
     <>
@@ -111,16 +226,51 @@ export function UserProfileDrawer({ userId, onClose }: UserProfileDrawerProps) {
                   {profile.detail.student?.grade ? <span className="people-role-tag">{profile.detail.student.grade}</span> : null}
                   <StatusBadge variant={profile.status === 'ACTIVE' ? 'success' : 'warning'}>{profile.status}</StatusBadge>
                 </div>
-                <div style={{ ...rowCard, display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Phone</span><span>{profile.phone || '—'}</span></div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Member since</span><span>{new Date(profile.createdAt).toLocaleDateString()}</span></div>
-                  {profile.detail.staff ? (
-                    <>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Designation</span><span>{profile.detail.staff.designation}</span></div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Contract</span><span>{profile.detail.staff.contractType}</span></div>
-                    </>
-                  ) : null}
-                </div>
+                {editing ? (
+                  <div style={{ ...rowCard, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <input value={form.firstName} onChange={(e) => setForm((f) => ({ ...f, firstName: e.target.value }))} placeholder="First name" style={editInput} />
+                      <input value={form.lastName} onChange={(e) => setForm((f) => ({ ...f, lastName: e.target.value }))} placeholder="Last name" style={editInput} />
+                    </div>
+                    <input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="Phone" style={editInput} />
+                    {isStudent ? (
+                      <select value={form.gradeName} onChange={(e) => setForm((f) => ({ ...f, gradeName: e.target.value }))} style={editInput}>
+                        <option value="">No grade</option>
+                        {grades.map((g) => <option key={g.id} value={g.name}>{g.name}</option>)}
+                      </select>
+                    ) : null}
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <Button onClick={() => void saveEdit()} disabled={busy} style={{ flex: 1, minHeight: '36px', height: '36px' }}>Save</Button>
+                      <Button variant="outline" onClick={() => setEditing(false)} style={{ minHeight: '36px', height: '36px' }}>Cancel</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ ...rowCard, display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Phone</span><span>{profile.phone || '—'}</span></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Member since</span><span>{new Date(profile.createdAt).toLocaleDateString()}</span></div>
+                    {profile.detail.staff ? (
+                      <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Designation</span><span>{profile.detail.staff.designation}</span></div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Contract</span><span>{profile.detail.staff.contractType}</span></div>
+                      </>
+                    ) : null}
+                  </div>
+                )}
+                {!editing ? (
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
+                    {isStudent ? (
+                      <Button onClick={() => setShowAnalytics(true)} style={{ minHeight: '36px', height: '36px' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>insights</span> Analytics
+                      </Button>
+                    ) : null}
+                    <Button variant="outline" onClick={startEdit} disabled={busy} style={{ minHeight: '36px', height: '36px' }}>
+                      <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>edit</span> Edit
+                    </Button>
+                    <Button variant="outline" onClick={() => void toggleActive()} disabled={busy} style={{ minHeight: '36px', height: '36px', color: profile.status === 'ACTIVE' ? 'var(--color-error)' : 'var(--color-success)', borderColor: profile.status === 'ACTIVE' ? 'rgba(230,57,70,0.4)' : 'rgba(0,171,102,0.4)' }}>
+                      {profile.status === 'ACTIVE' ? 'Deactivate' : 'Reactivate'}
+                    </Button>
+                  </div>
+                ) : null}
               </div>
 
               {/* Parent → children + dues */}
@@ -157,6 +307,22 @@ export function UserProfileDrawer({ userId, onClose }: UserProfileDrawerProps) {
                 <>
                   <div>
                     <div style={sectionTitle}>Fees</div>
+                    <div style={{ ...rowCard, marginBottom: '10px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 600 }}>Recurring monthly fee</span>
+                        <span style={{ fontSize: '16px', fontWeight: 700, color: 'var(--color-primary)' }}>{money(profile.detail.student.monthlyFee)}/mo</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-muted)', marginTop: '6px' }}>
+                        <span>{profile.detail.student.grade ?? 'No grade'} tuition</span>
+                        <span>{money(profile.detail.student.gradeTuition)}</span>
+                      </div>
+                      {profile.detail.student.monthlyFee > profile.detail.student.gradeTuition ? (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-muted)', marginTop: '3px' }}>
+                          <span>Extra activities</span>
+                          <span>{money(profile.detail.student.monthlyFee - profile.detail.student.gradeTuition)}</span>
+                        </div>
+                      ) : null}
+                    </div>
                     <div style={{ display: 'flex', gap: '8px' }}>
                       <FeeStat label="Billed" value={money(profile.detail.student.fees.totalBilled)} />
                       <FeeStat label="Paid" value={money(profile.detail.student.fees.totalPaid)} tone="paid" />
@@ -177,18 +343,52 @@ export function UserProfileDrawer({ userId, onClose }: UserProfileDrawerProps) {
                     ) : null}
                   </div>
                   <div>
-                    <div style={sectionTitle}>Enrollments ({profile.detail.student.enrollments.length})</div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                      <span style={sectionTitle as React.CSSProperties}>Extra activities ({profile.detail.student.enrollments.filter((e) => e.status === 'ACTIVE').length})</span>
+                      {!enrollOpen ? (
+                        <Button variant="outline" onClick={() => void openEnroll()} style={{ minHeight: '30px', height: '30px', padding: '4px 12px', fontSize: '12.5px' }}>
+                          <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>add</span> Enroll
+                        </Button>
+                      ) : null}
+                    </div>
+                    {enrollOpen ? (
+                      <div style={{ ...rowCard, display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '10px' }}>
+                        <select value={enrollCourse} onChange={(e) => { setEnrollCourse(e.target.value); setEnrollClass(''); }} style={editInput}>
+                          <option value="">Select an activity…</option>
+                          {activities.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                        </select>
+                        {enrollCourse ? (
+                          <select value={enrollClass} onChange={(e) => setEnrollClass(e.target.value)} style={editInput}>
+                            <option value="">Select a class/time…</option>
+                            {activities.find((a) => a.id === enrollCourse)?.classes.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
+                          </select>
+                        ) : null}
+                        {enrollCourse && activities.find((a) => a.id === enrollCourse)?.classes.length === 0 ? (
+                          <p style={{ fontSize: '12px', color: 'var(--color-warning)' }}>This activity has no class/time yet — add one under Timetables.</p>
+                        ) : null}
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <Button onClick={() => void doEnroll()} disabled={busy || !enrollClass} style={{ flex: 1, minHeight: '34px', height: '34px' }}>Enroll</Button>
+                          <Button variant="outline" onClick={() => setEnrollOpen(false)} style={{ minHeight: '34px', height: '34px' }}>Cancel</Button>
+                        </div>
+                        {activities.length === 0 ? <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>No extra activities yet. Create an ungraded course (e.g. Drum Class) under Courses.</p> : null}
+                      </div>
+                    ) : null}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       {profile.detail.student.enrollments.length === 0 ? (
-                        <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Not enrolled in any class yet.</p>
+                        <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>No extra activities. Grade tuition covers all subjects.</p>
                       ) : (
-                        profile.detail.student.enrollments.map((e, i) => (
-                          <div key={i} style={{ ...rowCard, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        profile.detail.student.enrollments.map((e) => (
+                          <div key={e.id} style={{ ...rowCard, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
                             <div>
                               <div style={{ fontSize: '13.5px', fontWeight: 700 }}>{e.courseName}</div>
                               <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{e.className}</div>
                             </div>
-                            <StatusBadge variant={e.status === 'ACTIVE' ? 'success' : e.status === 'BLOCKED' ? 'error' : 'info'}>{e.status}</StatusBadge>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <StatusBadge variant={e.status === 'ACTIVE' ? 'success' : e.status === 'BLOCKED' ? 'error' : 'info'}>{e.status}</StatusBadge>
+                              <button type="button" onClick={() => void unenroll(e.id)} disabled={busy} aria-label="Unenroll" title="Unenroll" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-error)', display: 'grid', placeItems: 'center', padding: '4px' }}>
+                                <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>person_remove</span>
+                              </button>
+                            </div>
                           </div>
                         ))
                       )}
@@ -234,6 +434,10 @@ export function UserProfileDrawer({ userId, onClose }: UserProfileDrawerProps) {
           ) : null}
         </div>
       </aside>
+
+      {showAnalytics ? (
+        <StudentAnalytics userId={userId} fetcher={api.people.getAnalytics} onClose={() => setShowAnalytics(false)} />
+      ) : null}
     </>
   );
 }

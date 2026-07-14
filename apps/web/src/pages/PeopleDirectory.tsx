@@ -374,7 +374,7 @@ export function PeopleDirectory() {
         </div>
       )}
 
-      {selectedUserId ? <UserProfileDrawer userId={selectedUserId} onClose={() => setSelectedUserId('')} /> : null}
+      {selectedUserId ? <UserProfileDrawer userId={selectedUserId} onClose={() => setSelectedUserId('')} onChanged={() => void loadData()} /> : null}
 
       {bulkOpen ? (
         <BulkStudentImport

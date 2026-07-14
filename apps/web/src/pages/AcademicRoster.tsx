@@ -15,6 +15,8 @@ interface Person {
   name: string;
   email: string;
   status: string;
+  gradeId: string | null;
+  gradeName: string | null;
   roles: PersonRole[];
   createdAt: string;
 }
@@ -60,6 +62,7 @@ export function AcademicRoster({ role, title, subtitle, emptyText, showFees = fa
   const [errorMsg, setErrorMsg] = useState('');
   const [search, setSearch] = useState('');
   const [feeFilter, setFeeFilter] = useState<'ALL' | 'OVERDUE' | 'DUE'>('ALL');
+  const [gradeFilter, setGradeFilter] = useState('ALL');
   const [selectedUserId, setSelectedUserId] = useState('');
 
   const loadPeople = async () => {
@@ -93,13 +96,23 @@ export function AcademicRoster({ role, title, subtitle, emptyText, showFees = fa
     return people.filter((p) => {
       const matchesSearch = !term || p.name.toLowerCase().includes(term) || p.email.toLowerCase().includes(term);
       if (!matchesSearch) return false;
+      if (showFees && gradeFilter !== 'ALL') {
+        if (gradeFilter === 'NONE' ? p.gradeId !== null : p.gradeId !== gradeFilter) return false;
+      }
       if (!showFees || feeFilter === 'ALL') return true;
       const fee = feeMap.get(p.id);
       if (feeFilter === 'OVERDUE') return (fee?.overdueAmount ?? 0) > 0;
       if (feeFilter === 'DUE') return (fee?.totalDue ?? 0) > 0;
       return true;
     });
-  }, [people, search, showFees, feeFilter, feeMap]);
+  }, [people, search, showFees, feeFilter, gradeFilter, feeMap]);
+
+  // Distinct grades present among these students, for the filter dropdown.
+  const gradeOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    people.forEach((p) => { if (p.gradeId && p.gradeName) map.set(p.gradeId, p.gradeName); });
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [people]);
 
   const branchesRepresented = useMemo(() => {
     const names = new Set<string>();
@@ -112,7 +125,7 @@ export function AcademicRoster({ role, title, subtitle, emptyText, showFees = fa
     [people, feeMap, showFees]
   );
 
-  const colCount = showFees ? 5 : 4;
+  const colCount = showFees ? 6 : 4;
 
   return (
     <div className="people-page">
@@ -157,6 +170,15 @@ export function AcademicRoster({ role, title, subtitle, emptyText, showFees = fa
           <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name or email…" />
         </div>
         {showFees ? (
+          <select className="people-filter" value={gradeFilter} onChange={(e) => setGradeFilter(e.target.value)}>
+            <option value="ALL">All grades</option>
+            {gradeOptions.map((g) => (
+              <option key={g.id} value={g.id}>{g.name}</option>
+            ))}
+            <option value="NONE">No grade set</option>
+          </select>
+        ) : null}
+        {showFees ? (
           <select className="people-filter" value={feeFilter} onChange={(e) => setFeeFilter(e.target.value as 'ALL' | 'OVERDUE' | 'DUE')}>
             <option value="ALL">All fee status</option>
             <option value="OVERDUE">Overdue only</option>
@@ -171,6 +193,7 @@ export function AcademicRoster({ role, title, subtitle, emptyText, showFees = fa
             <thead>
               <tr>
                 <th>{role}</th>
+                {showFees ? <th>Grade</th> : null}
                 <th>Branch</th>
                 {showFees ? <th>Fees</th> : null}
                 <th>Status</th>
@@ -201,6 +224,11 @@ export function AcademicRoster({ role, title, subtitle, emptyText, showFees = fa
                           </div>
                         </div>
                       </td>
+                      {showFees ? (
+                        <td>
+                          {person.gradeName ? <span className="people-role-tag">{person.gradeName}</span> : <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>—</span>}
+                        </td>
+                      ) : null}
                       <td>
                         <span style={{ fontSize: '13.5px', color: branchNames.length ? 'var(--text)' : 'var(--text-muted)' }}>
                           {branchNames.length ? branchNames.join(', ') : '—'}
@@ -222,7 +250,7 @@ export function AcademicRoster({ role, title, subtitle, emptyText, showFees = fa
         </div>
       </div>
 
-      {selectedUserId ? <UserProfileDrawer userId={selectedUserId} onClose={() => setSelectedUserId('')} /> : null}
+      {selectedUserId ? <UserProfileDrawer userId={selectedUserId} onClose={() => setSelectedUserId('')} onChanged={() => void loadPeople()} /> : null}
     </div>
   );
 }

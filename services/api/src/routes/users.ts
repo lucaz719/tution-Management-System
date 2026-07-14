@@ -171,7 +171,10 @@ router.get('/', authMiddleware, async (req: TenantRequest, res: Response) => {
         ...(tenantAdmin ? {} : { userRoles: { some: { branchId: { in: scopes } } } }),
       },
       orderBy: { createdAt: 'desc' },
-      include: { userRoles: { include: { role: true, branch: true } } },
+      include: {
+        userRoles: { include: { role: true, branch: true } },
+        student: { select: { grade: { select: { id: true, name: true } } } },
+      },
     });
 
     return res.json({
@@ -180,6 +183,8 @@ router.get('/', authMiddleware, async (req: TenantRequest, res: Response) => {
         name: `${u.firstName} ${u.lastName}`,
         email: u.email,
         status: u.status,
+        gradeId: u.student?.grade?.id ?? null,
+        gradeName: u.student?.grade?.name ?? null,
         roles: u.userRoles.map((ur) => ({
           role: ur.role.name,
           branchId: ur.branchId,
@@ -236,7 +241,7 @@ router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Respo
       where: { id: req.params.id, tenantId: req.tenantId! },
       include: {
         userRoles: { include: { role: true, branch: true } },
-        student: { include: { grade: true } },
+        student: { include: { grade: { select: { name: true, monthlyFee: true } } } },
         parent: true,
         staffRecord: true,
       },
@@ -270,9 +275,22 @@ router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Respo
     if (user.student) {
       const enrollments = await prisma.enrollment.findMany({
         where: { studentId: user.student.id },
-        include: { course: { select: { name: true } }, class: { select: { name: true } } },
+        include: {
+          course: { select: { name: true, feeStructure: true, isTaxExempt: true, taxPercentage: true } },
+          class: { select: { name: true } },
+        },
         orderBy: { createdAt: 'desc' },
       });
+      // Live recurring monthly fee = grade tuition (all subjects) + active extra
+      // activity enrolments.
+      const gradeTuition = user.student.grade?.monthlyFee ?? 0;
+      const extrasFee = enrollments
+        .filter((e) => e.status === 'ACTIVE')
+        .reduce((sum, e) => {
+          const base = Number((e.course.feeStructure as { monthlyBase?: number })?.monthlyBase || 0);
+          return sum + (e.course.isTaxExempt ? base : base * (1 + Number(e.course.taxPercentage || 13) / 100));
+        }, 0);
+      const monthlyFee = gradeTuition + extrasFee;
       const attendance = await prisma.studentAttendance.groupBy({
         by: ['status'],
         where: { studentId: user.student.id },
@@ -281,8 +299,12 @@ router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Respo
       detail.student = {
         admissionDate: user.student.admissionDate,
         emergencyContact: user.student.emergencyContact,
+        studentId: user.student.id,
         grade: user.student.grade?.name ?? null,
+        gradeTuition,
+        monthlyFee: Math.round(monthlyFee * 100) / 100,
         enrollments: enrollments.map((e) => ({
+          id: e.id,
           courseName: e.course.name,
           className: e.class.name,
           status: e.status,
@@ -367,6 +389,198 @@ router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Respo
     return res.json({ ...base, detail });
   } catch (error: any) {
     return res.status(500).json({ error: 'Failed to load profile.', details: error.message });
+  }
+});
+
+// --- Student analytics (admin / branch-admin / assigned teacher / parent / self) ---
+router.get('/:id/analytics', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const caller = req.user as UserPayload;
+  try {
+    const target = await prisma.user.findFirst({
+      where: { id: req.params.id, tenantId: req.tenantId! },
+      include: { student: { include: { grade: { select: { name: true } } } } },
+    });
+    if (!target || !target.student) {
+      return res.status(404).json({ error: 'Student not found in your institution.' });
+    }
+    const studentId = target.student.id;
+
+    const enrollments = await prisma.enrollment.findMany({
+      where: { studentId },
+      include: {
+        course: { select: { name: true } },
+        class: { select: { id: true, name: true, teacherId: true, assignedTeacher: { select: { firstName: true, lastName: true } } } },
+      },
+    });
+    const classIds = Array.from(new Set(enrollments.map((e) => e.classId)));
+
+    // Access: admin (scoped), self, assigned teacher, or a linked parent.
+    let allowed = isTenantAdmin(caller) || caller.id === target.id;
+    const scopes = branchAdminScopes(caller);
+    if (!allowed && scopes.length > 0) {
+      allowed = Boolean(await prisma.userRole.findFirst({ where: { userId: target.id, branchId: { in: scopes } } }));
+    }
+    if (!allowed && classIds.length > 0) {
+      allowed = Boolean(await prisma.class.findFirst({ where: { id: { in: classIds }, teacherId: caller.id } }));
+    }
+    if (!allowed) {
+      const parent = await prisma.parent.findUnique({ where: { userId: caller.id } });
+      if (parent) {
+        allowed = Boolean(await prisma.studentParent.findFirst({ where: { studentId, parentId: parent.id } }));
+      }
+    }
+    if (!allowed) {
+      return res.status(403).json({ error: 'You do not have access to this student\'s analytics.' });
+    }
+
+    // Attendance — full records power the totals, the monthly trend, and per-course rates.
+    const attRecords = await prisma.studentAttendance.findMany({
+      where: { studentId },
+      select: { classId: true, status: true, date: true },
+      orderBy: { date: 'asc' },
+    });
+    const countStatus = (s: string) => attRecords.filter((r) => r.status === s).length;
+    const present = countStatus('PRESENT'), absent = countStatus('ABSENT'), excused = countStatus('EXCUSED'), blocked = countStatus('BLOCKED');
+    const totalMarked = attRecords.length;
+
+    const today = new Date();
+    const attendanceTrend = Array.from({ length: 6 }, (_, i) => {
+      const d = new Date(today.getFullYear(), today.getMonth() - (5 - i), 1);
+      const inMonth = attRecords.filter((r) => r.date.getFullYear() === d.getFullYear() && r.date.getMonth() === d.getMonth());
+      const p = inMonth.filter((r) => r.status === 'PRESENT').length;
+      return {
+        month: d.toLocaleString('en', { month: 'short' }),
+        present: p,
+        total: inMonth.length,
+        rate: inMonth.length ? Math.round((p / inMonth.length) * 100) : null,
+      };
+    });
+
+    // Fees
+    const fees = await studentFeeSummary(studentId);
+    const billed = fees.totalPaid + fees.totalDue;
+
+    // Homework — every assignment in the student's classes matched to their submissions,
+    // so the profile can track each homework individually (status, lateness, grade).
+    const homeworks = classIds.length
+      ? await prisma.homework.findMany({
+          where: { classId: { in: classIds } },
+          orderBy: { deadline: 'desc' },
+          select: { id: true, classId: true, subject: true, title: true, deadline: true },
+        })
+      : [];
+    const subs = await prisma.homeworkSubmission.findMany({
+      where: { studentId },
+      select: { homeworkId: true, grade: true, remarks: true, createdAt: true, updatedAt: true },
+    });
+    const subByHw = new Map(subs.map((s) => [s.homeworkId, s]));
+    const courseByClass = new Map(enrollments.map((e) => [e.classId, e.course.name]));
+
+    const nowMs = Date.now();
+    const homeworkTimeline = homeworks.slice(0, 30).map((hw) => {
+      const sub = subByHw.get(hw.id);
+      const status = sub
+        ? (sub.grade != null ? 'GRADED' : 'SUBMITTED')
+        : (hw.deadline.getTime() < nowMs ? 'OVERDUE' : 'PENDING');
+      return {
+        id: hw.id,
+        title: hw.title,
+        subject: hw.subject,
+        course: courseByClass.get(hw.classId) ?? null,
+        deadline: hw.deadline,
+        status,
+        late: sub ? sub.createdAt.getTime() > hw.deadline.getTime() : false,
+        grade: sub?.grade ?? null,
+        submittedAt: sub?.createdAt ?? null,
+      };
+    });
+
+    const assigned = homeworks.length;
+    const submittedHw = homeworks.filter((hw) => subByHw.has(hw.id));
+    const submitted = submittedHw.length;
+    const graded = submittedHw.filter((hw) => subByHw.get(hw.id)!.grade != null).length;
+    const onTime = submittedHw.filter((hw) => subByHw.get(hw.id)!.createdAt.getTime() <= hw.deadline.getTime()).length;
+    const overdueHw = homeworks.filter((hw) => !subByHw.has(hw.id) && hw.deadline.getTime() < nowMs).length;
+
+    // Per-course mapping — one entry per enrolment with the class, teacher, and the
+    // student's attendance/homework performance inside that course.
+    const perCourse = enrollments.map((e) => {
+      const classAtt = attRecords.filter((r) => r.classId === e.classId);
+      const classPresent = classAtt.filter((r) => r.status === 'PRESENT').length;
+      const classHw = homeworks.filter((h) => h.classId === e.classId);
+      return {
+        course: e.course.name,
+        className: e.class.name,
+        teacher: e.class.assignedTeacher ? `${e.class.assignedTeacher.firstName} ${e.class.assignedTeacher.lastName}` : null,
+        status: e.status,
+        attendanceRate: classAtt.length ? Math.round((classPresent / classAtt.length) * 100) : null,
+        homeworkAssigned: classHw.length,
+        homeworkSubmitted: classHw.filter((h) => subByHw.has(h.id)).length,
+      };
+    });
+
+    // Recent activity — submissions, grades received, attendance marks, and fee
+    // payments merged into one newest-first feed.
+    const hwTitle = new Map(homeworks.map((h) => [h.id, h.title]));
+    const activity: Array<{ type: string; date: Date; label: string; detail?: string }> = [];
+    subs.forEach((s) => {
+      const title = hwTitle.get(s.homeworkId);
+      if (!title) return;
+      activity.push({ type: 'submission', date: s.createdAt, label: `Submitted "${title}"` });
+      if (s.grade != null) {
+        activity.push({ type: 'grade', date: s.updatedAt, label: `Received ${s.grade} for "${title}"`, detail: s.remarks ?? undefined });
+      }
+    });
+    attRecords.slice(-20).forEach((r) => {
+      const course = courseByClass.get(r.classId);
+      const word = r.status.charAt(0) + r.status.slice(1).toLowerCase();
+      activity.push({ type: 'attendance', date: r.date, label: `${word} in ${course ?? 'class'}` });
+    });
+    fees.invoices.forEach((i) => {
+      if (i.paymentDate) activity.push({ type: 'payment', date: i.paymentDate, label: `Paid invoice — NPR ${i.netPayable.toLocaleString()}` });
+    });
+    activity.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    // Graph connections
+    const teachers = Array.from(new Set(
+      enrollments.map((e) => e.class.assignedTeacher ? `${e.class.assignedTeacher.firstName} ${e.class.assignedTeacher.lastName}` : null).filter(Boolean) as string[]
+    ));
+    const parentLinks = await prisma.studentParent.findMany({
+      where: { studentId },
+      include: { parent: { include: { user: { select: { firstName: true, lastName: true } } } } },
+    });
+
+    return res.json({
+      name: `${target.firstName} ${target.lastName}`,
+      grade: target.student.grade?.name ?? null,
+      attendance: {
+        present, absent, excused, blocked, totalMarked,
+        rate: totalMarked ? Math.round((present / totalMarked) * 100) : null,
+        trend: attendanceTrend,
+      },
+      homework: {
+        assigned, submitted, graded,
+        pending: Math.max(0, assigned - submitted),
+        overdue: overdueHw,
+        completionRate: assigned ? Math.round((submitted / assigned) * 100) : null,
+        onTimeRate: submitted ? Math.round((onTime / submitted) * 100) : null,
+        timeline: homeworkTimeline,
+      },
+      fees: {
+        paid: fees.totalPaid, due: fees.totalDue, overdue: fees.overdueCount,
+        collectionRate: billed ? Math.round((fees.totalPaid / billed) * 100) : null,
+      },
+      activeCourses: enrollments.filter((e) => e.status === 'ACTIVE').map((e) => e.course.name),
+      perCourse,
+      activity: activity.slice(0, 15),
+      connections: {
+        courses: Array.from(new Set(enrollments.map((e) => e.course.name))),
+        teachers,
+        parents: parentLinks.map((pl) => `${pl.parent.user.firstName} ${pl.parent.user.lastName}`),
+      },
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Failed to load analytics.', details: error.message });
   }
 });
 
@@ -666,6 +880,105 @@ router.post('/bulk-students', authMiddleware, async (req: TenantRequest, res: Re
 
   const createdCount = results.filter((r) => r.status === 'created').length;
   return res.json({ createdCount, errorCount: results.length - createdCount, results });
+});
+
+// --- Update / deactivate a user (Tenant Admin, or Branch Admin in scope) ---
+
+// Load a user in the caller's tenant and confirm they may manage them.
+async function loadManageableUser(req: TenantRequest, id: string) {
+  const caller = req.user as UserPayload;
+  const tenantAdmin = isTenantAdmin(caller);
+  const scopes = branchAdminScopes(caller);
+  if (!tenantAdmin && scopes.length === 0) return { error: 403 as const };
+
+  const user = await prisma.user.findFirst({
+    where: { id, tenantId: req.tenantId! },
+    include: { userRoles: true, student: true },
+  });
+  if (!user) return { error: 404 as const };
+
+  if (!tenantAdmin) {
+    const inScope = user.userRoles.some((ur) => ur.branchId && scopes.includes(ur.branchId));
+    if (!inScope) return { error: 403 as const };
+  }
+  return { user };
+}
+
+router.put('/:id', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const loaded = await loadManageableUser(req, req.params.id);
+  if (loaded.error) {
+    return res.status(loaded.error).json({ error: loaded.error === 404 ? 'User not found in your institution.' : 'You cannot manage this user.' });
+  }
+  const { user } = loaded;
+
+  const data: Record<string, unknown> = {};
+  if (typeof req.body?.firstName === 'string' && req.body.firstName.trim()) data.firstName = req.body.firstName.trim();
+  if (typeof req.body?.lastName === 'string' && req.body.lastName.trim()) data.lastName = req.body.lastName.trim();
+  if (typeof req.body?.phone === 'string') data.phone = req.body.phone.trim();
+  if (['ACTIVE', 'INACTIVE', 'SUSPENDED'].includes(req.body?.status)) data.status = req.body.status;
+
+  // Grade reassignment (students only): string sets, null clears.
+  let gradeUpdate: { gradeId: string | null } | null = null;
+  if (user.student && 'gradeId' in (req.body ?? {})) {
+    if (req.body.gradeId === null || req.body.gradeId === '') {
+      gradeUpdate = { gradeId: null };
+    } else if (typeof req.body.gradeId === 'string') {
+      const grade = await prisma.grade.findFirst({ where: { id: req.body.gradeId, tenantId: req.tenantId! } });
+      if (!grade) return res.status(404).json({ error: 'Grade not found in your institution.' });
+      gradeUpdate = { gradeId: grade.id };
+    }
+  }
+
+  if (Object.keys(data).length === 0 && !gradeUpdate) {
+    return res.status(400).json({ error: 'Nothing to update.' });
+  }
+
+  const gradeChanged = gradeUpdate && user.student && gradeUpdate.gradeId !== user.student.gradeId;
+
+  try {
+    if (Object.keys(data).length > 0) await prisma.user.update({ where: { id: user.id }, data });
+    if (gradeUpdate && user.student) await prisma.student.update({ where: { id: user.student.id }, data: gradeUpdate });
+
+    // Promotion reconciliation: moving to a new grade completes active enrolments
+    // in courses tied to a *different* graded level, so monthly billing (which is
+    // the sum of active enrolments) drops the old grade's fees. Ungraded courses
+    // are left untouched. The admin then enrols in the new grade's courses.
+    let droppedEnrollments = 0;
+    if (gradeChanged && gradeUpdate!.gradeId && user.student) {
+      const result = await prisma.enrollment.updateMany({
+        where: { studentId: user.student.id, status: 'ACTIVE', course: { gradeId: { notIn: [gradeUpdate!.gradeId] } } },
+        data: { status: 'COMPLETED' },
+      });
+      droppedEnrollments = result.count;
+    }
+
+    return res.json({ message: 'User updated.', droppedEnrollments });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Failed to update user.', details: error.message });
+  }
+});
+
+// Deactivate (soft-delete): sets status INACTIVE and drops active enrolments so
+// billing stops. History (invoices, records) is preserved for audit.
+router.delete('/:id', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const loaded = await loadManageableUser(req, req.params.id);
+  if (loaded.error) {
+    return res.status(loaded.error).json({ error: loaded.error === 404 ? 'User not found in your institution.' : 'You cannot manage this user.' });
+  }
+  const { user } = loaded;
+  if (user.id === (req.user as UserPayload).id) {
+    return res.status(400).json({ error: 'You cannot deactivate your own account.' });
+  }
+
+  try {
+    await prisma.user.update({ where: { id: user.id }, data: { status: 'INACTIVE' } });
+    if (user.student) {
+      await prisma.enrollment.updateMany({ where: { studentId: user.student.id, status: 'ACTIVE' }, data: { status: 'DROPPED' } });
+    }
+    return res.json({ message: 'User deactivated.' });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Failed to deactivate user.', details: error.message });
+  }
 });
 
 export default router;

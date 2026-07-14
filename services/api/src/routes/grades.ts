@@ -25,6 +25,7 @@ router.get('/', authMiddleware, async (req: TenantRequest, res: Response) => {
         id: g.id,
         name: g.name,
         sortOrder: g.sortOrder,
+        monthlyFee: g.monthlyFee,
         studentCount: g._count.students,
         courseCount: g._count.courses,
       })),
@@ -122,11 +123,12 @@ router.post('/seed-defaults', authMiddleware, hasPermission('manage_students'), 
 router.post('/', authMiddleware, hasPermission('manage_students'), async (req: TenantRequest, res: Response) => {
   const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
   const sortOrder = Number.isFinite(Number(req.body?.sortOrder)) ? Number(req.body.sortOrder) : 99;
+  const monthlyFee = Number.isFinite(Number(req.body?.monthlyFee)) && Number(req.body.monthlyFee) >= 0 ? Math.round(Number(req.body.monthlyFee)) : 0;
   if (!name) {
     return res.status(400).json({ error: 'Grade name is required.' });
   }
   try {
-    const grade = await prisma.grade.create({ data: { tenantId: req.tenantId!, name, sortOrder } });
+    const grade = await prisma.grade.create({ data: { tenantId: req.tenantId!, name, sortOrder, monthlyFee } });
     return res.status(201).json({ message: 'Grade created.', grade });
   } catch (error: any) {
     if (error.code === 'P2002') {
@@ -147,6 +149,7 @@ router.put('/:id', authMiddleware, hasPermission('manage_students'), async (req:
     const data: Record<string, unknown> = {};
     if (typeof req.body?.name === 'string' && req.body.name.trim()) data.name = req.body.name.trim();
     if (Number.isFinite(Number(req.body?.sortOrder))) data.sortOrder = Number(req.body.sortOrder);
+    if (Number.isFinite(Number(req.body?.monthlyFee)) && Number(req.body.monthlyFee) >= 0) data.monthlyFee = Math.round(Number(req.body.monthlyFee));
     if (Object.keys(data).length === 0) {
       return res.status(400).json({ error: 'Nothing to update.' });
     }

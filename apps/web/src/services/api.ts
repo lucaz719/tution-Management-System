@@ -261,6 +261,32 @@ export const api = {
     getProfile: async (userId: string) => {
       return request<any>(`/users/${userId}/profile`);
     },
+    getAnalytics: async (userId: string) => {
+      return request<{
+        name: string;
+        grade: string | null;
+        attendance: {
+          present: number; absent: number; excused: number; blocked: number; totalMarked: number; rate: number | null;
+          trend: Array<{ month: string; present: number; total: number; rate: number | null }>;
+        };
+        homework: {
+          assigned: number; submitted: number; graded: number; pending: number; overdue: number;
+          completionRate: number | null; onTimeRate: number | null;
+          timeline: Array<{ id: string; title: string; subject: string; course: string | null; deadline: string; status: 'GRADED' | 'SUBMITTED' | 'OVERDUE' | 'PENDING'; late: boolean; grade: string | null; submittedAt: string | null }>;
+        };
+        fees: { paid: number; due: number; overdue: number; collectionRate: number | null };
+        activeCourses: string[];
+        perCourse: Array<{ course: string; className: string; teacher: string | null; status: string; attendanceRate: number | null; homeworkAssigned: number; homeworkSubmitted: number }>;
+        activity: Array<{ type: string; date: string; label: string; detail?: string }>;
+        connections: { courses: string[]; teachers: string[]; parents: string[] };
+      }>(`/users/${userId}/analytics`);
+    },
+    update: async (userId: string, changes: { firstName?: string; lastName?: string; phone?: string; status?: string; gradeId?: string | null }) => {
+      return request<{ message: string; droppedEnrollments?: number }>(`/users/${userId}`, { method: 'PUT', body: JSON.stringify(changes) });
+    },
+    deactivate: async (userId: string) => {
+      return request<{ message: string }>(`/users/${userId}`, { method: 'DELETE' });
+    },
     createBranchAdmin: async (payload: { firstName: string; lastName: string; email: string; phone?: string; branchId: string }) => {
       return request<{ message: string; user: any; temporaryPassword: string }>('/users/branch-admin', {
         method: 'POST',
@@ -294,10 +320,10 @@ export const api = {
     seedDefaults: async () => {
       return request<{ message: string; created: number }>('/grades/seed-defaults', { method: 'POST' });
     },
-    create: async (name: string, sortOrder?: number) => {
-      return request<{ message: string; grade: any }>('/grades', { method: 'POST', body: JSON.stringify({ name, sortOrder }) });
+    create: async (name: string, sortOrder?: number, monthlyFee?: number) => {
+      return request<{ message: string; grade: any }>('/grades', { method: 'POST', body: JSON.stringify({ name, sortOrder, monthlyFee }) });
     },
-    update: async (id: string, changes: { name?: string; sortOrder?: number }) => {
+    update: async (id: string, changes: { name?: string; sortOrder?: number; monthlyFee?: number }) => {
       return request<{ message: string; grade: any }>(`/grades/${id}`, { method: 'PUT', body: JSON.stringify(changes) });
     },
     remove: async (id: string) => {
@@ -338,6 +364,17 @@ export const api = {
         body: JSON.stringify(payload),
       });
     },
+    bulkCreateCourses: async (payload: {
+      branchId: string;
+      items: Array<{ name: string; gradeId?: string | null; type?: string; monthlyBase: number; isTaxExempt?: boolean; description?: string }>;
+    }) => {
+      return request<{
+        message: string;
+        created: number;
+        skipped: number;
+        results: Array<{ index: number; name: string; status: 'created' | 'skipped' | 'error'; error?: string }>;
+      }>('/courses/bulk', { method: 'POST', body: JSON.stringify(payload) });
+    },
     listClasses: async () => {
       const data = await request<{ classes: any[] }>('/courses/classes');
       return data.classes ?? [];
@@ -347,6 +384,24 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(payload),
       });
+    },
+    updateCourse: async (id: string, changes: { name?: string; description?: string | null; type?: string; feeStructure?: Record<string, unknown>; isTaxExempt?: boolean; taxPercentage?: number; gradeId?: string | null }) => {
+      return request<{ message: string; course: any }>(`/courses/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(changes),
+      });
+    },
+    deleteCourse: async (id: string) => {
+      return request<{ message: string }>(`/courses/${id}`, { method: 'DELETE' });
+    },
+    enroll: async (studentId: string, courseId: string, classId: string) => {
+      return request<{ message: string; enrollment: any; monthlyDelta: number }>('/courses/enroll', {
+        method: 'POST',
+        body: JSON.stringify({ studentId, courseId, classId }),
+      });
+    },
+    unenroll: async (enrollmentId: string) => {
+      return request<{ message: string }>(`/courses/enrollments/${enrollmentId}`, { method: 'DELETE' });
     },
     updateClass: async (id: string, changes: { name?: string; schedule?: unknown; teacherId?: string | null }) => {
       return request<{ message: string; class: any }>(`/courses/classes/${id}`, {

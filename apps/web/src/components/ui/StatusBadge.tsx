@@ -13,7 +13,7 @@ const badgeStyles: Record<StatusBadgeVariant, { background: string; color: strin
   warning: { background: 'rgba(224, 142, 0, 0.14)', color: 'var(--color-warning)' },
   error: { background: 'rgba(214, 69, 69, 0.14)', color: 'var(--color-error)' },
   info: { background: 'rgba(47, 111, 237, 0.12)', color: 'var(--color-info)' },
-  gold: { background: 'rgba(255, 188, 59, 0.16)', color: 'var(--color-accent)' },
+  gold: { background: 'var(--color-gold-bg)', color: 'var(--color-gold-text)' },
 };
 
 function formatLabel(status: StatusBadgeVariant) {

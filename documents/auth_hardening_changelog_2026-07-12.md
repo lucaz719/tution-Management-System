@@ -337,7 +337,69 @@ Made grade a real cross-cutting dimension rather than a student label. Engineeri
 
 ---
 
-## 21. Remaining Work
+## 21. Grade Filter on Roster + Enrollment Grade Guard (2026-07-13)
+
+- **Students roster:** `GET /users` now returns each student's `gradeId`/`gradeName`. The Students roster shows a Grade column and a **grade filter** ("show all Class 10 students", plus a "No grade set" option to catch unassigned students).
+- **Enrollment grade guard:** `POST /courses/enroll` now rejects (400) enrolling a student into a course whose grade differs from the student's — with a clear message ("This course is for Class 9, but the student is in Class 10"). A graded course only accepts matching-grade students; ungraded courses or ungraded students are unaffected. Also added a check that the chosen class actually belongs to the course.
+- **Verified:** roster carries grades (Class 12 / Class 10 / none); a Class-10 student blocked from a Class-9 course (400); matching/ungraded enrolments still pass.
+
+---
+
+## 22. Course CRUD + Grade Auto-Propagation to Timetables (2026-07-13)
+
+- **Course update/delete** (was create-only): `PUT /courses/:id` (name, description, type, fee, tax, grade — validated/clearable) and `DELETE /courses/:id` (409 when the course has classes or enrolments). Courses page gained Edit (reuses the drawer; branch locked on edit) and Delete actions.
+- **Grade flows to timetables:** `GET /courses/classes` returns the course-derived `gradeName`; the Add Class course picker shows each course's grade and auto-displays "Grade auto-set from course: Class X"; class cards badge the grade. A class inherits its grade through its course — nothing extra to keep in sync.
+- **Verified:** rename + grade-clear via PUT; delete blocked (409) on an in-use course; empty course deleted; classes carry the derived grade.
+
+---
+
+## 23. User (Student/Teacher) Update/Deactivate + Unenroll (2026-07-13)
+
+Filled the missing U/D on users, and added the unenroll path that course deletion needs.
+- `PUT /users/:id` — edit firstName/lastName/phone/status + gradeId (students); tenant/branch scoped.
+- `DELETE /users/:id` — **soft-delete** (status INACTIVE) and drops the student's active enrolments; preserves invoices/history for audit; can't deactivate your own account (400).
+- `DELETE /courses/enrollments/:id` — unenroll a student (removes the enrolment row) so an over-enrolled course can then be deleted. Profile now returns enrolment ids.
+- **UI:** the profile drawer gained Edit (inline name/phone/grade), Deactivate/Reactivate, and a per-enrolment unenroll (person_remove); lists refresh via a new `onChanged` callback.
+- **Verified:** edit phone; unenroll all → course enrolled=0 (then blocked only by "delete its classes first" — correct cascade); self-deactivate blocked (400); deactivate→reactivate round-trip.
+
+---
+
+## 24. Grade Promotion → Billing Reconciliation (2026-07-13)
+
+Promoting a student (e.g. Class 9 → Class 10) now keeps billing correct, because the monthly amount is derived from active enrolments.
+- `PUT /users/:id`: when a student's grade changes, active enrolments in courses tied to a *different graded* level are auto-set to COMPLETED (ungraded/generic courses untouched). Response returns `droppedEnrollments`. The admin then enrols in the new grade's courses, which sets the new monthly amount.
+- Profile now returns `monthlyFee` (sum of active enrolments' net course fees, tax-aware) and shows it as "Recurring monthly fee NPR x/mo" — so the change is visible.
+- Edit toast surfaces the reconciliation ("Grade updated — N old-grade enrolments completed…").
+- **Verified:** Class 9 student with a Grade-9 course showed 2,486/mo; promoting to Class 10 completed that enrolment (`droppedEnrollments=1`) and the monthly fee dropped to 0, ready for new-grade enrolment.
+
+Design note: billing is never a stored number — it's always the live sum of active enrolments, so it stays correct through promotions, unenrolments, and fee edits without any denormalized field to sync. Future promotions/transfers reuse this same path.
+
+---
+
+## 25. Student Analytics (KPIs + Knowledge Graph) (2026-07-13)
+
+Per-student analytics — the parent-facing selling point.
+- `GET /users/:id/analytics`: computes attendance (present/absent/excused + rate), homework (assigned/submitted/graded/pending + completion %), fees (paid/due/overdue + collection %), active courses, and a connections map (grade, courses, teachers, parents) for the graph. **Access: tenant admin (all), branch admin (scoped), the assigned teacher, a linked parent, or the student themselves** — so the same endpoint serves admin, teacher, and the future parent portal.
+- Frontend `StudentAnalytics` drawer: KPI tiles with progress rings, an attendance breakdown bar chart, and a toggle-able **radial knowledge graph** (student at centre → grade/courses/teachers/parents). Opened via an **Analytics** button on any student's profile card.
+- Empty states are honest (attendance/homework show "No data" until those records exist).
+- **Verified:** endpoint returns structured KPIs (fees 100% collected, parent connection present); both sides typecheck.
+
+Note: attendance & homework will populate once those flows record data (student-attendance marking exists; homework is Phase-2). The KPI/graph framework is data-driven and fills in automatically.
+
+---
+
+## 26. Fee Model Reframe: Grade Tuition + Extra Activities (2026-07-13)
+
+Corrected the billing model to match the business: **grade = monthly tuition covering all subjects; courses = opt-in extra activities (Drum Class, etc.) with their own fees.**
+- `Grade.monthlyFee` added (migration `grade_monthly_fee`); editable on the Grades page (new "Monthly Tuition" column, inline edit).
+- **Monthly bill = grade tuition + active extra-activity enrolments.** Both the `generate-invoices` run and the profile's live `monthlyFee` now sum grade base + extras. Profile shows the breakdown (tuition line + extras line).
+- **Enrolment no longer creates an invoice** (that double-billed against the monthly run and was the source of the intermittent enroll 500). `POST /courses/enroll` now just creates the enrolment and returns `monthlyDelta`; billing is the monthly run only. Also added a duplicate-active-enrolment guard (409).
+- **New enrol UI:** the student profile has an "Enroll" action listing ungraded courses (extra activities) + their class/time; enrolling shows the monthly delta. Grade tuition breakdown is shown in the fee card.
+- **Verified:** Class 10 tuition 3,500 → Aarav's monthly fee 3,500 (tuition only); enrolling in Drum Class (ungraded, +1,000) → monthly fee 4,500, no invoice/500. Enroll endpoint healthy.
+
+---
+
+## 27. Remaining Work
 
 | Item | Status |
 |---|---|

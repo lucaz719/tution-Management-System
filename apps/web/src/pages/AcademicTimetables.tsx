@@ -17,6 +17,7 @@ interface ClassItem {
   courseId: string;
   courseName: string;
   courseType: string;
+  gradeName: string | null;
   branchId: string;
   branchName: string;
   teacherId: string | null;
@@ -31,6 +32,7 @@ interface CourseOption {
   name: string;
   branchId: string;
   branchName: string;
+  gradeName: string | null;
 }
 
 interface TeacherOption {
@@ -90,7 +92,7 @@ export function AcademicTimetables() {
         api.people.list(),
       ]);
       setClasses(classList as ClassItem[]);
-      setCourses((courseList as any[]).map((c) => ({ id: c.id, name: c.name, branchId: c.branchId, branchName: c.branchName })));
+      setCourses((courseList as any[]).map((c) => ({ id: c.id, name: c.name, branchId: c.branchId, branchName: c.branchName, gradeName: c.gradeName ?? null })));
       setTeachers(
         (people as any[])
           .filter((p) => p.roles.some((r: any) => r.role === 'Teacher'))
@@ -267,7 +269,10 @@ export function AcademicTimetables() {
                   <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text)' }}>{cls.name}</div>
                   <div style={{ fontSize: '12.5px', color: 'var(--text-muted)', marginTop: '3px' }}>{cls.courseName} · {cls.branchName}</div>
                 </div>
-                <span className="people-role-tag">{cls.courseType.replace('_', ' ')}</span>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  {cls.gradeName ? <span className="people-role-tag">{cls.gradeName}</span> : null}
+                  <span className="people-role-tag">{cls.courseType.replace('_', ' ')}</span>
+                </div>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text)', background: 'rgba(21, 96, 189, 0.05)', borderRadius: '10px', padding: '10px 12px' }}>
@@ -326,9 +331,23 @@ export function AcademicTimetables() {
                     <select value={form.courseId} onChange={(e) => { setField('courseId', e.target.value); setEditBranchId(courses.find((c) => c.id === e.target.value)?.branchId ?? ''); }} required>
                       <option value="">Select a course…</option>
                       {courses.map((c) => (
-                        <option key={c.id} value={c.id}>{c.name} — {c.branchName}</option>
+                        <option key={c.id} value={c.id}>{c.name}{c.gradeName ? ` · ${c.gradeName}` : ''} — {c.branchName}</option>
                       ))}
                     </select>
+                    {(() => {
+                      const selected = courses.find((c) => c.id === form.courseId);
+                      if (!selected) return null;
+                      return (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', fontSize: '12.5px', color: 'var(--text-muted)' }}>
+                          <span className="material-symbols-outlined" style={{ fontSize: '16px', color: 'var(--color-primary-light)' }}>stairs</span>
+                          {selected.gradeName ? (
+                            <>Grade auto-set from course: <span style={{ fontWeight: 700, color: 'var(--color-primary)' }}>{selected.gradeName}</span></>
+                          ) : (
+                            <>This course has no grade — set one under Courses to link it.</>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 ) : null}
                 <div className="people-field">

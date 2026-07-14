@@ -2,7 +2,6 @@ import { Router, Response } from 'express';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
-import { getBillingPeriod } from '../utils/nepali';
 
 const router = Router();
 
@@ -58,6 +57,94 @@ router.post(
   }
 );
 
+// 1b. Bulk-create courses — used by the grade × subject generator so admins
+// don't add the school ladder one course at a time. Skips duplicates (same
+// name + grade + branch), so re-running is safe.
+router.post(
+  '/bulk',
+  authMiddleware,
+  hasPermission('manage_courses'),
+  async (req: TenantRequest, res: Response) => {
+    const { branchId, items } = req.body as {
+      branchId?: string;
+      items?: Array<{ name?: string; gradeId?: string | null; type?: string; monthlyBase?: number; isTaxExempt?: boolean; description?: string }>;
+    };
+    if (!branchId || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'branchId and a non-empty items array are required.' });
+    }
+    if (items.length > 500) {
+      return res.status(400).json({ error: 'Too many courses in one request (maximum 500).' });
+    }
+
+    try {
+      const branch = await prisma.branch.findUnique({ where: { id: branchId } });
+      if (!branch || branch.tenantId !== req.tenantId) {
+        return res.status(404).json({ error: 'Branch not found in your institution.' });
+      }
+
+      const grades = await prisma.grade.findMany({ where: { tenantId: req.tenantId! }, select: { id: true } });
+      const gradeIds = new Set(grades.map((g) => g.id));
+
+      const existing = await prisma.course.findMany({
+        where: { tenantId: req.tenantId!, branchId },
+        select: { name: true, gradeId: true },
+      });
+      const seen = new Set(existing.map((c) => `${c.gradeId ?? ''}::${c.name.toLowerCase()}`));
+
+      const results: Array<{ index: number; name: string; status: 'created' | 'skipped' | 'error'; error?: string }> = [];
+      let created = 0;
+      for (const [index, item] of items.entries()) {
+        const name = typeof item.name === 'string' ? item.name.trim() : '';
+        const gradeId = typeof item.gradeId === 'string' && item.gradeId ? item.gradeId : null;
+        // Strict number check: JSON null/missing must not coerce to a 0 fee.
+        const fee = typeof item.monthlyBase === 'number' && Number.isFinite(item.monthlyBase) ? item.monthlyBase : NaN;
+        if (!name) {
+          results.push({ index, name, status: 'error', error: 'Course name is required.' });
+          continue;
+        }
+        if (gradeId && !gradeIds.has(gradeId)) {
+          results.push({ index, name, status: 'error', error: 'Grade not found in your institution.' });
+          continue;
+        }
+        if (!Number.isFinite(fee) || fee < 0) {
+          results.push({ index, name, status: 'error', error: 'Invalid monthly fee.' });
+          continue;
+        }
+        const key = `${gradeId ?? ''}::${name.toLowerCase()}`;
+        if (seen.has(key)) {
+          results.push({ index, name, status: 'skipped', error: 'A course with this name already exists for this grade and branch.' });
+          continue;
+        }
+        seen.add(key);
+        await prisma.course.create({
+          data: {
+            tenantId: req.tenantId!,
+            branchId,
+            gradeId,
+            name,
+            description: typeof item.description === 'string' && item.description.trim() ? item.description.trim() : null,
+            type: (item.type as any) || 'REGULAR',
+            feeStructure: { monthlyBase: fee },
+            isTaxExempt: !!item.isTaxExempt,
+          },
+        });
+        results.push({ index, name, status: 'created' });
+        created += 1;
+      }
+
+      const skipped = items.length - created;
+      return res.status(201).json({
+        message: `${created} course(s) created, ${skipped} skipped.`,
+        created,
+        skipped,
+        results,
+      });
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Bulk course creation failed.', details: error.message });
+    }
+  }
+);
+
 // 2. List all Courses (Scoped by Multi-Tenant context)
 router.get(
   '/',
@@ -107,7 +194,7 @@ router.get(
         where: { course: { tenantId: req.tenantId! } },
         orderBy: { createdAt: 'desc' },
         include: {
-          course: { select: { name: true, type: true } },
+          course: { select: { name: true, type: true, grade: { select: { id: true, name: true } } } },
           branch: { select: { name: true } },
           assignedTeacher: { select: { id: true, firstName: true, lastName: true } },
           _count: { select: { enrollments: true, sessions: true } },
@@ -121,6 +208,9 @@ router.get(
           courseId: c.courseId,
           courseName: c.course.name,
           courseType: c.course.type,
+          // Grade is derived from the course — the class inherits it automatically.
+          gradeId: c.course.grade?.id ?? null,
+          gradeName: c.course.grade?.name ?? null,
           branchId: c.branchId,
           branchName: c.branch.name,
           teacherId: c.teacherId,
@@ -142,7 +232,7 @@ router.post(
   authMiddleware,
   hasPermission('manage_billing'),
   async (req: TenantRequest, res: Response) => {
-    const { studentId, courseId, classId, admissionDate, discount } = req.body;
+    const { studentId, courseId, classId, admissionDate } = req.body;
 
     if (!studentId || !courseId || !classId) {
       return res.status(400).json({
@@ -159,7 +249,10 @@ router.post(
 
       // The student and class must also belong to the tenant.
       const [student, klass] = await Promise.all([
-        prisma.student.findFirst({ where: { id: studentId, user: { tenantId: req.tenantId! } } }),
+        prisma.student.findFirst({
+          where: { id: studentId, user: { tenantId: req.tenantId! } },
+          include: { grade: { select: { name: true } } },
+        }),
         prisma.class.findFirst({ where: { id: classId, course: { tenantId: req.tenantId! } } }),
       ]);
       if (!student) {
@@ -168,8 +261,27 @@ router.post(
       if (!klass) {
         return res.status(404).json({ error: 'Class not found in your institution.' });
       }
+      // The class must belong to the course being enrolled in.
+      if (klass.courseId !== courseId) {
+        return res.status(400).json({ error: 'The selected class does not belong to this course.' });
+      }
 
-      // 2. Perform logical enrollment.
+      // Grade guard: a graded course can only enrol students of that grade.
+      if (course.gradeId && student.gradeId && course.gradeId !== student.gradeId) {
+        const courseGrade = await prisma.grade.findUnique({ where: { id: course.gradeId }, select: { name: true } });
+        return res.status(400).json({
+          error: `This course is for ${courseGrade?.name ?? 'another grade'}, but ${student.gradeId ? `the student is in ${student.grade?.name ?? 'a different grade'}` : 'the student has no grade set'}. Assign a matching grade first.`,
+        });
+      }
+
+      // Prevent duplicate active enrolment in the same class.
+      const dup = await prisma.enrollment.findFirst({ where: { studentId, classId, status: 'ACTIVE' } });
+      if (dup) {
+        return res.status(409).json({ error: 'Student is already enrolled in this class.' });
+      }
+
+      // Create the enrolment only. Billing is the monthly run (grade tuition +
+      // active extra-activity enrolments) — no per-enrolment invoice here.
       const enrollment = await prisma.enrollment.create({
         data: {
           studentId,
@@ -180,54 +292,14 @@ router.post(
         },
       });
 
-      // 3. Invoice Calculation & Tax Compliance Checks
       const feeStructure = (course.feeStructure ?? {}) as { monthlyBase?: number };
-      const baseAmount = Number(feeStructure.monthlyBase || 3000);
-      const discountAmount = discount ? Number(discount) : 0.00;
-      const subtotal = Math.max(0, baseAmount - discountAmount);
-
-      // Apply Nepalese tax logic
-      let taxAmount = 0;
-      let netPayable = subtotal;
-
-      if (!course.isTaxExempt) {
-        const taxRate = Number(course.taxPercentage || 13.00) / 100;
-        taxAmount = subtotal * taxRate;
-        netPayable = subtotal + taxAmount;
-      }
-
-      // 4. Create invoice record — billing cycle aligns to the current Nepali
-      //    (Bikram Sambat) month, so parents are billed per BS month, not AD.
-      const period = await getBillingPeriod(new Date(), 10);
-      const invoice = await prisma.invoice.create({
-        data: {
-          tenantId: req.tenantId!,
-          studentId,
-          amount: baseAmount,
-          discount: discountAmount,
-          fine: 0.00,
-          netPayable: netPayable,
-          billingCycleStart: period.cycleStart,
-          billingCycleEnd: period.cycleEnd,
-          dueDate: period.dueDate,
-          status: 'UNPAID',
-          nepalPayQrCode: `nepalpay://pay?merchant=tms_${req.tenantId}&amount=${netPayable}&invoice=${enrollment.id}`,
-        },
-      });
+      const base = Number(feeStructure.monthlyBase || 0);
+      const monthlyDelta = course.isTaxExempt ? base : base * (1 + Number(course.taxPercentage || 13) / 100);
 
       return res.status(201).json({
-        message: 'Student enrolled and initial billing invoice successfully generated.',
+        message: 'Student enrolled.',
         enrollment,
-        invoice: {
-          ...invoice,
-          billingDetails: {
-            isTaxExempt: course.isTaxExempt,
-            appliedTaxPercentage: course.isTaxExempt ? 0 : (course.taxPercentage || 13.00),
-            taxComputedNpr: taxAmount,
-            netPayableNpr: netPayable,
-            billingPeriodBs: period.label,
-          },
-        },
+        monthlyDelta: Math.round(monthlyDelta * 100) / 100,
       });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to process enrollment.', details: error.message });
@@ -721,6 +793,102 @@ router.post(
       });
     } catch (error: any) {
       return res.status(500).json({ error: 'Refund processing failed.', details: error.message });
+    }
+  }
+);
+
+// Unenroll a student (delete the enrolment row) — frees a course for deletion.
+router.delete(
+  '/enrollments/:id',
+  authMiddleware,
+  hasPermission('manage_billing'),
+  async (req: TenantRequest, res: Response) => {
+    const { id } = req.params;
+    try {
+      const enrollment = await prisma.enrollment.findUnique({ where: { id }, include: { course: true } });
+      if (!enrollment || enrollment.course.tenantId !== req.tenantId) {
+        return res.status(404).json({ error: 'Enrolment not found in your institution.' });
+      }
+      await prisma.enrollment.delete({ where: { id } });
+      return res.json({ message: 'Student unenrolled.' });
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Failed to unenroll.', details: error.message });
+    }
+  }
+);
+
+// ── Course update / delete ──────────────────────────────────────────────────
+// Update a course (name, description, type, fee, tax, grade). Tenant-scoped.
+router.put(
+  '/:id',
+  authMiddleware,
+  hasPermission('manage_courses'),
+  async (req: TenantRequest, res: Response) => {
+    const { id } = req.params;
+    const { name, description, type, feeStructure, isTaxExempt, taxPercentage, gradeId } = req.body;
+
+    try {
+      const course = await prisma.course.findUnique({ where: { id } });
+      if (!course || course.tenantId !== req.tenantId) {
+        return res.status(404).json({ error: 'Course not found in your institution.' });
+      }
+
+      const data: Record<string, unknown> = {};
+      if (typeof name === 'string' && name.trim()) data.name = name.trim();
+      if (typeof description === 'string') data.description = description.trim() || null;
+      if (typeof type === 'string' && type) data.type = type;
+      if (feeStructure && typeof feeStructure === 'object') data.feeStructure = feeStructure;
+      if (typeof isTaxExempt === 'boolean') data.isTaxExempt = isTaxExempt;
+      if (taxPercentage !== undefined && Number.isFinite(Number(taxPercentage))) data.taxPercentage = Number(taxPercentage);
+
+      // grade: string reassigns (validated), null clears.
+      if (gradeId === null) {
+        data.gradeId = null;
+      } else if (typeof gradeId === 'string' && gradeId) {
+        const grade = await prisma.grade.findFirst({ where: { id: gradeId, tenantId: req.tenantId! } });
+        if (!grade) {
+          return res.status(404).json({ error: 'Grade not found in your institution.' });
+        }
+        data.gradeId = gradeId;
+      }
+
+      if (Object.keys(data).length === 0) {
+        return res.status(400).json({ error: 'No valid fields provided to update.' });
+      }
+
+      const updated = await prisma.course.update({ where: { id }, data });
+      return res.json({ message: 'Course updated.', course: updated });
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Failed to update course.', details: error.message });
+    }
+  }
+);
+
+// Delete a course. Blocked when it has classes or enrolments, to protect data.
+router.delete(
+  '/:id',
+  authMiddleware,
+  hasPermission('manage_courses'),
+  async (req: TenantRequest, res: Response) => {
+    const { id } = req.params;
+    try {
+      const course = await prisma.course.findUnique({
+        where: { id },
+        include: { _count: { select: { classes: true, enrollments: true } } },
+      });
+      if (!course || course.tenantId !== req.tenantId) {
+        return res.status(404).json({ error: 'Course not found in your institution.' });
+      }
+      if (course._count.enrollments > 0) {
+        return res.status(409).json({ error: 'Cannot delete a course with enrolled students. Unenrol them first.' });
+      }
+      if (course._count.classes > 0) {
+        return res.status(409).json({ error: 'Cannot delete a course that still has classes. Delete its classes first.' });
+      }
+      await prisma.course.delete({ where: { id } });
+      return res.json({ message: 'Course deleted.' });
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Failed to delete course.', details: error.message });
     }
   }
 );

@@ -8,6 +8,7 @@ interface Grade {
   id: string;
   name: string;
   sortOrder: number;
+  monthlyFee: number;
   studentCount: number;
   courseCount: number;
 }
@@ -33,6 +34,7 @@ export function AcademicGrades() {
   const [newName, setNewName] = useState('');
   const [editingId, setEditingId] = useState('');
   const [editName, setEditName] = useState('');
+  const [editFee, setEditFee] = useState('');
   const [detail, setDetail] = useState<GradeDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
@@ -98,9 +100,9 @@ export function AcademicGrades() {
     if (!editName.trim()) return;
     setBusy(true);
     try {
-      await api.grades.update(id, { name: editName.trim() });
+      await api.grades.update(id, { name: editName.trim(), monthlyFee: Number(editFee) || 0 });
       setEditingId('');
-      showToast('Grade renamed.', 'success');
+      showToast('Grade updated.', 'success');
       await loadGrades();
     } catch (error: unknown) {
       showToast(error instanceof Error ? error.message : 'Failed to rename grade.', 'error');
@@ -140,12 +142,12 @@ export function AcademicGrades() {
 
       {errorMsg ? <StatusBadge variant="error">{errorMsg}</StatusBadge> : null}
 
-      <form onSubmit={addGrade} style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '12px 14px' }}>
+      <form onSubmit={addGrade} style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '12px 14px', marginBottom: '22px' }}>
         <input
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           placeholder="Add a grade (e.g. Class 11)"
-          style={{ flex: 1, minWidth: '200px', padding: '10px 14px', borderRadius: 'var(--radius-sm)', border: '1.5px solid var(--border)', background: 'var(--bg-background)', color: 'var(--text-foreground)', fontFamily: 'inherit', fontSize: '14px', outline: 'none' }}
+          style={{ flex: 1, minWidth: '200px', padding: '10px 16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', background: 'var(--bg-background)', color: 'var(--text-foreground)', fontFamily: 'inherit', fontSize: '14px', outline: 'none' }}
         />
         <Button type="submit" disabled={busy || !newName.trim()} style={{ height: '42px' }}>
           <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>add</span>
@@ -163,16 +165,17 @@ export function AcademicGrades() {
           <table className="people-table">
             <thead>
               <tr>
-                <th>Grade</th>
-                <th>Students</th>
-                <th>Courses</th>
-                <th style={{ textAlign: 'right' }}>Actions</th>
+                <th style={{ width: '28%' }}>Grade</th>
+                <th style={{ width: '20%' }}>Monthly Tuition</th>
+                <th style={{ textAlign: 'center', width: '13%' }}>Students</th>
+                <th style={{ textAlign: 'center', width: '13%' }}>Courses</th>
+                <th style={{ textAlign: 'right', width: '26%' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {grades.length === 0 ? (
                 <tr>
-                  <td colSpan={4}>
+                  <td colSpan={5}>
                     <div className="people-empty">
                       <span className="material-symbols-outlined">stairs</span>
                       {isLoading ? 'Loading grades…' : 'No grades yet. Click "Add Standard Grades" for Nursery through Class 12.'}
@@ -188,16 +191,24 @@ export function AcademicGrades() {
                           value={editName}
                           onChange={(e) => setEditName(e.target.value)}
                           autoFocus
-                          style={{ padding: '8px 12px', borderRadius: 'var(--radius-sm)', border: '1.5px solid var(--brand)', background: 'var(--bg-background)', color: 'var(--text-foreground)', fontFamily: 'inherit', fontSize: '14px', outline: 'none' }}
+                          style={{ padding: '8px 12px', borderRadius: 'var(--radius-md)', border: '1.5px solid var(--brand)', background: 'var(--bg-background)', color: 'var(--text-foreground)', fontFamily: 'inherit', fontSize: '14px', outline: 'none' }}
                         />
                       ) : (
-                        <button type="button" onClick={() => void openDetail(grade)} style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-primary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>
+                        <button type="button" onClick={() => void openDetail(grade)} style={{ fontSize: '14.5px', fontWeight: 700, color: 'var(--color-primary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>
                           {grade.name}
                         </button>
                       )}
                     </td>
-                    <td><StatusBadge variant={grade.studentCount > 0 ? 'info' : 'success'}>{grade.studentCount}</StatusBadge></td>
-                    <td><StatusBadge variant="gold">{grade.courseCount}</StatusBadge></td>
+                    <td>
+                      {editingId === grade.id ? (
+                        <input value={editFee} onChange={(e) => setEditFee(e.target.value)} inputMode="numeric" placeholder="0"
+                          style={{ width: '110px', padding: '8px 12px', borderRadius: 'var(--radius-md)', border: '1.5px solid var(--brand)', background: 'var(--bg-background)', color: 'var(--text-foreground)', fontFamily: 'inherit', fontSize: '14px', outline: 'none' }} />
+                      ) : (
+                        <span style={{ fontSize: '14px', fontWeight: 700 }}>NPR {grade.monthlyFee.toLocaleString()}<span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 500 }}>/mo</span></span>
+                      )}
+                    </td>
+                    <td style={{ textAlign: 'center' }}><StatusBadge variant={grade.studentCount > 0 ? 'info' : 'success'}>{grade.studentCount}</StatusBadge></td>
+                    <td style={{ textAlign: 'center' }}><StatusBadge variant="gold">{grade.courseCount}</StatusBadge></td>
                     <td style={{ textAlign: 'right' }}>
                       <div style={{ display: 'inline-flex', gap: '8px' }}>
                         {editingId === grade.id ? (
@@ -207,7 +218,7 @@ export function AcademicGrades() {
                           </>
                         ) : (
                           <>
-                            <Button variant="outline" onClick={() => { setEditingId(grade.id); setEditName(grade.name); }} style={{ minHeight: '34px', height: '34px', padding: '6px 12px' }}>
+                            <Button variant="outline" onClick={() => { setEditingId(grade.id); setEditName(grade.name); setEditFee(String(grade.monthlyFee)); }} style={{ minHeight: '34px', height: '34px', padding: '6px 12px' }}>
                               <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>edit</span>
                             </Button>
                             <Button variant="outline" onClick={() => void removeGrade(grade)} disabled={busy} style={{ minHeight: '34px', height: '34px', padding: '6px 12px', color: 'var(--color-error)', borderColor: 'rgba(230, 57, 70, 0.4)' }}>

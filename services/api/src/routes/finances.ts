@@ -192,13 +192,24 @@ router.post(
     try {
       const period = await getBillingPeriod(new Date(), 10);
 
+      // Monthly bill per student = their grade's base tuition (all subjects) +
+      // net fees of their active extra-activity enrolments.
+      const feeByStudent = new Map<string, number>();
+
+      // 1. Grade base tuition for every student who has a graded level.
+      const students = await prisma.student.findMany({
+        where: { user: { tenantId: req.tenantId! }, gradeId: { not: null } },
+        include: { grade: { select: { monthlyFee: true } } },
+      });
+      for (const s of students) {
+        if (s.grade && s.grade.monthlyFee > 0) feeByStudent.set(s.id, s.grade.monthlyFee);
+      }
+
+      // 2. Add active extra-activity enrolment fees.
       const enrollments = await prisma.enrollment.findMany({
         where: { status: 'ACTIVE', course: { tenantId: req.tenantId! } },
         include: { course: true },
       });
-
-      // Sum fees per student across their active enrolments.
-      const feeByStudent = new Map<string, number>();
       for (const e of enrollments) {
         const fee = (e.course.feeStructure ?? {}) as { monthlyBase?: number };
         const base = Number(fee.monthlyBase || 0);
