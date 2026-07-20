@@ -11,7 +11,7 @@ void main() {
     await tester.pumpWidget(const ProviderScope(child: TMSApp()));
     await tester.pumpAndSettle();
 
-    expect(find.text('Welcome to TMS'), findsOneWidget);
-    expect(find.text('Sign in'), findsOneWidget);
+    expect(find.text('Tuition Management System'), findsOneWidget);
+    expect(find.text('Sign In'), findsNWidgets(2));
   });
 }

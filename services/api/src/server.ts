@@ -25,6 +25,9 @@ import appointmentsRouter from './routes/appointments';
 import resourcesRouter from './routes/resources';
 import cronRouter from './routes/cron';
 
+import { toNodeHandler } from 'better-auth/node';
+import { auth } from './utils/auth';
+
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
 
@@ -43,6 +46,14 @@ app.get('/api/health', (req: TenantRequest, res: Response) => {
 
 // Serve static login UI without tenant isolation
 app.use('/login', staticRouter);
+
+// Mount Better Auth handler (bypassing tenant isolation middleware, except for legacy login)
+app.all('/api/auth/*', (req, res, next) => {
+  if (req.path === '/api/auth/login') {
+    return next();
+  }
+  return toNodeHandler(auth)(req, res);
+});
 
 // Global Tenant Isolation Middleware (Automatically extracts x-tenant-id or auth claims)
 app.use(tenantMiddleware);

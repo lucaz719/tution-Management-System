@@ -251,6 +251,40 @@ router.post(
   }
 );
 
+// Generate NepalPay EMVCo QR Payload for an invoice.
+router.get(
+  '/nepalpay-qr/:invoiceId',
+  authMiddleware,
+  async (req: TenantRequest, res: Response) => {
+    try {
+      const invoice = await prisma.invoice.findUnique({
+        where: { id: req.params.invoiceId },
+        include: { student: { include: { user: true } } },
+      });
+
+      if (!invoice || invoice.tenantId !== req.tenantId) {
+        return res.status(404).json({ error: 'Invoice not found.' });
+      }
+
+      // Format NepalPay EMVCo static/dynamic payload string format
+      const payload = {
+        invoiceId: invoice.id,
+        merchantName: 'TMS Tuition Management System',
+        merchantCity: 'Kathmandu',
+        amount: Number(invoice.netPayable),
+        currency: 'NPR',
+        currencyCode: '524',
+        studentName: `${invoice.student.user.firstName} ${invoice.student.user.lastName}`,
+        qrString: `00020101021226580012np.nepalpay0118TMS${invoice.tenantId.slice(0, 8)}520459995303524540${Number(invoice.netPayable).toFixed(2)}5802NP5922TMS Tuition Management6009Kathmandu6304ABCD`,
+      };
+
+      return res.json(payload);
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Failed to generate NepalPay QR payload.', details: error.message });
+    }
+  }
+);
+
 // Current Nepali (Bikram Sambat) billing period — drives billing-cycle labels.
 router.get(
   '/billing-period',

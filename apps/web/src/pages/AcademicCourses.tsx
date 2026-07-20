@@ -78,8 +78,14 @@ function GroupRows({ label, courses, onEdit, onDelete, busyId }: {
           </td>
           <td><span style={{ fontSize: '13.5px' }}>{course.branchName}</span></td>
           <td>
-            <span style={{ fontSize: '14px', fontWeight: 700 }}>NPR {(course.feeStructure?.monthlyBase ?? 0).toLocaleString()}</span>
-            {course.isTaxExempt ? <StatusBadge variant="info">Tax-exempt</StatusBadge> : null}
+            <div style={{ fontSize: '14px', fontWeight: 700 }}>NPR {(course.feeStructure?.monthlyBase ?? 0).toLocaleString()}</div>
+            {course.isTaxExempt ? (
+              <StatusBadge status="success">Tax-Exempt (0% VAT)</StatusBadge>
+            ) : (
+              <div style={{ fontSize: '11px', color: 'var(--color-primary-light)', marginTop: '2px', fontWeight: 600 }}>
+                Incl. 13% VAT: NPR {Math.round((course.feeStructure?.monthlyBase ?? 0) * 1.13).toLocaleString()}
+              </div>
+            )}
           </td>
           <td><span style={{ fontSize: '14px' }}>{course.classCount}</span></td>
           <td><span style={{ fontSize: '14px' }}>{course.enrollmentCount}</span></td>

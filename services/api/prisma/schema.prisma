@@ -91,10 +91,6 @@ model Tenant {
   name                String
   panNumber           String               @unique // Nepal 9-digit PAN/VAT
   status              UserStatus           @default(ACTIVE)
-  // Tenant-wide policy settings (editable from the Tenant Admin dashboard)
-  vatRate             Float                @default(13)
-  gracePeriodMinutes  Int                  @default(15)
-  pettyCashCapNpr     Int                  @default(20000)
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
   branches            Branch[]
@@ -104,12 +100,12 @@ model Tenant {
   invoices            Invoice[]
   leaves              Leave[]
   pettyCash           PettyCash[]
-  grades              Grade[]
   // Phase 2 relations
   academicEvents      AcademicEvent[]
   socialConfigs       TenantSocialConfig[]
   socialPosts         SocialMediaPost[]
   certificateTemplates CertificateTemplate[]
+  vehicleRoutes       VehicleRoute[]
   expenses            Expense[]
   payrolls            Payroll[]
   refunds             RefundRequest[]
@@ -165,7 +161,6 @@ model User {
   firstName         String
   lastName          String
   phone             String
-  twoFactorEnabled  Boolean             @default(false)
   status            UserStatus          @default(ACTIVE)
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
@@ -175,8 +170,14 @@ model User {
   parent            Parent?
   leaves            Leave[]
   teacherAttendance TeacherAttendance[]
-  sessions          TeacherSession[]
-  assignedClasses   Class[]             @relation("AssignedClasses")
+  teacherSessions   TeacherSession[]
+
+  // Better Auth support
+  name              String?
+  emailVerified     Boolean             @default(false)
+  image             String?
+  sessions          Session[]
+  accounts          Account[]
 }
 
 // 5. User-Role-Branch Junction (Handles multiple branches per teacher/admin)
@@ -213,29 +214,11 @@ model StaffRecord {
   payrolls         Payroll[]
 }
 
-// Grade level (Nursery, LKG, UKG, Class 1..12) — CRUD-managed per tenant.
-model Grade {
-  id        String    @id @default(uuid())
-  tenantId  String
-  tenant    Tenant    @relation(fields: [tenantId], references: [id])
-  name       String
-  sortOrder  Int       @default(0)
-  monthlyFee Int       @default(0) // Base monthly tuition for this grade (all subjects)
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-  students   Student[]
-  courses    Course[]
-
-  @@unique([tenantId, name])
-}
-
 // 7. Student Records
 model Student {
   id                    String              @id @default(uuid())
   userId                String              @unique
   user                  User                @relation(fields: [userId], references: [id])
-  gradeId               String?
-  grade                 Grade?              @relation(fields: [gradeId], references: [id])
   admissionDate         DateTime
   emergencyContact      String
   createdAt             DateTime            @default(now())
@@ -247,6 +230,8 @@ model Student {
   // Phase 2 relations
   homeworkSubmissions   HomeworkSubmission[]
   certificates          Certificate[]
+  canteenWallet         CanteenWallet?
+  vehicleAssignment     StudentVehicle?
   refunds               RefundRequest[]
 }
 
@@ -277,8 +262,6 @@ model Course {
   tenant        Tenant       @relation(fields: [tenantId], references: [id])
   branchId      String
   branch        Branch       @relation(fields: [branchId], references: [id])
-  gradeId       String?      // Grade level this course targets (Class 10, etc.)
-  grade         Grade?       @relation(fields: [gradeId], references: [id])
   name          String
   description   String?
   type          CourseType   @default(REGULAR)
@@ -299,8 +282,6 @@ model Class {
   course            Course              @relation(fields: [courseId], references: [id])
   branchId          String
   branch            Branch              @relation(fields: [branchId], references: [id])
-  teacherId         String?             // Assigned teacher (drives session generation)
-  assignedTeacher   User?               @relation("AssignedClasses", fields: [teacherId], references: [id])
   name              String
   schedule          Json                // Timetable days & time slots
   createdAt         DateTime            @default(now())
@@ -641,6 +622,57 @@ model ExitClearance {
   updatedAt          DateTime    @updatedAt
 }
 
+// 28. Canteen Management
+model CanteenWallet {
+  id           String               @id @default(uuid())
+  studentId    String               @unique
+  student      Student              @relation(fields: [studentId], references: [id])
+  balance      Decimal              @default(0.00) @db.Decimal(12, 2)
+  pinHash      String?
+  status       String               @default("ACTIVE") // ACTIVE, LOCKED
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  transactions CanteenTransaction[]
+}
+
+model CanteenTransaction {
+  id          String        @id @default(uuid())
+  walletId    String
+  wallet      CanteenWallet @relation(fields: [walletId], references: [id])
+  amount      Decimal       @db.Decimal(12, 2)
+  type        String        // CREDIT (Reload), DEBIT (Purchase)
+  description String?
+  referenceId String?       // Nepal Pay transaction ID for reloads
+  createdAt   DateTime      @default(now())
+}
+
+// 29. Vehicle Routing & Tracking
+model VehicleRoute {
+  id               String           @id @default(uuid())
+  tenantId         String
+  tenant           Tenant           @relation(fields: [tenantId], references: [id])
+  routeName        String
+  driverName       String
+  driverPhone      String
+  vehicleNumber    String?
+  currentLatitude  Float?
+  currentLongitude Float?
+  lastUpdated      DateTime?
+  updatedAt        DateTime         @updatedAt
+  students         StudentVehicle[]
+}
+
+model StudentVehicle {
+  studentId String  @unique
+  student   Student @relation(fields: [studentId], references: [id])
+  routeId   String
+  route     VehicleRoute @relation(fields: [routeId], references: [id])
+  pickupPoint String?
+  createdAt DateTime @default(now())
+
+  @@id([studentId, routeId])
+}
+
 // ==========================================
 // PHASE 3: ERP & ADVANCED
 // ==========================================
@@ -695,17 +727,40 @@ model RefundRequest {
   updatedAt       DateTime @updatedAt
 }
 
-// One-time verification codes for password reset and 2FA.
-// Codes are stored as SHA-256 hashes; plaintext is only sent to the user.
-model VerificationCode {
-  id         String    @id @default(uuid())
-  identifier String    // normalized email
-  purpose    String    // PASSWORD_RESET | RESET_TOKEN | TWO_FACTOR
-  codeHash   String
-  expiresAt  DateTime
-  attempts   Int       @default(0)
-  consumedAt DateTime?
-  createdAt  DateTime  @default(now())
+model Session {
+  id        String   @id @default(uuid())
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
 
-  @@index([identifier, purpose])
+model Account {
+  id                    String    @id @default(uuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  expiresAt             DateTime?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@unique([providerId, accountId])
+}
+
+model Verification {
+  id         String    @id @default(uuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime? @default(now())
+  updatedAt  DateTime? @updatedAt
 }

@@ -7,6 +7,7 @@ import {
   requestTwoFactorCode,
 } from '../features/auth/service';
 import type { AuthUser } from '../features/auth/types';
+import { authClient } from '../features/auth/auth-client';
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -152,7 +153,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
 
     try {
-      const session = await authenticateUser(email, password);
+      let session: any;
+      try {
+        const res = await authClient.signIn.email({
+          email,
+          password,
+          dontNavigate: true,
+        } as any);
+        if (res?.data) {
+          const { data: sessionData } = await authClient.getSession();
+          if (sessionData && sessionData.user) {
+            session = {
+              token: sessionData.session.token,
+              user: {
+                id: sessionData.user.id,
+                email: sessionData.user.email,
+                firstName: sessionData.user.name?.split(' ')[0] || '',
+                lastName: sessionData.user.name?.split(' ')[1] || '',
+                role: (sessionData.user as any).role || 'TEACHER',
+                requiresTwoFactor: false,
+                firstLogin: false,
+              },
+              tenantId: (sessionData.user as any).tenantId || null,
+            };
+          }
+        }
+      } catch (err) {
+        console.warn('Better Auth login failed, falling back to legacy login:', err);
+      }
+
+      if (!session) {
+        session = await authenticateUser(email, password);
+      }
+
       writeStoredSession(session.token, session.user, session.tenantId, rememberMe);
 
       if (session.user.requiresTwoFactor) {
@@ -180,7 +213,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [attemptCount]);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    try {
+      await authClient.signOut();
+    } catch (err) {
+      console.warn('Better Auth signOut failed:', err);
+    }
     removeAuthToken();
     clearLocalStorageArtifacts();
     clearSessionStorageArtifacts();

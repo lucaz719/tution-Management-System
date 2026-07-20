@@ -1,39 +1,157 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:tms_mobile/features/auth/data/auth_service.dart';
 
-class AuthUser {
-  final String id;
-  final String name;
-  final String email;
-  final String role;
-
-  const AuthUser({
-    required this.id,
-    required this.name,
-    required this.email,
-    required this.role,
-  });
-}
-
+/// Global auth state — drives router guards and role-based navigation.
 class AuthState {
   final AuthUser? user;
   final bool isAuthenticated;
+  final bool isLoading;
+  final bool isTwoFactorPending;
+  final int attemptCount;
 
-  const AuthState({this.user, this.isAuthenticated = false});
+  const AuthState({
+    this.user,
+    this.isAuthenticated = false,
+    this.isLoading = true,
+    this.isTwoFactorPending = false,
+    this.attemptCount = 0,
+  });
+
+  AuthState copyWith({
+    AuthUser? user,
+    bool? isAuthenticated,
+    bool? isLoading,
+    bool? isTwoFactorPending,
+    int? attemptCount,
+  }) {
+    return AuthState(
+      user: user ?? this.user,
+      isAuthenticated: isAuthenticated ?? this.isAuthenticated,
+      isLoading: isLoading ?? this.isLoading,
+      isTwoFactorPending: isTwoFactorPending ?? this.isTwoFactorPending,
+      attemptCount: attemptCount ?? this.attemptCount,
+    );
+  }
+
+  /// Role-based redirect path — mirrors web AuthContext.roleRedirectPath.
+  String get roleRedirectPath {
+    if (user == null) return '/login';
+    if (isTwoFactorPending) return '/2fa';
+
+    return switch (user!.role) {
+      'TEACHER' => '/teacher/home',
+      'STUDENT' => '/student/home',
+      'PARENT' => '/parent/home',
+      _ => '/login',
+    };
+  }
 }
 
 class AuthNotifier extends StateNotifier<AuthState> {
-  AuthNotifier() : super(const AuthState(
-    user: AuthUser(
-      id: 'parent-user-400',
-      name: 'Pinnacle Parent',
-      email: 'parent@pinnacle.edu.np',
-      role: 'PARENT',
-    ),
-    isAuthenticated: true,
-  ));
+  AuthNotifier() : super(const AuthState()) {
+    _restoreSession();
+  }
 
-  void logout() {
-    state = const AuthState(user: null, isAuthenticated: false);
+  /// Try to restore session from stored token + user.
+  Future<void> _restoreSession() async {
+    try {
+      final user = await AuthService.restoreSession();
+      if (user != null) {
+        state = AuthState(
+          user: user,
+          isAuthenticated: true,
+          isLoading: false,
+        );
+      } else {
+        state = const AuthState(isLoading: false);
+      }
+    } catch (_) {
+      state = const AuthState(isLoading: false);
+    }
+  }
+
+  /// Login with email and password.
+  Future<void> login(String email, String password) async {
+    if (state.attemptCount >= 5) {
+      throw const AuthFailure(
+        'Your account has been locked after 5 failed attempts.',
+      );
+    }
+
+    state = state.copyWith(isLoading: true);
+
+    try {
+      final user = await AuthService.signIn(email: email, password: password);
+
+      if (user.requiresTwoFactor) {
+        // Send 2FA code immediately.
+        try {
+          await AuthService.sendTwoFactorCode(email);
+        } catch (_) {
+          // The 2FA screen offers a resend option.
+        }
+
+        state = AuthState(
+          user: user,
+          isAuthenticated: false,
+          isLoading: false,
+          isTwoFactorPending: true,
+          attemptCount: 0,
+        );
+      } else {
+        state = AuthState(
+          user: user,
+          isAuthenticated: true,
+          isLoading: false,
+        );
+      }
+    } on AuthFailure {
+      state = state.copyWith(
+        isLoading: false,
+        attemptCount: state.attemptCount + 1,
+      );
+      rethrow;
+    } catch (e) {
+      state = state.copyWith(
+        isLoading: false,
+        attemptCount: state.attemptCount + 1,
+      );
+      throw AuthFailure('Login failed: $e');
+    }
+  }
+
+  /// Complete 2FA verification.
+  Future<void> verify2FA(String code) async {
+    if (state.user == null) return;
+
+    state = state.copyWith(isLoading: true);
+
+    try {
+      await AuthService.verifyTwoFactorCode(
+        email: state.user!.email,
+        code: code,
+      );
+
+      state = AuthState(
+        user: state.user,
+        isAuthenticated: true,
+        isLoading: false,
+      );
+    } on AuthFailure {
+      state = state.copyWith(isLoading: false);
+      rethrow;
+    }
+  }
+
+  /// Sign out and clear all session data.
+  Future<void> logout() async {
+    await AuthService.signOut();
+    state = const AuthState(isLoading: false);
+  }
+
+  /// Reset the failed-attempt counter (e.g. after a successful reset-password).
+  void resetAttemptCount() {
+    state = state.copyWith(attemptCount: 0);
   }
 }
 

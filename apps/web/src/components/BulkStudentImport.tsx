@@ -1,5 +1,4 @@
 import { useRef, useState } from 'react';
-import ExcelJS from 'exceljs';
 import { Button } from './ui/Button';
 import { StatusBadge } from './ui/StatusBadge';
 import { useToast } from './ui/Toast';
@@ -12,7 +11,6 @@ interface BulkStudentImportProps {
   onImported: () => void;
 }
 
-// Columns of the template — order and headers must match the parser below.
 const COLUMNS = [
   { header: 'First Name', key: 'firstName', width: 18, required: true },
   { header: 'Last Name', key: 'lastName', width: 18, required: true },
@@ -49,49 +47,28 @@ export function BulkStudentImport({ branches, grades = [], onClose, onImported }
   const [isImporting, setIsImporting] = useState(false);
   const [results, setResults] = useState<ImportResult[] | null>(null);
 
-  const downloadTemplate = async () => {
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet('Students');
-    ws.columns = COLUMNS.map((c) => ({ header: c.header, key: c.key, width: c.width }));
+  const downloadTemplate = () => {
+    const headers = COLUMNS.map((c) => `"${c.header}"`).join(',');
+    const sampleRow = [
+      '"Aarav"',
+      '"Koirala"',
+      '"aarav.koirala@example.com"',
+      '"9800000001"',
+      `"${branches[0]?.name ?? 'Damak Main Center'}"`,
+      `"${grades[0] ?? 'Class 10'}"`,
+      '"9800000002"',
+      '"Rajesh"',
+      '"Koirala"',
+      '"rajesh.koirala@example.com"',
+      '"9800000002"',
+    ].join(',');
 
-    // Style the header row.
-    ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1560BD' } };
-    ws.getRow(1).height = 20;
-
-    // One example row so the format is unambiguous.
-    ws.addRow({
-      firstName: 'Aarav',
-      lastName: 'Koirala',
-      email: 'aarav.koirala@example.com',
-      phone: '9800000001',
-      branchName: branches[0]?.name ?? 'Damak Main Center',
-      grade: grades[0] ?? 'Class 10',
-      emergencyContact: '9800000002',
-      parentFirstName: 'Rajesh',
-      parentLastName: 'Koirala',
-      parentEmail: 'rajesh.koirala@example.com',
-      parentPhone: '9800000002',
-    });
-
-    // Reference sheet listing valid branch and grade names.
-    const ref = wb.addWorksheet('Reference');
-    ref.columns = [
-      { header: 'Valid branch names', key: 'branch', width: 32 },
-      { header: 'Valid grade names', key: 'grade', width: 24 },
-    ];
-    ref.getRow(1).font = { bold: true };
-    const maxRows = Math.max(branches.length, grades.length);
-    for (let i = 0; i < maxRows; i++) {
-      ref.addRow({ branch: branches[i]?.name ?? '', grade: grades[i] ?? '' });
-    }
-
-    const buffer = await wb.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const csvContent = `${headers}\n${sampleRow}`;
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'sanskardip-student-import-template.xlsx';
+    a.download = 'tms-student-import-template.csv';
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -100,42 +77,38 @@ export function BulkStudentImport({ branches, grades = [], onClose, onImported }
     setIsParsing(true);
     setResults(null);
     try {
-      const wb = new ExcelJS.Workbook();
-      await wb.xlsx.load(await file.arrayBuffer());
-      const ws = wb.worksheets[0];
-      if (!ws) throw new Error('No sheet found in the file.');
+      let parsed: RowRecord[] = [];
 
-      // Map header names (row 1) to column indices, so column order is flexible.
-      const headerRow = ws.getRow(1);
+      const text = await file.text();
+      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+      if (lines.length < 2) throw new Error('File is empty or has no header.');
+
+      const headers = lines[0].split(/,|\t/).map((h) => h.trim().replace(/^"|"$/g, '').toLowerCase());
       const headerMap = new Map<string, number>();
-      headerRow.eachCell((cell, col) => {
-        const label = String(cell.value ?? '').trim().toLowerCase();
-        const match = COLUMNS.find((c) => c.header.toLowerCase() === label);
-        if (match) headerMap.set(match.key, col);
+      COLUMNS.forEach((c) => {
+        const idx = headers.findIndex((h) => h === c.header.toLowerCase());
+        if (idx !== -1) headerMap.set(c.key, idx);
       });
+
       if (!headerMap.has('firstName') || !headerMap.has('email')) {
-        throw new Error('Missing required columns. Download the template and keep its headers.');
+        throw new Error('File missing required headers: "First Name" and "Email".');
       }
 
-      const parsed: RowRecord[] = [];
-      ws.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return;
+      for (let i = 1; i < lines.length; i++) {
+        const cells = lines[i].split(/,|\t/).map((c) => c.trim().replace(/^"|"$/g, ''));
         const rec: RowRecord = {};
-        let hasValue = false;
+        let hasVal = false;
         COLUMNS.forEach((c) => {
-          const col = headerMap.get(c.key);
-          if (!col) return;
-          const cell = row.getCell(col).value;
-          let text = '';
-          if (cell && typeof cell === 'object' && 'text' in cell) text = String((cell as { text: unknown }).text ?? '');
-          else if (cell !== null && cell !== undefined) text = String(cell);
-          rec[c.key] = text.trim();
-          if (rec[c.key]) hasValue = true;
+          const idx = headerMap.get(c.key);
+          if (idx !== undefined && idx < cells.length) {
+            rec[c.key] = cells[idx];
+            if (cells[idx]) hasVal = true;
+          }
         });
-        if (hasValue) parsed.push(rec);
-      });
+        if (hasVal) parsed.push(rec);
+      }
 
-      if (parsed.length === 0) throw new Error('No data rows found below the header.');
+      if (parsed.length === 0) throw new Error('No valid student data rows found below the header.');
       setRows(parsed);
       setFileName(file.name);
     } catch (error: unknown) {

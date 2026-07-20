@@ -230,25 +230,78 @@ export function TenantBranches() {
           </Card>
         ) : (
           branches.map((branch) => (
-            <Card key={branch.id} hoverable={false}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
+            <Card key={branch.id} style={{ padding: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
                 <div>
-                  <h3 style={{ fontSize: '17px', fontWeight: 700, color: 'var(--color-text)' }}>{branch.name}</h3>
-                  <p style={{ marginTop: '6px', fontSize: '13px', color: 'rgba(44, 62, 80, 0.68)' }}>{branch.address}</p>
+                  <h3 style={{ fontSize: '18px', fontWeight: 700, margin: 0 }}>{branch.name}</h3>
+                  <p style={{ fontSize: '13px', color: 'var(--text-muted-foreground)', marginTop: '4px' }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: '14px', verticalAlign: 'middle', marginRight: '4px' }}>location_on</span>
+                    {branch.address}
+                  </p>
                 </div>
-                <Button variant="outline" onClick={() => startEdit(branch)} style={{ height: '36px', padding: '0 14px' }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>edit</span>
-                  Edit
+                <StatusBadge status="success" />
+              </div>
+
+              {/* GPS Geofence Visualizer Box */}
+              <div style={{
+                background: 'var(--color-surface)',
+                padding: '12px 14px',
+                borderRadius: '12px',
+                border: '1px solid var(--color-border)',
+                marginBottom: '16px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '50%',
+                    background: 'rgba(243, 156, 18, 0.15)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--color-accent)'
+                  }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>radar</span>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--color-text)' }}>GPS Geofence</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted-foreground)' }}>
+                      Lat: {branch.latitude?.toFixed(4)}, Long: {branch.longitude?.toFixed(4)}
+                    </div>
+                  </div>
+                </div>
+                <span style={{
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  padding: '4px 8px',
+                  borderRadius: '20px',
+                  background: 'rgba(15, 76, 138, 0.1)',
+                  color: 'var(--color-primary)'
+                }}>
+                  {branch.radiusMeters}m Radius
+                </span>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '13px', marginBottom: '16px' }}>
+                <div style={{ background: 'var(--color-surface)', padding: '10px', borderRadius: '8px' }}>
+                  <span style={{ color: 'var(--text-muted-foreground)', display: 'block', fontSize: '11px' }}>Grace Period</span>
+                  <strong>{branch.gracePeriodMinutes} mins</strong>
+                </div>
+                <div style={{ background: 'var(--color-surface)', padding: '10px', borderRadius: '8px' }}>
+                  <span style={{ color: 'var(--text-muted-foreground)', display: 'block', fontSize: '11px' }}>Staff & Courses</span>
+                  <strong>{branch.staffCount ?? 0} Staff · {branch.courseCount ?? 0} Courses</strong>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <Button variant="secondary" onClick={() => startEdit(branch)} style={{ flex: 1 }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: '16px', marginRight: '6px' }}>edit</span>
+                  Edit Branch
                 </Button>
               </div>
-              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '16px' }}>
-                <StatusBadge variant="info">{branch.staffCount} staff role{branch.staffCount === 1 ? '' : 's'}</StatusBadge>
-                <StatusBadge variant="gold">{branch.courseCount} course{branch.courseCount === 1 ? '' : 's'}</StatusBadge>
-                <StatusBadge variant="success">Geofence {branch.radiusMeters}m</StatusBadge>
-              </div>
-              <p style={{ marginTop: '12px', fontSize: '11px', color: 'rgba(44, 62, 80, 0.55)' }}>
-                {branch.latitude.toFixed(4)}, {branch.longitude.toFixed(4)} · Grace {branch.gracePeriodMinutes} min · Since {new Date(branch.createdAt).toLocaleDateString()}
-              </p>
             </Card>
           ))
         )}

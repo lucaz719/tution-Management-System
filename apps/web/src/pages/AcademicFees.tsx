@@ -58,6 +58,7 @@ export function AcademicFees() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
   const [payingId, setPayingId] = useState('');
+  const [qrModal, setQrModal] = useState<{ id: string; studentName: string; amount: number; month: string } | null>(null);
 
   const loadData = async () => {
     setIsLoading(true);
@@ -265,8 +266,21 @@ export function AcademicFees() {
                     {inv.status === 'PAID' ? (
                       <StatusBadge variant="success">Paid</StatusBadge>
                     ) : (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         {inv.overdue ? <StatusBadge variant="error">Overdue</StatusBadge> : <StatusBadge variant="warning">Unpaid</StatusBadge>}
+                        <Button
+                          variant="outline"
+                          onClick={() => setQrModal({
+                            id: inv.id,
+                            studentName: payStudent.name,
+                            amount: inv.netPayable,
+                            month: toBsLabel(inv.dueDate)
+                          })}
+                          style={{ minHeight: '34px', height: '34px', padding: '6px 12px', borderColor: 'var(--color-accent)', color: 'var(--color-accent-hover)' }}
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: '16px', marginRight: '4px' }}>qr_code_scanner</span>
+                          QR
+                        </Button>
                         <Button onClick={() => void recordPayment(inv.id)} disabled={payingId === inv.id} style={{ minHeight: '34px', height: '34px', padding: '6px 14px' }}>
                           {payingId === inv.id ? 'Saving…' : 'Mark Paid'}
                         </Button>
@@ -280,6 +294,85 @@ export function AcademicFees() {
               <Button variant="outline" onClick={() => setPayStudent(null)} style={{ flex: 1 }}>Done</Button>
             </div>
           </aside>
+        </>
+      ) : null}
+
+      {/* NepalPay QR Modal */}
+      {qrModal ? (
+        <>
+          <div className="people-drawer-overlay" onClick={() => setQrModal(null)} />
+          <div style={{
+            position: 'fixed',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            background: '#FFFFFF',
+            borderRadius: '24px',
+            padding: '32px',
+            zIndex: 1100,
+            width: '90%',
+            maxWidth: '420px',
+            textAlign: 'center',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.2)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="material-symbols-outlined" style={{ color: 'var(--color-accent)', fontSize: '24px' }}>qr_code_2</span>
+                <span style={{ fontWeight: 700, fontSize: '18px' }}>NepalPay QR</span>
+              </div>
+              <button onClick={() => setQrModal(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '16px' }}>
+              Invoice for <strong>{qrModal.studentName}</strong> ({qrModal.month} BS)
+            </div>
+
+            {/* Generated QR Mock Card */}
+            <div style={{
+              background: '#F8F9FA',
+              padding: '24px',
+              borderRadius: '16px',
+              border: '2px dashed var(--color-border)',
+              marginBottom: '20px',
+              display: 'inline-block'
+            }}>
+              <svg width="180" height="180" viewBox="0 0 180 180" style={{ display: 'block', margin: '0 auto' }}>
+                {/* Outer frame */}
+                <rect x="10" y="10" width="160" height="160" fill="none" stroke="#0F4C8A" strokeWidth="4" rx="8" />
+                {/* QR Pattern Simulation */}
+                <rect x="25" y="25" width="40" height="40" fill="#0F4C8A" />
+                <rect x="33" y="33" width="24" height="24" fill="#FFFFFF" />
+                <rect x="39" y="39" width="12" height="12" fill="#0F4C8A" />
+
+                <rect x="115" y="25" width="40" height="40" fill="#0F4C8A" />
+                <rect x="123" y="33" width="24" height="24" fill="#FFFFFF" />
+                <rect x="129" y="39" width="12" height="12" fill="#0F4C8A" />
+
+                <rect x="25" y="115" width="40" height="40" fill="#0F4C8A" />
+                <rect x="33" y="123" width="24" height="24" fill="#FFFFFF" />
+                <rect x="39" y="129" width="12" height="12" fill="#0F4C8A" />
+
+                <path d="M75 25h30v10H75zM75 45h20v20H75zM100 55h20v10h-20zM25 75h50v10H25zM85 75h30v20H85zM125 75h30v10h-30zM45 95h30v30H45zM95 105h20v40H95zM125 115h25v25h-25z" fill="#2C3E50" />
+                {/* NepalPay Logo Icon Center */}
+                <circle cx="90" cy="90" r="16" fill="#F39C12" />
+                <text x="90" y="94" textAnchor="middle" fill="#FFFFFF" fontSize="10" fontWeight="900">NPR</text>
+              </svg>
+            </div>
+
+            <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--color-primary)', marginBottom: '4px' }}>
+              {money(qrModal.amount)}
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '20px' }}>
+              Scan using FONEPAY, eSewa, Khalti, or any NepalPay Mobile Banking app.
+            </div>
+
+            <Button onClick={() => { showToast('QR code copied to clipboard!', 'success'); setQrModal(null); }} style={{ width: '100%' }}>
+              <span className="material-symbols-outlined" style={{ fontSize: '18px', marginRight: '6px' }}>download</span>
+              Done / Save QR
+            </Button>
+          </div>
         </>
       ) : null}
     </div>

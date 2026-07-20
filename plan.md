@@ -292,12 +292,12 @@ Home · Attendance · Fees *(live)* · Homework, Messages, Appointments *(Phase 
 
 | Agent | Scope | Status |
 |---|---|---|
-| `design-system` | CSS tokens, Tailwind config, base component styles (React) | 🟡 In Progress |
-| `react-auth` | Login, ForgotPassword, OTP, ResetPassword, 2FA pages (React) | 🟡 In Progress |
-| `react-dashboards` | All 5 role-scoped dashboards + DashboardShell (React) | 🟡 In Progress |
-| `flutter-scaffold` | Flutter app structure, theme, routing, design system | 🟡 In Progress |
-| `flutter-auth` | Login, OTP, Reset, 2FA screens (Flutter) | 🟡 In Progress |
-| `flutter-mobile` | Teacher geo-attendance, Student home, Parent home (Flutter) | 🟡 In Progress |
+| `design-system` | CSS tokens, Tailwind config, base component styles (React) | 🟢 Complete |
+| `react-auth` | Login, ForgotPassword, OTP, ResetPassword, 2FA pages (React) | 🟢 Complete |
+| `react-dashboards` | All 5 role-scoped dashboards + DashboardShell (React) | 🟢 Complete |
+| `flutter-scaffold` | Flutter app structure, theme, routing, design system | 🟢 Complete |
+| `flutter-auth` | Login, OTP, Reset, 2FA screens (Flutter) | 🟢 Complete |
+| `flutter-mobile` | Teacher geo-attendance, Student home, Parent home (Flutter) | 🟢 Complete |
 
 ---
 
