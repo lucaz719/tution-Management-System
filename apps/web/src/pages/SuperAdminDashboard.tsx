@@ -137,7 +137,7 @@ export function SuperAdminDashboard() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
           <div>
             <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '20px', fontWeight: 600, color: 'var(--color-text)' }}>Platform Control Center</h3>
-            <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.7)', fontSize: '13px' }}>
+            <p style={{ marginTop: '4px', color: 'var(--text-muted)', fontSize: '13px' }}>
               Review institution onboarding requests and provision new tenants.
             </p>
           </div>
@@ -168,7 +168,7 @@ export function SuperAdminDashboard() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '12px', flexWrap: 'wrap' }}>
           <div>
             <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Institution Onboarding Requests</h3>
-            <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>
+            <p style={{ marginTop: '4px', color: 'var(--text-muted)', fontSize: '13px' }}>
               Approving a request provisions the tenant, default branch, and primary admin account.
             </p>
           </div>
@@ -177,22 +177,22 @@ export function SuperAdminDashboard() {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {requests.length === 0 ? (
-            <p style={{ color: 'rgba(44, 62, 80, 0.64)', fontSize: '14px', textAlign: 'center', padding: '24px 0' }}>
+            <p style={{ color: 'var(--text-muted)', fontSize: '14px', textAlign: 'center', padding: '24px 0' }}>
               {isLoading ? 'Loading requests…' : 'No onboarding requests yet. Institutions can apply via the public onboarding form.'}
             </p>
           ) : (
             requests.map((request) => (
               <div
                 key={request.id}
-                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.1)', background: '#FFFFFF', flexWrap: 'wrap' }}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '14px 16px', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--bg)', flexWrap: 'wrap' }}
               >
                 <div style={{ minWidth: '220px' }}>
                   <p style={{ fontWeight: 700, fontSize: '15px', color: 'var(--color-text)' }}>{request.name}</p>
-                  <p style={{ marginTop: '4px', fontSize: '12px', color: 'rgba(44, 62, 80, 0.68)' }}>
+                  <p style={{ marginTop: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
                     {request.email} · {request.phone} · PAN {request.panNumber}
                   </p>
                   {request.remarks ? (
-                    <p style={{ marginTop: '4px', fontSize: '12px', color: 'rgba(44, 62, 80, 0.55)' }}>“{request.remarks}”</p>
+                    <p style={{ marginTop: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>“{request.remarks}”</p>
                   ) : null}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
@@ -227,24 +227,24 @@ export function SuperAdminDashboard() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '12px', flexWrap: 'wrap' }}>
           <div>
             <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Recent Tenants</h3>
-            <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Latest provisioned institutions across the platform.</p>
+            <p style={{ marginTop: '4px', color: 'var(--text-muted)', fontSize: '13px' }}>Latest provisioned institutions across the platform.</p>
           </div>
           <StatusBadge variant="info">{tenants.length} total</StatusBadge>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {tenants.length === 0 ? (
-            <p style={{ color: 'rgba(44, 62, 80, 0.64)', fontSize: '14px', textAlign: 'center', padding: '24px 0' }}>
+            <p style={{ color: 'var(--text-muted)', fontSize: '14px', textAlign: 'center', padding: '24px 0' }}>
               {isLoading ? 'Loading tenants…' : 'No tenants provisioned yet.'}
             </p>
           ) : (
             tenants.slice(0, 5).map((tenant) => (
               <div
                 key={tenant.id}
-                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.1)', background: '#FFFFFF', flexWrap: 'wrap' }}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '14px 16px', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--bg)', flexWrap: 'wrap' }}
               >
                 <div>
                   <p style={{ fontWeight: 700, fontSize: '15px', color: 'var(--color-text)' }}>{tenant.name}</p>
-                  <p style={{ marginTop: '4px', fontSize: '12px', color: 'rgba(44, 62, 80, 0.68)' }}>
+                  <p style={{ marginTop: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
                     PAN {tenant.panNumber} · {tenant.branchCount} branch{tenant.branchCount === 1 ? '' : 'es'} · {tenant.userCount} user{tenant.userCount === 1 ? '' : 's'}
                   </p>
                 </div>
@@ -265,19 +265,19 @@ export function SuperAdminDashboard() {
             <div style={{ textAlign: 'center' }}>
               <span className="material-symbols-outlined" style={{ fontSize: '44px', color: 'var(--color-success)' }}>task_alt</span>
               <h3 style={{ marginTop: '10px', fontSize: '20px', fontWeight: 700, color: 'var(--color-text)' }}>Tenant Provisioned</h3>
-              <p style={{ marginTop: '6px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>
+              <p style={{ marginTop: '6px', color: 'var(--text-muted)', fontSize: '13px' }}>
                 {provisioned.tenantName} is live with branch “{provisioned.defaultBranch}”.
               </p>
             </div>
 
             <div style={{ marginTop: '18px', padding: '16px', borderRadius: '12px', background: 'rgba(21, 96, 189, 0.06)', border: '1px solid rgba(21, 96, 189, 0.12)' }}>
-              <p style={{ fontSize: '12px', fontWeight: 700, color: 'rgba(44, 62, 80, 0.7)' }}>PRIMARY ADMIN LOGIN</p>
+              <p style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>PRIMARY ADMIN LOGIN</p>
               <p style={{ marginTop: '8px', fontSize: '14px', fontWeight: 700, color: 'var(--color-text)', wordBreak: 'break-all' }}>{provisioned.primaryAdminUser}</p>
-              <p style={{ marginTop: '10px', fontSize: '12px', fontWeight: 700, color: 'rgba(44, 62, 80, 0.7)' }}>TEMPORARY PASSWORD (shown once)</p>
+              <p style={{ marginTop: '10px', fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>TEMPORARY PASSWORD (shown once)</p>
               <p style={{ marginTop: '8px', fontFamily: 'monospace', fontSize: '16px', fontWeight: 700, color: 'var(--color-primary)' }}>{provisioned.temporaryPassword}</p>
             </div>
 
-            <p style={{ marginTop: '12px', fontSize: '12px', color: 'rgba(44, 62, 80, 0.6)' }}>
+            <p style={{ marginTop: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
               Share these credentials securely with the institution. The password is not stored in plain text and cannot be shown again.
             </p>
 

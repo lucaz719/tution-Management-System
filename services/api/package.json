@@ -6,6 +6,9 @@
     "dev": "nodemon src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
+    "sms:test": "npm run build && node dist/scripts/send-sms-test.js",
+    "sms:fixture-test": "npm run build && node dist/scripts/run-sms-invoice-fixture.js",
+    "sms:fixture-retry": "npm run build && node dist/scripts/retry-sms-invoice-fixture.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed"
