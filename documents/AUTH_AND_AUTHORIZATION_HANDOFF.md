@@ -56,7 +56,7 @@ GET  /api/auth/get-session
 POST /api/auth/sign-out
 ```
 
-The API still contains a legacy JWT compatibility path. Treat it as transitional. Remove it only after every client has migrated to Better Auth and the integration tests no longer depend on it.
+There is no JWT compatibility path. Better Auth is the only supported authentication mechanism in this deployment.
 
 ### 2.2 Scope resolution
 
@@ -82,7 +82,6 @@ Copy `services/api/.env.example` to `services/api/.env` and set real local value
 
 ```env
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/tms?schema=public"
-JWT_SECRET="<strong-random-value>"
 BETTER_AUTH_SECRET="<different-strong-random-value>"
 BETTER_AUTH_URL="http://localhost:3001"
 WEB_ORIGIN="http://localhost:5173"
@@ -273,11 +272,10 @@ The next engineering priorities are:
 
 1. Finish migrating all web and mobile authentication calls to Better Auth.
 2. Add automated integration tests for login, logout, session expiry, password reset, IDOR, and role escalation.
-3. Remove the legacy JWT login fallback after client migration is complete.
-4. Add rate limiting and lockout monitoring for repeated failed logins.
-5. Verify secure cookie flags in staging over HTTPS.
-6. Review and remediate the outstanding dependency audit findings.
-7. Run a full staging acceptance test using two branches and separate role accounts.
+3. Add rate limiting and lockout monitoring for repeated failed logins.
+4. Verify secure cookie flags in staging over HTTPS.
+5. Review and remediate the outstanding dependency audit findings.
+6. Run a full staging acceptance test using two branches and separate role accounts.
 
 ## 10.0 Key files
 

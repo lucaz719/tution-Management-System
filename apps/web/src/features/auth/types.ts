@@ -18,12 +18,6 @@ export interface AuthUser {
   requiresTwoFactor?: boolean;
 }
 
-export interface AuthSession {
-  token: string;
-  tenantId?: string | null;
-  user: AuthUser;
-}
-
 export type AuthErrorCode =
   | 'INVALID_CREDENTIALS'
   | 'ACCOUNT_LOCKED'

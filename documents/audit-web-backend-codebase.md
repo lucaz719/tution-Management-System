@@ -5,7 +5,7 @@
 
 ## Executive summary
 
-This is a TypeScript npm-workspace monorepo for a multi-tenant tuition-management SaaS. The central path is coherent: the React web client calls an Express API, the API uses Prisma to access PostgreSQL, and tenant and role information are carried in JWT claims. The project has a wide backend feature surface, but the web product currently implements only a subset of that surface and several older/prototype paths remain alongside it.
+This is a TypeScript npm-workspace monorepo for a single-institution, multi-branch tuition-management system. The React web client calls an Express API, the API uses Prisma to access PostgreSQL, and Better Auth owns the database-backed session cookie. The project has a wide backend feature surface, but the web product currently implements only a subset of that surface and several older/prototype paths remain alongside it.
 
 The most important structural work is to make authorization and tenant scoping a deliberate, centralized boundary, then separate real product modules from prototype/unfinished modules. See the accompanying authentication audit for the urgent security findings.
 
@@ -15,7 +15,7 @@ The most important structural work is to make authorization and tenant scoping a
 Browser
   React 19 web app (apps/web, Webpack, :5173)
     -> AuthContext: user/session/role routing
-    -> services/api.ts: fetch wrapper adds Bearer JWT + X-Tenant-Id
+    -> services/api.ts: fetch wrapper sends the Better Auth session cookie
     -> route pages, dashboards, forms
   Express API (services/api, :3001)
     -> CORS + JSON parser

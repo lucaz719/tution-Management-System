@@ -1,11 +1,12 @@
 import 'package:dio/dio.dart';
+import 'package:cookie_jar/cookie_jar.dart';
+import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Central API client for the TMS mobile app.
 ///
-/// Uses Dio with an auth-token interceptor that reads from SharedPreferences.
-/// All backend calls should go through [ApiClient.dio] to get automatic
-/// token injection and consistent error handling.
+/// Uses Dio with a Better Auth session cookie jar. All backend calls should go
+/// through [ApiClient.dio] so the httpOnly session cookie is sent automatically.
 class ApiClient {
   ApiClient._();
 
@@ -16,7 +17,6 @@ class ApiClient {
   // instead of localhost. For physical device, use your machine's LAN IP.
   static const String _baseUrl = 'http://10.0.2.2:3001';
 
-  static const String tokenKey = 'tms_auth_token';
   static const String userKey = 'tms_auth_user';
   static const String tenantKey = 'tms_tenant_id';
 
@@ -35,20 +35,9 @@ class ApiClient {
       responseType: ResponseType.json,
     ));
 
+    dio.interceptors.add(CookieManager(CookieJar()));
     dio.interceptors.add(_AuthInterceptor());
     _initialized = true;
-  }
-
-  /// Save authentication token after successful login.
-  static Future<void> saveToken(String token) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(tokenKey, token);
-  }
-
-  /// Retrieve the stored auth token (or null).
-  static Future<String?> getToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(tokenKey);
   }
 
   /// Save the authenticated user as JSON string.
@@ -66,26 +55,13 @@ class ApiClient {
   /// Clear all auth data (on logout or session expiry).
   static Future<void> clearAuth() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(tokenKey);
     await prefs.remove(userKey);
     await prefs.remove(tenantKey);
   }
 }
 
-/// Injects the Bearer token into every outbound request and clears auth on 401.
+/// Clears local user state when the server rejects the session.
 class _AuthInterceptor extends Interceptor {
-  @override
-  Future<void> onRequest(
-    RequestOptions options,
-    RequestInterceptorHandler handler,
-  ) async {
-    final token = await ApiClient.getToken();
-    if (token != null && token.isNotEmpty) {
-      options.headers['Authorization'] = 'Bearer $token';
-    }
-    handler.next(options);
-  }
-
   @override
   Future<void> onError(DioException err, ErrorInterceptorHandler handler) async {
     if (err.response?.statusCode == 401) {

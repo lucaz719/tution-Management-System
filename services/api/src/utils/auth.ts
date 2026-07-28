@@ -4,9 +4,9 @@ import { customSession } from 'better-auth/plugins';
 import bcrypt from 'bcryptjs';
 import prisma from './db';
 
-const authSecret = process.env.BETTER_AUTH_SECRET || process.env.JWT_SECRET;
+const authSecret = process.env.BETTER_AUTH_SECRET;
 if (!authSecret) {
-  throw new Error('BETTER_AUTH_SECRET or JWT_SECRET is required before starting the API.');
+  throw new Error('BETTER_AUTH_SECRET is required before starting the API.');
 }
 
 export const auth = betterAuth({

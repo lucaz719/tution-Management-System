@@ -1,14 +1,9 @@
 import { Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
 import { TenantRequest } from './tenant';
 import { UserPayload } from '@tms/types';
 import { auth } from '../utils/auth';
-import { JWT_SECRET } from '../utils/env';
 
 export async function authMiddleware(req: TenantRequest, res: Response, next: NextFunction) {
-  const authHeader = req.headers['authorization'];
-
-  // 1. Try to check Better Auth session first
   try {
     const session = await auth.api.getSession({
       headers: req.headers as Record<string, string>,
@@ -30,25 +25,11 @@ export async function authMiddleware(req: TenantRequest, res: Response, next: Ne
       req.tenantId = req.user.tenantId;
       return next();
     }
-  } catch (err) {
-    // Graceful fallback to JWT verification
+  } catch {
+    // Authentication failures are intentionally indistinguishable from a
+    // missing session. No bearer-token fallback exists in this deployment.
   }
-
-  // 2. Fallback to standard JWT check (for backward compatibility / simulated mode)
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Access denied. No token provided.' });
-  }
-
-  const token = authHeader.split(' ')[1];
-
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET) as UserPayload;
-    req.user = decoded;
-    req.tenantId = decoded.tenantId;
-    next();
-  } catch (error) {
-    return res.status(401).json({ error: 'Invalid or expired authentication token.' });
-  }
+  return res.status(401).json({ error: 'Authentication required.' });
 }
 
 // Permission checking middleware supporting branch-level scopes

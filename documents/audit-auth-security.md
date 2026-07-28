@@ -1,9 +1,9 @@
 # Authentication, Authorization & Security Audit
 
 **Scope:** web and backend authentication/authorization only; mobile excluded.  
-**Assessment:** do not deploy this authentication design to production until the critical 2FA bypass is corrected and the authorization/cron findings are addressed.
+**Assessment:** historical review. The JWT design described below has been retired; Better Auth sessions and centralized scope enforcement are now the supported design. Re-evaluate any remaining findings against the current implementation before release.
 
-## Current authentication flow
+## Historical authentication flow (retired)
 
 ```text
 1. Web posts email/password to POST /api/auth/login.

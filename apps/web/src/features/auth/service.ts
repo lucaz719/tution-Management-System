@@ -1,17 +1,11 @@
 import { api } from '../../services/api';
-import type { AuthErrorCode, AuthSession, AuthUser, UserRole } from './types';
+import type { AuthErrorCode, UserRole } from './types';
 import { normalizeEmail } from './utils';
 
 interface PendingPasswordReset {
   email: string;
   token: string;
   expiresAt: number;
-}
-
-interface ApiLoginPayload {
-  token?: string;
-  tenantId?: string | null;
-  user?: unknown;
 }
 
 const RESET_DURATION_MS = 5 * 60 * 1000;
@@ -107,66 +101,6 @@ function toAuthFlowError(error: unknown, code: AuthErrorCode, fallbackMessage: s
       : fallbackMessage;
 
   return new AuthFlowError(code, message);
-}
-
-function normalizeApiRole(role: unknown): UserRole | null {
-  const candidate = typeof role === 'string' ? role.toUpperCase().replace(/\s+/g, '_') : '';
-
-  if (candidate in ROLE_DEFAULT_PATHS) {
-    return candidate as UserRole;
-  }
-
-  return null;
-}
-
-function resolveApiRole(payload: Record<string, unknown>): UserRole | null {
-  const directRole = normalizeApiRole(payload.role);
-  if (directRole) {
-    return directRole;
-  }
-
-  if (Array.isArray(payload.roles)) {
-    for (const entry of payload.roles) {
-      const roleName =
-        entry && typeof entry === 'object' ? (entry as Record<string, unknown>).roleName : entry;
-      const normalized = normalizeApiRole(roleName);
-      if (normalized) {
-        return normalized;
-      }
-    }
-  }
-
-  return null;
-}
-
-function normalizeApiUser(email: string, user: unknown): AuthUser | null {
-  if (!user || typeof user !== 'object') {
-    return null;
-  }
-
-  const payload = user as Record<string, unknown>;
-  const normalizedEmail = typeof payload.email === 'string' ? normalizeEmail(payload.email) : normalizeEmail(email);
-
-  const role = resolveApiRole(payload);
-  if (!role) {
-    return null;
-  }
-
-  const fullName = [payload.firstName, payload.lastName]
-    .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
-    .join(' ');
-
-  return {
-    id: typeof payload.id === 'string' ? payload.id : normalizedEmail,
-    email: normalizedEmail,
-    name:
-      typeof payload.name === 'string' && payload.name.trim().length > 0
-        ? payload.name
-        : fullName || normalizedEmail.split('@')[0],
-    role,
-    firstLogin: payload.firstLogin === true,
-    requiresTwoFactor: payload.requiresTwoFactor === true && !isTrustedDevice(normalizedEmail),
-  };
 }
 
 function parsePendingPasswordReset(rawValue: string | null): PendingPasswordReset | null {
@@ -344,33 +278,4 @@ export function getFriendlyErrorMessage(error: unknown, fallbackMessage: string)
   }
 
   return fallbackMessage;
-}
-
-export async function authenticateUser(email: string, password: string): Promise<AuthSession> {
-  const normalizedEmail = normalizeEmail(email);
-
-  let apiResponse: ApiLoginPayload;
-  try {
-    apiResponse = (await api.auth.login(normalizedEmail, password)) as ApiLoginPayload;
-  } catch (error) {
-    throw toAuthFlowError(error, 'INVALID_CREDENTIALS', 'Invalid email or password.');
-  }
-
-  const user = normalizeApiUser(normalizedEmail, apiResponse.user);
-
-  if (!apiResponse.token || !user) {
-    throw new AuthFlowError(
-      'INVALID_CREDENTIALS',
-      'Sign-in could not be completed because the server response was incomplete. Contact your administrator.'
-    );
-  }
-
-  const rawUser = apiResponse.user as Record<string, unknown>;
-  const payloadTenantId = typeof rawUser.tenantId === 'string' ? rawUser.tenantId : null;
-
-  return {
-    token: apiResponse.token,
-    tenantId: apiResponse.tenantId ?? payloadTenantId,
-    user,
-  };
 }

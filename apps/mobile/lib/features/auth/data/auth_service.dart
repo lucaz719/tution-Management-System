@@ -75,8 +75,10 @@ class AuthUser {
 
 /// Auth service that calls the real TMS backend API.
 ///
-/// Endpoints mirror [services/api/src/routes/auth.ts]:
-///   POST /api/auth/login           → email + password → token + user
+/// Better Auth endpoints:
+///   POST /api/auth/sign-in/email   → email + password → secure session cookie
+///   GET  /api/auth/get-session     → current user/session
+///   POST /api/auth/sign-out        → invalidate session
 ///   POST /api/auth/forgot-password → email → sends OTP
 ///   POST /api/auth/verify-reset-otp → email + otp → resetToken
 ///   POST /api/auth/reset-password  → resetToken + newPassword
@@ -87,32 +89,21 @@ class AuthService {
 
   static Dio get _dio => ApiClient.instance.dio;
 
-  /// Authenticate with email + password.
-  /// Returns the [AuthUser] and stores the JWT token.
+  /// Authenticate with email + password and retain the Better Auth cookie.
   static Future<AuthUser> signIn({
     required String email,
     required String password,
   }) async {
     try {
-      final response = await _dio.post(
-        '/api/auth/login',
+      await _dio.post(
+        '/api/auth/sign-in/email',
         data: {
           'email': email.trim().toLowerCase(),
           'password': password,
         },
       );
-
-      final data = response.data as Map<String, dynamic>;
-      final token = data['token'] as String?;
-
-      if (token == null || token.isEmpty) {
-        throw const AuthFailure('Authentication succeeded but no token was returned.');
-      }
-
-      final user = AuthUser.fromJson(data);
-
-      // Persist token and user for session continuity.
-      await ApiClient.saveToken(token);
+      final session = await _dio.get('/api/auth/get-session');
+      final user = AuthUser.fromJson(session.data as Map<String, dynamic>);
       await ApiClient.saveUser(jsonEncode(user.toJson()));
 
       return user;
@@ -214,24 +205,25 @@ class AuthService {
 
   /// Sign out — clear local session data.
   static Future<void> signOut() async {
-    await ApiClient.clearAuth();
+    try {
+      await _dio.post('/api/auth/sign-out');
+    } finally {
+      await ApiClient.clearAuth();
+    }
   }
 
-  /// Try to restore session from stored token + user JSON.
-  /// Returns null if no valid session is stored.
+  /// Try to restore the server-backed session.
   static Future<AuthUser?> restoreSession() async {
-    final token = await ApiClient.getToken();
-    final userJson = await ApiClient.getUser();
-
-    if (token == null || userJson == null) return null;
-
     try {
-      final decoded = jsonDecode(userJson) as Map<String, dynamic>;
-      return AuthUser.fromJson(decoded);
-    } catch (_) {
-      await ApiClient.clearAuth();
+      final session = await _dio.get('/api/auth/get-session');
+      if (session.data is! Map<String, dynamic> || (session.data as Map)['user'] == null) return null;
+      final user = AuthUser.fromJson(session.data as Map<String, dynamic>);
+      await ApiClient.saveUser(jsonEncode(user.toJson()));
+      return user;
+    } on DioException {
       return null;
     }
+
   }
 
   /// Extract a user-friendly error message from a Dio exception.

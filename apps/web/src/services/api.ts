@@ -3,23 +3,11 @@
 
 const API_BASE_URL = 'http://localhost:3001/api';
 
-// Helper to get token
-export function getAuthToken(): string | null {
-  return sessionStorage.getItem('tms_token') ?? localStorage.getItem('tms_token');
-}
-
-// Helper to set token
-export function setAuthToken(token: string) {
-  localStorage.setItem('tms_token', token);
-}
-
 // Helper to remove token
 export function removeAuthToken() {
-  localStorage.removeItem('tms_token');
   localStorage.removeItem('tms_tenant_id');
   localStorage.removeItem('tms_user');
   localStorage.removeItem('tms_session_scope');
-  sessionStorage.removeItem('tms_token');
   sessionStorage.removeItem('tms_tenant_id');
   sessionStorage.removeItem('tms_user');
 }
@@ -35,13 +23,8 @@ export function setTenantId(tenantId: string) {
 
 // Generic Request wrapper
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = getAuthToken();
-
   const headers = new Headers(options.headers || {});
   headers.set('Content-Type', 'application/json');
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
@@ -72,14 +55,6 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 export const api = {
   // Authentication
   auth: {
-    // Session persistence (token/user/tenant scope) is owned by AuthContext,
-    // which honours the "remember me" choice.
-    login: async (email: string, pass: string) => {
-      return request<{ token: string; tenantId?: string; user: any }>('/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ email, password: pass }),
-      });
-    },
     requestPasswordReset: async (email: string) => {
       return request<{ success: boolean }>('/auth/forgot-password', {
         method: 'POST',
