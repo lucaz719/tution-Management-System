@@ -1,0 +1,10 @@
+.git
+.github
+**/node_modules
+**/dist
+**/build
+**/.env
+**/*.log
+apps/mobile
+documents
+

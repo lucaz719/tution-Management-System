@@ -124,11 +124,13 @@ router.post('/', authMiddleware, hasPermission('manage_students'), async (req: T
   const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
   const sortOrder = Number.isFinite(Number(req.body?.sortOrder)) ? Number(req.body.sortOrder) : 99;
   const monthlyFee = Number.isFinite(Number(req.body?.monthlyFee)) && Number(req.body.monthlyFee) >= 0 ? Math.round(Number(req.body.monthlyFee)) : 0;
+  const admissionFee = Number.isFinite(Number(req.body?.admissionFee)) && Number(req.body.admissionFee) >= 0 ? Math.round(Number(req.body.admissionFee)) : 0;
+  const billingMode = req.body?.billingMode === 'SUBJECT' ? 'SUBJECT' : 'GRADE';
   if (!name) {
     return res.status(400).json({ error: 'Grade name is required.' });
   }
   try {
-    const grade = await prisma.grade.create({ data: { tenantId: req.tenantId!, name, sortOrder, monthlyFee } });
+    const grade = await prisma.grade.create({ data: { tenantId: req.tenantId!, name, sortOrder, monthlyFee, admissionFee, billingMode } });
     return res.status(201).json({ message: 'Grade created.', grade });
   } catch (error: any) {
     if (error.code === 'P2002') {
@@ -150,6 +152,8 @@ router.put('/:id', authMiddleware, hasPermission('manage_students'), async (req:
     if (typeof req.body?.name === 'string' && req.body.name.trim()) data.name = req.body.name.trim();
     if (Number.isFinite(Number(req.body?.sortOrder))) data.sortOrder = Number(req.body.sortOrder);
     if (Number.isFinite(Number(req.body?.monthlyFee)) && Number(req.body.monthlyFee) >= 0) data.monthlyFee = Math.round(Number(req.body.monthlyFee));
+    if (Number.isFinite(Number(req.body?.admissionFee)) && Number(req.body.admissionFee) >= 0) data.admissionFee = Math.round(Number(req.body.admissionFee));
+    if (req.body?.billingMode === 'GRADE' || req.body?.billingMode === 'SUBJECT') data.billingMode = req.body.billingMode;
     if (Object.keys(data).length === 0) {
       return res.status(400).json({ error: 'Nothing to update.' });
     }

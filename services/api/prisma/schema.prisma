@@ -43,6 +43,39 @@ enum InvoiceStatus {
   BLOCKED_OVERRIDE
 }
 
+enum InvoiceType {
+  ADMISSION
+  TUITION
+  SUBJECT
+  ACTIVITY
+}
+
+enum GradeBillingMode {
+  GRADE
+  SUBJECT
+}
+
+enum AdmissionStatus {
+  PENDING_PAYMENT
+  READY_FOR_LOGIN
+  ACTIVE
+}
+
+enum PaymentProvider {
+  CONNECTIPS
+  NEPALPAY
+  CASH
+  BANK
+}
+
+enum PaymentAttemptStatus {
+  PENDING
+  VALIDATING
+  SUCCESS
+  FAILED
+  INCOMPLETE
+}
+
 enum LeaveType {
   CASUAL
   SICK
@@ -78,7 +111,7 @@ model TenantRequest {
   name      String
   email     String
   phone     String
-  panNumber String   // Nepal 9-digit PAN/VAT
+  panNumber String // Nepal 9-digit PAN/VAT
   remarks   String?
   status    String   @default("PENDING") // PENDING, APPROVED, REJECTED
   createdAt DateTime @default(now())
@@ -87,69 +120,70 @@ model TenantRequest {
 
 // 1. Tenant / Institution
 model Tenant {
-  id                  String               @id @default(uuid())
-  name                String
-  panNumber           String               @unique // Nepal 9-digit PAN/VAT
-  status              UserStatus           @default(ACTIVE)
-  vatRate             Float                @default(13)
-  gracePeriodMinutes  Int                  @default(15)
-  pettyCashCapNpr     Int                  @default(20000)
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
-  branches            Branch[]
-  roles               Role[]
-  users               User[]
-  courses             Course[]
-  invoices            Invoice[]
-  leaves              Leave[]
-  pettyCash           PettyCash[]
-  grades              Grade[]
+  id                   String                @id @default(uuid())
+  name                 String
+  panNumber            String                @unique // Nepal 9-digit PAN/VAT
+  status               UserStatus            @default(ACTIVE)
+  vatRate              Float                 @default(13)
+  gracePeriodMinutes   Int                   @default(15)
+  pettyCashCapNpr      Int                   @default(20000)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  branches             Branch[]
+  roles                Role[]
+  users                User[]
+  courses              Course[]
+  invoices             Invoice[]
+  leaves               Leave[]
+  pettyCash            PettyCash[]
+  grades               Grade[]
   // Phase 2 relations
-  academicEvents      AcademicEvent[]
-  socialConfigs       TenantSocialConfig[]
-  socialPosts         SocialMediaPost[]
+  academicEvents       AcademicEvent[]
+  socialConfigs        TenantSocialConfig[]
+  socialPosts          SocialMediaPost[]
   certificateTemplates CertificateTemplate[]
-  vehicleRoutes       VehicleRoute[]
-  expenses            Expense[]
-  payrolls            Payroll[]
-  refunds             RefundRequest[]
+  vehicleRoutes        VehicleRoute[]
+  expenses             Expense[]
+  payrolls             Payroll[]
+  refunds              RefundRequest[]
+  paymentAttempts      PaymentAttempt[]
 }
 
 // 2. Branch / Center
 model Branch {
-  id                  String              @id @default(uuid())
-  tenantId            String
-  tenant              Tenant              @relation(fields: [tenantId], references: [id])
-  name                String
-  address             String
-  latitude            Float
-  longitude           Float
-  radiusMeters        Float               @default(100.0) // Geofence radius
-  gracePeriodMinutes  Int                 @default(15)
-  createdAt           DateTime            @default(now())
-  updatedAt           DateTime            @updatedAt
-  userRoles           UserRole[]
-  courses             Course[]
-  classes             Class[]
-  leaves              Leave[]
-  pettyCash           PettyCash[]
-  resourceLogs        ResourceLog[]
-  maintenanceTasks    MaintenanceTask[]
-  teacherAttendance   TeacherAttendance[]
+  id                 String              @id @default(uuid())
+  tenantId           String
+  tenant             Tenant              @relation(fields: [tenantId], references: [id])
+  name               String
+  address            String
+  latitude           Float
+  longitude          Float
+  radiusMeters       Float               @default(100.0) // Geofence radius
+  gracePeriodMinutes Int                 @default(15)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  userRoles          UserRole[]
+  courses            Course[]
+  classes            Class[]
+  leaves             Leave[]
+  pettyCash          PettyCash[]
+  resourceLogs       ResourceLog[]
+  maintenanceTasks   MaintenanceTask[]
+  teacherAttendance  TeacherAttendance[]
   // Phase 2 relations
-  academicEvents      AcademicEvent[]
-  socialPosts         SocialMediaPost[]
-  certificates        Certificate[]
-  expenses            Expense[]
+  academicEvents     AcademicEvent[]
+  socialPosts        SocialMediaPost[]
+  certificates       Certificate[]
+  expenses           Expense[]
 }
 
 // 3. RBAC Roles
 model Role {
   id          String     @id @default(uuid())
-  tenantId    String?    // Null for default global system roles
+  tenantId    String? // Null for default global system roles
   tenant      Tenant?    @relation(fields: [tenantId], references: [id])
   name        String
-  permissions Json       // Store role capability array
+  permissions Json // Store role capability array
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
   userRoles   UserRole[]
@@ -178,12 +212,12 @@ model User {
   assignedClasses   Class[]             @relation("AssignedClasses")
 
   // Better Auth support
-  name              String
-  emailVerified     Boolean             @default(false)
-  twoFactorEnabled  Boolean             @default(false)
-  image             String?
-  sessions          Session[]
-  accounts          Account[]
+  name             String
+  emailVerified    Boolean   @default(false)
+  twoFactorEnabled Boolean   @default(false)
+  image            String?
+  sessions         Session[]
+  accounts         Account[]
 }
 
 // 5. User-Role-Branch Junction (Handles multiple branches per teacher/admin)
@@ -193,7 +227,7 @@ model UserRole {
   user      User     @relation(fields: [userId], references: [id])
   roleId    String
   role      Role     @relation(fields: [roleId], references: [id])
-  branchId  String?  // Null means tenant-wide access
+  branchId  String? // Null means tenant-wide access
   branch    Branch?  @relation(fields: [branchId], references: [id])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -203,16 +237,16 @@ model UserRole {
 
 // 6. HR Staff Records
 model StaffRecord {
-  id               String                @id @default(uuid())
-  userId           String                @unique
-  user             User                  @relation(fields: [userId], references: [id])
+  id               String                 @id @default(uuid())
+  userId           String                 @unique
+  user             User                   @relation(fields: [userId], references: [id])
   joiningDate      DateTime
   designation      String
-  contractType     String                // FIXED, HOUR_RATE, CASUAL
-  salaryStructure  Json                  // Hourly rates, basic monthly, etc.
-  documents        Json?                 // Links to stored files (contract, NID, certifications)
-  createdAt        DateTime              @default(now())
-  updatedAt        DateTime              @updatedAt
+  contractType     String // FIXED, HOUR_RATE, CASUAL
+  salaryStructure  Json // Hourly rates, basic monthly, etc.
+  documents        Json? // Links to stored files (contract, NID, certifications)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
   // Phase 2 relations
   staffDocuments   StaffDocument[]
   performanceScore StaffPerformanceScore?
@@ -222,41 +256,44 @@ model StaffRecord {
 
 // Grade level (Nursery, LKG, UKG, Class 1..12) — CRUD-managed per tenant.
 model Grade {
-  id        String    @id @default(uuid())
-  tenantId  String
-  tenant    Tenant    @relation(fields: [tenantId], references: [id])
-  name      String
-  sortOrder Int       @default(0)
-  monthlyFee Int      @default(0) // Base monthly tuition for this grade (all subjects)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  students  Student[]
-  courses   Course[]
+  id           String           @id @default(uuid())
+  tenantId     String
+  tenant       Tenant           @relation(fields: [tenantId], references: [id])
+  name         String
+  sortOrder    Int              @default(0)
+  monthlyFee   Int              @default(0) // Base monthly tuition for this grade (all subjects)
+  admissionFee Int              @default(0)
+  billingMode  GradeBillingMode @default(GRADE)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  students     Student[]
+  courses      Course[]
 
   @@unique([tenantId, name])
 }
 
 // 7. Student Records
 model Student {
-  id                    String              @id @default(uuid())
-  userId                String              @unique
-  user                  User                @relation(fields: [userId], references: [id])
-  gradeId               String?
-  grade                 Grade?              @relation(fields: [gradeId], references: [id])
-  admissionDate         DateTime
-  emergencyContact      String
-  createdAt             DateTime            @default(now())
-  updatedAt             DateTime            @updatedAt
-  enrollments           Enrollment[]
-  studentParents        StudentParent[]
-  invoices              Invoice[]
-  studentAttendance     StudentAttendance[]
+  id                  String               @id @default(uuid())
+  userId              String               @unique
+  user                User                 @relation(fields: [userId], references: [id])
+  gradeId             String?
+  grade               Grade?               @relation(fields: [gradeId], references: [id])
+  admissionDate       DateTime
+  emergencyContact    String
+  admissionStatus     AdmissionStatus      @default(PENDING_PAYMENT)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  enrollments         Enrollment[]
+  studentParents      StudentParent[]
+  invoices            Invoice[]
+  studentAttendance   StudentAttendance[]
   // Phase 2 relations
-  homeworkSubmissions   HomeworkSubmission[]
-  certificates          Certificate[]
-  canteenWallet         CanteenWallet?
-  vehicleAssignment     StudentVehicle?
-  refunds               RefundRequest[]
+  homeworkSubmissions HomeworkSubmission[]
+  certificates        Certificate[]
+  canteenWallet       CanteenWallet?
+  vehicleAssignment   StudentVehicle?
+  refunds             RefundRequest[]
 }
 
 // 8. Parent / Guardian Records
@@ -281,24 +318,25 @@ model StudentParent {
 
 // 10. Course Definition
 model Course {
-  id            String       @id @default(uuid())
-  tenantId      String
-  tenant        Tenant       @relation(fields: [tenantId], references: [id])
-  branchId      String
-  branch        Branch       @relation(fields: [branchId], references: [id])
-  gradeId       String?
-  grade         Grade?       @relation(fields: [gradeId], references: [id])
-  name          String
-  description   String?
-  type          CourseType   @default(REGULAR)
-  feeStructure  Json         // Flat monthly, installments, or hourly
-  isTaxExempt   Boolean      @default(false) // Supports tax-exempt courses (Nepalese VAT)
-  taxPercentage Decimal      @default(13.00) @db.Decimal(5, 2) // Defaults to standard 13% VAT
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  classes       Class[]
-  enrollments   Enrollment[]
-  refunds       RefundRequest[]
+  id              String          @id @default(uuid())
+  tenantId        String
+  tenant          Tenant          @relation(fields: [tenantId], references: [id])
+  branchId        String
+  branch          Branch          @relation(fields: [branchId], references: [id])
+  gradeId         String?
+  grade           Grade?          @relation(fields: [gradeId], references: [id])
+  name            String
+  description     String?
+  type            CourseType      @default(REGULAR)
+  isExtraActivity Boolean         @default(false)
+  feeStructure    Json // Flat monthly, installments, or hourly
+  isTaxExempt     Boolean         @default(false) // Supports tax-exempt courses (Nepalese VAT)
+  taxPercentage   Decimal         @default(13.00) @db.Decimal(5, 2) // Defaults to standard 13% VAT
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  classes         Class[]
+  enrollments     Enrollment[]
+  refunds         RefundRequest[]
 }
 
 // 11. Class / Timetable Instance
@@ -308,10 +346,10 @@ model Class {
   course            Course              @relation(fields: [courseId], references: [id])
   branchId          String
   branch            Branch              @relation(fields: [branchId], references: [id])
-  teacherId         String?             // Assigned teacher (drives session generation)
+  teacherId         String? // Assigned teacher (drives session generation)
   assignedTeacher   User?               @relation("AssignedClasses", fields: [teacherId], references: [id])
   name              String
-  schedule          Json                // Timetable days & time slots
+  schedule          Json // Timetable days & time slots
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
   enrollments       Enrollment[]
@@ -323,31 +361,31 @@ model Class {
 
 // 12. Student Enrollment
 model Enrollment {
-  id            String     @id @default(uuid())
+  id            String   @id @default(uuid())
   studentId     String
-  student       Student    @relation(fields: [studentId], references: [id])
+  student       Student  @relation(fields: [studentId], references: [id])
   courseId      String
-  course        Course     @relation(fields: [courseId], references: [id])
+  course        Course   @relation(fields: [courseId], references: [id])
   classId       String
-  class         Class      @relation(fields: [classId], references: [id])
-  status        String     // ACTIVE, COMPLETED, DROPPED, BLOCKED
+  class         Class    @relation(fields: [classId], references: [id])
+  status        String // ACTIVE, COMPLETED, DROPPED, BLOCKED
   admissionDate DateTime
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 // 13. Teacher GPS Stamps
 model TeacherAttendance {
-  id           String   @id @default(uuid())
-  userId       String   // Teacher's User ID
-  user         User     @relation(fields: [userId], references: [id])
-  branchId     String
-  branch       Branch   @relation(fields: [branchId], references: [id])
-  stampType    String   // IN, OUT, AUTO_OUT, RE_IN
-  latitude     Float
-  longitude    Float
-  gpsAccuracy  Float
-  timestamp    DateTime @default(now())
+  id          String   @id @default(uuid())
+  userId      String // Teacher's User ID
+  user        User     @relation(fields: [userId], references: [id])
+  branchId    String
+  branch      Branch   @relation(fields: [branchId], references: [id])
+  stampType   String // IN, OUT, AUTO_OUT, RE_IN
+  latitude    Float
+  longitude   Float
+  gpsAccuracy Float
+  timestamp   DateTime @default(now())
 }
 
 // 14. Teacher Session Log
@@ -363,7 +401,7 @@ model TeacherSession {
   checkOutTime         DateTime?
   totalMinutes         Int                 @default(0)
   dailyUpdateSubmitted Boolean             @default(false)
-  updateContent        String?             // Mandatory lesson summary text
+  updateContent        String? // Mandatory lesson summary text
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
   studentAttendance    StudentAttendance[]
@@ -380,31 +418,58 @@ model StudentAttendance {
   session   TeacherSession          @relation(fields: [sessionId], references: [id])
   date      DateTime                @db.Date
   status    StudentAttendanceStatus @default(PRESENT)
-  markedBy  String                  // Teacher's user ID who marked it
+  markedBy  String // Teacher's user ID who marked it
   createdAt DateTime                @default(now())
   updatedAt DateTime                @updatedAt
 }
 
 // 16. Fees and Invoicing
 model Invoice {
-  id                String        @id @default(uuid())
+  id                String           @id @default(uuid())
   tenantId          String
-  tenant            Tenant        @relation(fields: [tenantId], references: [id])
+  tenant            Tenant           @relation(fields: [tenantId], references: [id])
   studentId         String
-  student           Student       @relation(fields: [studentId], references: [id])
-  amount            Decimal       @db.Decimal(12, 2)
-  discount          Decimal       @db.Decimal(12, 2) @default(0.00)
-  fine              Decimal       @db.Decimal(12, 2) @default(0.00)
-  netPayable        Decimal       @db.Decimal(12, 2)
+  student           Student          @relation(fields: [studentId], references: [id])
+  amount            Decimal          @db.Decimal(12, 2)
+  discount          Decimal          @default(0.00) @db.Decimal(12, 2)
+  fine              Decimal          @default(0.00) @db.Decimal(12, 2)
+  netPayable        Decimal          @db.Decimal(12, 2)
   billingCycleStart DateTime
   billingCycleEnd   DateTime
   dueDate           DateTime
-  status            InvoiceStatus @default(UNPAID)
-  nepalPayQrCode    String?       // Storage for Nepal Pay QR string/image reference
-  transactionId     String?       // Nepal Pay transaction reference
+  status            InvoiceStatus    @default(UNPAID)
+  invoiceType       InvoiceType      @default(TUITION)
+  nepalPayQrCode    String? // Storage for Nepal Pay QR string/image reference
+  transactionId     String? // Nepal Pay transaction reference
   paymentDate       DateTime?
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  paymentAttempts   PaymentAttempt[]
+}
+
+model PaymentAttempt {
+  id                 String               @id @default(uuid())
+  tenantId           String
+  tenant             Tenant               @relation(fields: [tenantId], references: [id])
+  invoiceId          String
+  invoice            Invoice              @relation(fields: [invoiceId], references: [id])
+  provider           PaymentProvider
+  status             PaymentAttemptStatus @default(PENDING)
+  txnId              String               @unique
+  referenceId        String
+  amountPaisa        BigInt
+  gatewayStatus      String?
+  gatewayMessage     String?
+  validationAttempts Int                  @default(0)
+  lastValidatedAt    DateTime?
+  confirmedAt        DateTime?
+  failedAt           DateTime?
+  createdBy          String
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  @@index([tenantId, status, createdAt])
+  @@index([invoiceId, provider, status])
 }
 
 // 17. Leaves
@@ -421,7 +486,7 @@ model Leave {
   endDate    DateTime
   reason     String
   status     LeaveStatus @default(PENDING)
-  approvedBy String?     // Approver User ID
+  approvedBy String? // Approver User ID
   remarks    String?
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
@@ -440,7 +505,7 @@ model PettyCash {
   status           PettyCashStatus @default(PENDING)
   receiptProofUrl  String?
   remainingBalance Decimal         @db.Decimal(12, 2)
-  approvalChain    Json            // Log of transitions: [{role, action, timestamp, comment}]
+  approvalChain    Json // Log of transitions: [{role, action, timestamp, comment}]
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 }
@@ -451,8 +516,8 @@ model ResourceLog {
   branchId       String
   branch         Branch            @relation(fields: [branchId], references: [id])
   classroomId    String
-  staffId        String            // Submitting staff's user ID
-  itemsCondition Json              // { marker: "OK", duster: "MISSING", board: "DAMAGED" }
+  staffId        String // Submitting staff's user ID
+  itemsCondition Json // { marker: "OK", duster: "MISSING", board: "DAMAGED" }
   actionRequired Boolean           @default(false)
   remarks        String?
   status         ResourceLogStatus @default(PENDING)
@@ -486,26 +551,26 @@ model Homework {
   subject     String
   title       String
   description String?
-  contentUrl  String?              // Link to homework PDF/document
+  contentUrl  String? // Link to homework PDF/document
   deadline    DateTime
-  createdBy   String               // Teacher's User ID
+  createdBy   String // Teacher's User ID
   createdAt   DateTime             @default(now())
   updatedAt   DateTime             @updatedAt
   submissions HomeworkSubmission[]
 }
 
 model HomeworkSubmission {
-  id            String    @id @default(uuid())
+  id            String   @id @default(uuid())
   homeworkId    String
-  homework      Homework  @relation(fields: [homeworkId], references: [id])
+  homework      Homework @relation(fields: [homeworkId], references: [id])
   studentId     String
-  student       Student   @relation(fields: [studentId], references: [id])
-  submissionUrl String?   // Link to student's uploaded solution
-  grade         String?   // Marks/Grade awarded
+  student       Student  @relation(fields: [studentId], references: [id])
+  submissionUrl String? // Link to student's uploaded solution
+  grade         String? // Marks/Grade awarded
   remarks       String?
-  gradedBy      String?   // Teacher's User ID
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  gradedBy      String? // Teacher's User ID
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 // 22. Academic & Event Calendar
@@ -520,7 +585,7 @@ model AcademicEvent {
   id          String    @id @default(uuid())
   tenantId    String
   tenant      Tenant    @relation(fields: [tenantId], references: [id])
-  branchId    String?   // Null means tenant-wide (pushed to all branches)
+  branchId    String? // Null means tenant-wide (pushed to all branches)
   branch      Branch?   @relation(fields: [branchId], references: [id])
   title       String
   description String?
@@ -542,14 +607,14 @@ enum SocialPostStatus {
 }
 
 model TenantSocialConfig {
-  id           String   @id @default(uuid())
+  id           String    @id @default(uuid())
   tenantId     String
-  tenant       Tenant   @relation(fields: [tenantId], references: [id])
-  platform     String   // FACEBOOK, INSTAGRAM, TIKTOK, LINKEDIN
-  accessToken  String   // Encrypted OAuth access token
-  refreshToken String?  // Encrypted OAuth refresh token
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
+  platform     String // FACEBOOK, INSTAGRAM, TIKTOK, LINKEDIN
+  accessToken  String // Encrypted OAuth access token
+  refreshToken String? // Encrypted OAuth refresh token
   expiresAt    DateTime?
-  updatedAt    DateTime @updatedAt
+  updatedAt    DateTime  @updatedAt
 
   @@unique([tenantId, platform])
 }
@@ -562,13 +627,13 @@ model SocialMediaPost {
   branch               Branch           @relation(fields: [branchId], references: [id])
   title                String
   contentText          String
-  mediaUrls            Json?            // Array of images/videos URLs
-  platforms            Json             // Array of targeted platforms
+  mediaUrls            Json? // Array of images/videos URLs
+  platforms            Json // Array of targeted platforms
   scheduledPublishTime DateTime
   status               SocialPostStatus @default(DRAFT)
   rejectRemarks        String?
   publishedAt          DateTime?
-  createdBy            String           // Branch Admin User ID
+  createdBy            String // Branch Admin User ID
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
 }
@@ -587,7 +652,7 @@ model CertificateTemplate {
   tenant       Tenant          @relation(fields: [tenantId], references: [id])
   name         String
   type         CertificateType @default(COMPLETION)
-  layoutConfig Json            // JSON: fonts, background, logos, text blocks
+  layoutConfig Json // JSON: fonts, background, logos, text blocks
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
   certificates Certificate[]
@@ -602,9 +667,9 @@ model Certificate {
   template      CertificateTemplate @relation(fields: [templateId], references: [id])
   branchId      String
   branch        Branch              @relation(fields: [branchId], references: [id])
-  issuerId      String              // Admin User ID who issued
+  issuerId      String // Admin User ID who issued
   issuedDate    DateTime            @default(now())
-  pdfUrl        String              // Cloud Storage link to generated PDF
+  pdfUrl        String // Cloud Storage link to generated PDF
   createdAt     DateTime            @default(now())
 }
 
@@ -613,7 +678,7 @@ model StaffDocument {
   id            String      @id @default(uuid())
   staffRecordId String
   staffRecord   StaffRecord @relation(fields: [staffRecordId], references: [id])
-  documentType  String      // NID, CONTRACT, ACADEMIC, CERTIFICATION
+  documentType  String // NID, CONTRACT, ACADEMIC, CERTIFICATION
   fileUrl       String
   expiryDate    DateTime?
   createdAt     DateTime    @default(now())
@@ -628,10 +693,10 @@ model StaffPerformanceScore {
   overallScore         Float       @default(100.0) // 0-100 composite
   attendanceRate       Float       @default(100.0)
   classUpdateRate      Float       @default(100.0)
-  studentFeedbackScore Float       @default(5.0)   // 1-5 rating
-  parentFeedbackScore  Float       @default(5.0)   // 1-5 rating
+  studentFeedbackScore Float       @default(5.0) // 1-5 rating
+  parentFeedbackScore  Float       @default(5.0) // 1-5 rating
   leaveComplianceRate  Float       @default(100.0)
-  scoreHistory         Json?       // [{date, score}] trend data
+  scoreHistory         Json? // [{date, score}] trend data
   updatedAt            DateTime    @updatedAt
 }
 
@@ -643,7 +708,7 @@ model ExitClearance {
   resignationDate    DateTime
   reason             String?
   noticePeriodDays   Int
-  clearanceChecklist Json        // [{item, cleared, signature}]
+  clearanceChecklist Json // [{item, cleared, signature}]
   finalSettlementNpr Decimal     @db.Decimal(12, 2)
   status             String      @default("PENDING") // PENDING, CLEARANCE_COMPLETED, SETTLED
   createdAt          DateTime    @default(now())
@@ -668,9 +733,9 @@ model CanteenTransaction {
   walletId    String
   wallet      CanteenWallet @relation(fields: [walletId], references: [id])
   amount      Decimal       @db.Decimal(12, 2)
-  type        String        // CREDIT (Reload), DEBIT (Purchase)
+  type        String // CREDIT (Reload), DEBIT (Purchase)
   description String?
-  referenceId String?       // Nepal Pay transaction ID for reloads
+  referenceId String? // Nepal Pay transaction ID for reloads
   createdAt   DateTime      @default(now())
 }
 
@@ -691,12 +756,12 @@ model VehicleRoute {
 }
 
 model StudentVehicle {
-  studentId String  @unique
-  student   Student @relation(fields: [studentId], references: [id])
-  routeId   String
-  route     VehicleRoute @relation(fields: [routeId], references: [id])
+  studentId   String       @unique
+  student     Student      @relation(fields: [studentId], references: [id])
+  routeId     String
+  route       VehicleRoute @relation(fields: [routeId], references: [id])
   pickupPoint String?
-  createdAt DateTime @default(now())
+  createdAt   DateTime     @default(now())
 
   @@id([studentId, routeId])
 }
@@ -706,18 +771,18 @@ model StudentVehicle {
 // ==========================================
 
 model Expense {
-  id          String   @id @default(uuid())
-  tenantId    String
-  tenant      Tenant   @relation(fields: [tenantId], references: [id])
-  branchId    String?
-  branch      Branch?  @relation(fields: [branchId], references: [id])
-  category    String   // RENT, UTILITIES, MAINTENANCE, SALARY, MARKETING, OTHER
-  amount      Float
-  purpose     String
-  date        DateTime @default(now())
-  approvedBy  String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(uuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  branchId   String?
+  branch     Branch?  @relation(fields: [branchId], references: [id])
+  category   String // RENT, UTILITIES, MAINTENANCE, SALARY, MARKETING, OTHER
+  amount     Float
+  purpose    String
+  date       DateTime @default(now())
+  approvedBy String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 model Payroll {
@@ -808,4 +873,3 @@ model VerificationCode {
 
   @@index([identifier, purpose])
 }
-

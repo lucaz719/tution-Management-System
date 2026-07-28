@@ -3,6 +3,7 @@ import {
   canAccessBranch,
   canApprovePettyCashL1,
   canReleasePettyCash,
+  hasBranchPermission,
   isTenantAdmin,
   managedBranchIds,
   resolveActorScope,
@@ -26,6 +27,16 @@ assert.deepEqual(resolveActorScope(branchAdmin), { tenantWide: false, branchIds:
 assert.equal(canAccessBranch(tenantAdmin, 'branch-b'), true, 'Tenant Admin may operate in any branch in the institution');
 assert.equal(canAccessBranch(branchAdmin, 'branch-a'), true, 'Branch Admin may operate in their assigned branch');
 assert.equal(canAccessBranch(branchAdmin, 'branch-b'), false, 'Branch Admin cannot operate in another branch');
+assert.equal(
+  hasBranchPermission(branchAdmin, 'approve_petty_cash_l1', 'branch-a'),
+  true,
+  'branch permission must match the signed branch assignment',
+);
+assert.equal(
+  hasBranchPermission(branchAdmin, 'approve_petty_cash_l1', 'branch-b'),
+  false,
+  'branch permission cannot be reused in another branch',
+);
 assert.equal(
   canApprovePettyCashL1(branchAdmin, { tenantId: 'tenant-a', branchId: 'branch-a', status: 'PENDING' }),
   true,

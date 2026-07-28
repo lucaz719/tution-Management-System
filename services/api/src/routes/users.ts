@@ -12,6 +12,7 @@ import {
   type CanonicalRoleName,
 } from '../utils/roles';
 import { UserPayload } from '@tms/types';
+import { canReleaseAdmissionLogins } from '../utils/billing-rules';
 
 const router = Router();
 
@@ -67,6 +68,8 @@ async function provisionUser(params: {
   roleName: CanonicalRoleName;
   branchId: string | null;
   gradeId?: string | null;
+  status?: 'ACTIVE' | 'INACTIVE';
+  admissionStatus?: 'PENDING_PAYMENT' | 'READY_FOR_LOGIN' | 'ACTIVE';
 }): Promise<CreateUserResult> {
   const temporaryPassword = generateTempPassword();
   const passwordHash = await bcrypt.hash(temporaryPassword, 10);
@@ -82,7 +85,7 @@ async function provisionUser(params: {
         lastName: params.lastName,
         phone: params.phone || '',
         passwordHash,
-        status: 'ACTIVE',
+        status: params.status ?? 'ACTIVE',
       },
     });
 
@@ -111,7 +114,13 @@ async function provisionUser(params: {
       });
     } else if (params.roleName === 'Student') {
       await tx.student.create({
-        data: { userId: created.id, admissionDate: new Date(), emergencyContact: params.phone || '', gradeId: params.gradeId ?? null },
+        data: {
+          userId: created.id,
+          admissionDate: new Date(),
+          emergencyContact: params.phone || '',
+          gradeId: params.gradeId ?? null,
+          admissionStatus: params.admissionStatus ?? 'ACTIVE',
+        },
       });
     } else if (params.roleName === 'Parent') {
       await tx.parent.create({ data: { userId: created.id } });
@@ -161,6 +170,176 @@ router.get('/me', authMiddleware, async (req: TenantRequest, res: Response) => {
   } catch (error: any) {
     return res.status(500).json({ error: 'Failed to load capabilities.', details: error.message });
   }
+});
+
+// Admission creates inactive Student/Parent accounts and an admission invoice.
+// Credentials are released only through the activation endpoint after payment.
+router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const caller = req.user as UserPayload;
+  const tenantAdmin = isTenantAdmin(caller);
+  const scopes = branchAdminScopes(caller);
+  const branchId = typeof req.body?.branchId === 'string' ? req.body.branchId : '';
+  const gradeId = typeof req.body?.gradeId === 'string' ? req.body.gradeId : '';
+  if (!tenantAdmin && !scopes.includes(branchId)) {
+    return res.status(403).json({ error: 'Only the Tenant Admin or assigned Branch Admin may create admissions.' });
+  }
+
+  const studentFields = validateNewUserBody(req.body?.student);
+  const parentFields = validateNewUserBody(req.body?.parent);
+  if (!branchId || !gradeId || !studentFields || !parentFields) {
+    return res.status(400).json({
+      error: 'branchId, gradeId, and complete student and parent identity details are required.',
+    });
+  }
+
+  const [branch, grade, existing] = await Promise.all([
+    prisma.branch.findFirst({ where: { id: branchId, tenantId: req.tenantId! } }),
+    prisma.grade.findFirst({ where: { id: gradeId, tenantId: req.tenantId! } }),
+    prisma.user.findFirst({
+      where: { email: { in: [studentFields.email, parentFields.email] } },
+      select: { email: true },
+    }),
+  ]);
+  if (!branch || !grade) return res.status(404).json({ error: 'Branch or grade was not found in your institution.' });
+  if (studentFields.email === parentFields.email) {
+    return res.status(400).json({ error: 'Student and parent must use different email addresses.' });
+  }
+  if (existing) return res.status(409).json({ error: `An account already exists for ${existing.email}.` });
+  if (grade.admissionFee <= 0) {
+    return res.status(422).json({ error: 'Configure a positive admission fee for this grade before admitting students.' });
+  }
+
+  const [studentRoleId, parentRoleId] = await Promise.all([
+    ensureTenantRole(req.tenantId!, 'Student'),
+    ensureTenantRole(req.tenantId!, 'Parent'),
+  ]);
+  const hiddenStudentPassword = await bcrypt.hash(generateTempPassword(), 10);
+  const hiddenParentPassword = await bcrypt.hash(generateTempPassword(), 10);
+  const now = new Date();
+  const dueDate = new Date(now);
+  dueDate.setDate(dueDate.getDate() + 7);
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const studentUser = await tx.user.create({
+        data: {
+          tenantId: req.tenantId!,
+          email: studentFields.email,
+          name: `${studentFields.firstName} ${studentFields.lastName}`,
+          firstName: studentFields.firstName,
+          lastName: studentFields.lastName,
+          phone: studentFields.phone,
+          passwordHash: hiddenStudentPassword,
+          status: 'INACTIVE',
+        },
+      });
+      await tx.account.create({
+        data: { accountId: studentUser.id, providerId: 'credential', userId: studentUser.id, password: hiddenStudentPassword },
+      });
+      await tx.userRole.create({ data: { userId: studentUser.id, roleId: studentRoleId, branchId } });
+      const student = await tx.student.create({
+        data: {
+          userId: studentUser.id,
+          gradeId,
+          admissionDate: now,
+          emergencyContact: studentFields.phone || parentFields.phone,
+          admissionStatus: 'PENDING_PAYMENT',
+        },
+      });
+
+      const parentUser = await tx.user.create({
+        data: {
+          tenantId: req.tenantId!,
+          email: parentFields.email,
+          name: `${parentFields.firstName} ${parentFields.lastName}`,
+          firstName: parentFields.firstName,
+          lastName: parentFields.lastName,
+          phone: parentFields.phone,
+          passwordHash: hiddenParentPassword,
+          status: 'INACTIVE',
+        },
+      });
+      await tx.account.create({
+        data: { accountId: parentUser.id, providerId: 'credential', userId: parentUser.id, password: hiddenParentPassword },
+      });
+      await tx.userRole.create({ data: { userId: parentUser.id, roleId: parentRoleId, branchId } });
+      const parent = await tx.parent.create({ data: { userId: parentUser.id } });
+      await tx.studentParent.create({ data: { studentId: student.id, parentId: parent.id } });
+
+      const invoice = await tx.invoice.create({
+        data: {
+          tenantId: req.tenantId!,
+          studentId: student.id,
+          invoiceType: 'ADMISSION',
+          amount: grade.admissionFee,
+          netPayable: grade.admissionFee,
+          billingCycleStart: now,
+          billingCycleEnd: now,
+          dueDate,
+          status: 'UNPAID',
+        },
+      });
+      return { student, parent, invoice };
+    });
+
+    return res.status(201).json({
+      message: 'Admission created. Student and parent logins remain disabled until the admission invoice is paid.',
+      admission: {
+        studentId: result.student.id,
+        parentId: result.parent.id,
+        branchId,
+        gradeId,
+        status: result.student.admissionStatus,
+        invoiceId: result.invoice.id,
+        admissionFee: result.invoice.netPayable,
+      },
+    });
+  } catch (error: any) {
+    if (error.code === 'P2002') return res.status(409).json({ error: 'Student or parent email already exists.' });
+    return res.status(500).json({ error: 'Failed to create admission.' });
+  }
+});
+
+router.post('/admissions/:studentId/issue-logins', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const caller = req.user as UserPayload;
+  const student = await prisma.student.findFirst({
+    where: { id: req.params.studentId, user: { tenantId: req.tenantId! } },
+    include: {
+      user: { include: { userRoles: true } },
+      studentParents: { include: { parent: { include: { user: true } } } },
+      invoices: { where: { invoiceType: 'ADMISSION' }, orderBy: { createdAt: 'desc' }, take: 1 },
+    },
+  });
+  if (!student) return res.status(404).json({ error: 'Admission not found.' });
+  const branchId = student.user.userRoles.find((role) => role.branchId)?.branchId;
+  if (!branchId || (!isTenantAdmin(caller) && !branchAdminScopes(caller).includes(branchId))) {
+    return res.status(403).json({ error: 'Only the Tenant Admin or assigned Branch Admin may issue these logins.' });
+  }
+  if (!canReleaseAdmissionLogins(student.admissionStatus, student.invoices[0]?.status)) {
+    return res.status(409).json({ error: 'Admission payment must be recorded before logins can be issued.' });
+  }
+  const parentUser = student.studentParents[0]?.parent.user;
+  if (!parentUser) return res.status(409).json({ error: 'A linked parent account is required before issuing logins.' });
+
+  const studentPassword = generateTempPassword();
+  const parentPassword = generateTempPassword();
+  const [studentHash, parentHash] = await Promise.all([
+    bcrypt.hash(studentPassword, 10),
+    bcrypt.hash(parentPassword, 10),
+  ]);
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({ where: { id: student.userId }, data: { status: 'ACTIVE', passwordHash: studentHash } });
+    await tx.account.updateMany({ where: { userId: student.userId, providerId: 'credential' }, data: { password: studentHash } });
+    await tx.user.update({ where: { id: parentUser.id }, data: { status: 'ACTIVE', passwordHash: parentHash } });
+    await tx.account.updateMany({ where: { userId: parentUser.id, providerId: 'credential' }, data: { password: parentHash } });
+    await tx.student.update({ where: { id: student.id }, data: { admissionStatus: 'ACTIVE' } });
+  });
+
+  return res.json({
+    message: 'Admission activated. Deliver these one-time credentials through a secure channel.',
+    student: { email: student.user.email, temporaryPassword: studentPassword },
+    parent: { email: parentUser.email, temporaryPassword: parentPassword },
+  });
 });
 
 // --- List users in the caller's tenant (branch admins see only their branch) ---

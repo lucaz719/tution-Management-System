@@ -11,6 +11,9 @@ export async function authMiddleware(req: TenantRequest, res: Response, next: Ne
 
     if (session && session.user) {
       const user = session.user as any;
+      if (user.status && user.status !== 'ACTIVE') {
+        return res.status(403).json({ error: 'Account is not active.' });
+      }
       if (!user.tenantId) {
         return res.status(403).json({ error: 'Authenticated account has no institution scope.' });
       }

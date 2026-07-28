@@ -125,6 +125,52 @@ npm run dev
 
 Open `http://localhost:5173/login` and check the API at `http://localhost:3001/api/health`.
 
+## Docker setup
+
+Docker Compose starts PostgreSQL, applies all Prisma migrations, and then starts
+the API and web application.
+
+```powershell
+Copy-Item .env.docker.example .env
+# Replace BETTER_AUTH_SECRET and POSTGRES_PASSWORD in .env.
+docker compose up --build -d
+docker compose ps
+```
+
+Open `http://localhost:5173/login`. The API health endpoint is
+`http://localhost:3001/api/health`.
+
+Useful commands:
+
+```powershell
+docker compose logs -f api
+docker compose down
+# Explicitly remove the local database volume only when a full reset is wanted:
+docker compose down --volumes
+```
+
+The database persists in the named `tms_postgres_data` volume. The migration
+container runs `prisma migrate deploy` on every startup and exits successfully
+when the schema is current.
+
+### connectIPS payments
+
+connectIPS is disabled by default. Configure the `CONNECTIPS_*` values shown in
+`services/api/.env.example` using NCHL-issued UAT credentials. The creditor PFX
+must be supplied as base64 and must never be committed.
+
+Register these static API return URLs with NCHL:
+
+```text
+http://localhost:3001/api/finances/connectips/return/success
+http://localhost:3001/api/finances/connectips/return/failure
+```
+
+Use the corresponding HTTPS production URLs for live certification. Run
+`connectips-revalidate` through the protected cron endpoint on a five-minute
+schedule to reconcile successful payments when the customer closes the browser
+before returning.
+
 ## Development provisioning flow
 
 When `PLATFORM_ADMIN_ENABLED=true`, the seeded development Super Admin can provision the initial institution and Tenant Admin. After the Tenant Admin is created:

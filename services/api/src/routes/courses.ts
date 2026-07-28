@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
+import { canAccessBranch } from '../utils/access-control';
 
 const router = Router();
 
@@ -11,7 +12,7 @@ router.post(
   authMiddleware,
   hasPermission('manage_courses'),
   async (req: TenantRequest, res: Response) => {
-    const { branchId, gradeId, name, description, type, feeStructure, isTaxExempt, taxPercentage } = req.body;
+    const { branchId, gradeId, name, description, type, feeStructure, isTaxExempt, taxPercentage, isExtraActivity } = req.body;
 
     if (!branchId || !name || !type || !feeStructure) {
       return res.status(400).json({
@@ -45,6 +46,7 @@ router.post(
           description,
           type,
           feeStructure,
+          isExtraActivity: Boolean(isExtraActivity),
           isTaxExempt: !!isTaxExempt,
           taxPercentage: taxPercentage ? Number(taxPercentage) : 13.00,
         },
@@ -230,7 +232,6 @@ router.get(
 router.post(
   '/enroll',
   authMiddleware,
-  hasPermission('manage_billing'),
   async (req: TenantRequest, res: Response) => {
     const { studentId, courseId, classId, admissionDate } = req.body;
 
@@ -246,17 +247,23 @@ router.post(
       if (!course || course.tenantId !== req.tenantId) {
         return res.status(404).json({ error: 'Course not found in your institution.' });
       }
+      if (!canAccessBranch(req.user!, course.branchId)) {
+        return res.status(403).json({ error: 'Only the Tenant Admin or assigned Branch Admin may enroll this student.' });
+      }
 
       // The student and class must also belong to the tenant.
       const [student, klass] = await Promise.all([
         prisma.student.findFirst({
           where: { id: studentId, user: { tenantId: req.tenantId! } },
-          include: { grade: { select: { name: true } } },
+          include: { grade: { select: { name: true } }, user: { select: { status: true } } },
         }),
         prisma.class.findFirst({ where: { id: classId, course: { tenantId: req.tenantId! } } }),
       ]);
       if (!student) {
         return res.status(404).json({ error: 'Student not found in your institution.' });
+      }
+      if (student.admissionStatus !== 'ACTIVE' || student.user.status !== 'ACTIVE') {
+        return res.status(409).json({ error: 'Admission payment and login issuance must be completed before enrollment.' });
       }
       if (!klass) {
         return res.status(404).json({ error: 'Class not found in your institution.' });
@@ -825,7 +832,7 @@ router.put(
   hasPermission('manage_courses'),
   async (req: TenantRequest, res: Response) => {
     const { id } = req.params;
-    const { name, description, type, feeStructure, isTaxExempt, taxPercentage, gradeId } = req.body;
+    const { name, description, type, feeStructure, isTaxExempt, taxPercentage, gradeId, isExtraActivity } = req.body;
 
     try {
       const course = await prisma.course.findUnique({ where: { id } });
@@ -839,6 +846,7 @@ router.put(
       if (typeof type === 'string' && type) data.type = type;
       if (feeStructure && typeof feeStructure === 'object') data.feeStructure = feeStructure;
       if (typeof isTaxExempt === 'boolean') data.isTaxExempt = isTaxExempt;
+      if (typeof isExtraActivity === 'boolean') data.isExtraActivity = isExtraActivity;
       if (taxPercentage !== undefined && Number.isFinite(Number(taxPercentage))) data.taxPercentage = Number(taxPercentage);
 
       // grade: string reassigns (validated), null clears.

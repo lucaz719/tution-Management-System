@@ -4,6 +4,7 @@ import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { LeaveType, LeaveStatus } from '@tms/types';
 import { MockPushNotificationService, MockSmsSender } from '../utils/notifications';
+import { canAccessBranch, hasBranchPermission, isTenantAdmin } from '../utils/access-control';
 
 const router = Router();
 
@@ -20,6 +21,10 @@ router.post(
       return res.status(400).json({
         error: 'Missing required parameters: leaveType, startDate, endDate, reason, branchId.',
       });
+    }
+    const branchAssignment = req.user!.roles.some((role: any) => role.branchId === branchId);
+    if (!isTenantAdmin(req.user!) && !branchAssignment) {
+      return res.status(403).json({ error: 'You cannot submit leave for this branch.' });
     }
 
     try {
@@ -45,21 +50,7 @@ router.post(
 
       return res.status(201).json({ message: 'Leave request submitted successfully.', leave });
     } catch (error: any) {
-      return res.status(201).json({
-        message: 'Simulation Mode: Leave request submitted successfully.',
-        leave: {
-          id: 'sim-leave-' + Math.floor(Math.random() * 1000),
-          tenantId,
-          branchId,
-          userId,
-          leaveType,
-          startDate: new Date(startDate),
-          endDate: new Date(endDate),
-          reason,
-          status: 'PENDING',
-          createdAt: new Date(),
-        },
-      });
+      return res.status(500).json({ error: 'Failed to submit leave request.' });
     }
   }
 );
@@ -72,7 +63,6 @@ router.post(
     const { leaveId } = req.params;
     const { action, remarks } = req.body; // action: APPROVE or REJECT
     const approverId = req.user!.id;
-    const approverRole = req.user!.roles[0]?.roleName; // Main role name
 
     if (!action || !['APPROVE', 'REJECT'].includes(action)) {
       return res.status(400).json({ error: 'Missing required parameter: action (APPROVE or REJECT).' });
@@ -83,18 +73,7 @@ router.post(
 
     try {
       // Find current leave record to evaluate approval logic
-      let leave: any = null;
-      try {
-        leave = await prisma.leave.findUnique({ where: { id: leaveId } });
-      } catch (e) {
-        // Fallback for simulation
-        leave = {
-          id: leaveId,
-          leaveType: req.body.simLeaveType || 'CASUAL',
-          status: req.body.simLeaveStatus || 'PENDING',
-          userId: 'teacher-user-500',
-        };
-      }
+      const leave = await prisma.leave.findFirst({ where: { id: leaveId, tenantId: req.tenantId! } });
 
       if (!leave) {
         return res.status(404).json({ error: 'Leave request not found.' });
@@ -102,12 +81,12 @@ router.post(
 
       let newStatus: LeaveStatus = 'PENDING';
 
-      const isBranchAdmin = approverRole === 'Branch Admin';
-      const isTenantAdmin = approverRole === 'Tenant Admin';
+      const isBranchAdmin = hasBranchPermission(req.user!, 'approve_leave_l1', leave.branchId);
+      const tenantAdmin = isTenantAdmin(req.user!);
       if (leave.leaveType === 'LONG_SICK') {
         // Long Sick: Branch Admin performs L1; Tenant Admin performs the final L2 decision.
         const validL1 = isBranchAdmin && leave.status === 'PENDING';
-        const validL2 = isTenantAdmin && leave.status === 'APPROVED_LEVEL1';
+        const validL2 = tenantAdmin && leave.status === 'APPROVED_LEVEL1';
         if (!validL1 && !validL2) {
           return res.status(403).json({ error: 'Long Sick Leave requires Branch Admin L1, then Tenant Admin L2 approval.' });
         }
@@ -120,8 +99,7 @@ router.post(
         newStatus = action === 'REJECT' ? 'REJECTED' : 'APPROVED_LEVEL2';
       }
 
-      try {
-        await prisma.leave.update({
+      await prisma.leave.update({
           where: { id: leaveId },
           data: {
             status: newStatus,
@@ -129,9 +107,6 @@ router.post(
             remarks,
           },
         });
-      } catch (dbErr) {
-        // Continue simulation
-      }
 
       await MockPushNotificationService.sendPush(
         leave.userId,
@@ -164,6 +139,9 @@ router.post(
 
     if (!studentId || !reason || !branchId) {
       return res.status(400).json({ error: 'Missing required parameters: studentId, reason, branchId.' });
+    }
+    if (!canAccessBranch(req.user!, branchId)) {
+      return res.status(403).json({ error: 'You cannot approve emergency departure for this branch.' });
     }
 
     try {

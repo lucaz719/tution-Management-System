@@ -3,7 +3,7 @@ import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { CertificateType } from '@tms/types';
-import { canAccessBranch } from '../utils/access-control';
+import { canAccessBranch, isTenantAdmin } from '../utils/access-control';
 
 const router = Router();
 
@@ -11,8 +11,10 @@ const router = Router();
 router.post(
   '/templates',
   authMiddleware,
-  hasPermission('issue_certificates'),
   async (req: TenantRequest, res: Response) => {
+    if (!isTenantAdmin(req.user!)) {
+      return res.status(403).json({ error: 'Only the Tenant Admin may create master certificate templates.' });
+    }
     const { name, type, layoutConfig } = req.body;
 
     if (!name || !type || !layoutConfig) {
@@ -31,17 +33,7 @@ router.post(
 
       return res.status(201).json({ message: 'Certificate template created successfully.', template });
     } catch (error: any) {
-      return res.status(201).json({
-        message: 'Simulation Mode: Certificate template created successfully.',
-        template: {
-          id: 'sim-template-' + Math.floor(Math.random() * 1000),
-          tenantId: req.tenantId!,
-          name,
-          type,
-          layoutConfig,
-          createdAt: new Date(),
-        },
-      });
+      return res.status(500).json({ error: 'Failed to create certificate template.' });
     }
   }
 );
@@ -50,7 +42,7 @@ router.post(
 router.post(
   '/issue',
   authMiddleware,
-  hasPermission('manage_certificates'),
+  hasPermission('issue_certificates'),
   async (req: TenantRequest, res: Response) => {
     const { studentId, templateId, branchId, studentNameHint, courseNameHint } = req.body;
 
@@ -59,6 +51,14 @@ router.post(
     }
     if (!canAccessBranch(req.user!, branchId)) {
       return res.status(403).json({ error: 'You may only issue certificates for your assigned branch.' });
+    }
+    const [student, template, branch] = await Promise.all([
+      prisma.student.findFirst({ where: { id: studentId, user: { tenantId: req.tenantId! } } }),
+      prisma.certificateTemplate.findFirst({ where: { id: templateId, tenantId: req.tenantId! } }),
+      prisma.branch.findFirst({ where: { id: branchId, tenantId: req.tenantId! } }),
+    ]);
+    if (!student || !template || !branch) {
+      return res.status(404).json({ error: 'Student, template, or branch was not found in your institution.' });
     }
 
     // Generate unique verification ID
@@ -82,22 +82,7 @@ router.post(
         certificate,
       });
     } catch (error: any) {
-      // Simulation Fallback
-      return res.status(201).json({
-        message: 'Simulation Mode: Certificate successfully generated and assigned to student file.',
-        certificate: {
-          id: 'sim-cert-' + Math.floor(Math.random() * 1000),
-          certificateId: verificationId,
-          studentId,
-          templateId,
-          branchId,
-          issuerId: req.user!.id,
-          issuedDate: new Date(),
-          pdfUrl: `https://storage.tms.com.np/certs/${verificationId}.pdf`,
-          studentName: studentNameHint || 'Shyam Bahadur',
-          courseName: courseNameHint || 'Grade 12 Physics',
-        },
-      });
+      return res.status(500).json({ error: 'Failed to issue certificate.' });
     }
   }
 );
@@ -134,22 +119,7 @@ router.get(
         type: cert.template.type,
       });
     } catch (error: any) {
-      // Simulation verification success for testing
-      if (verificationId.startsWith('CERT-2026-')) {
-        return res.status(200).json({
-          isValid: true,
-          certificateId: verificationId,
-          studentName: 'Shyam Bahadur',
-          issuedDate: new Date(),
-          templateName: 'Standard High School Physics Completion Certificate',
-          type: 'COMPLETION' as CertificateType,
-        });
-      }
-
-      return res.status(404).json({
-        isValid: false,
-        error: 'Certificate verification failed. Record not found.',
-      });
+      return res.status(503).json({ isValid: false, error: 'Certificate verification is temporarily unavailable.' });
     }
   }
 );

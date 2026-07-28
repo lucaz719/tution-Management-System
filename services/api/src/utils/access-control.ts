@@ -37,6 +37,17 @@ export function canAccessBranch(actor: Actor, branchId: string): boolean {
   return isTenantAdmin(actor) || managedBranchIds(actor).includes(branchId);
 }
 
+export function hasRole(actor: Actor, roleName: string): boolean {
+  return actor.roles.some((role: UserPayload['roles'][number]) => role.roleName === roleName);
+}
+
+/** Checks an exact signed role assignment for a permission in a concrete branch. */
+export function hasBranchPermission(actor: Actor, permission: string, branchId: string): boolean {
+  return isTenantAdmin(actor) || actor.roles.some((role: UserPayload['roles'][number]) =>
+    role.branchId === branchId && role.permissions.includes(permission),
+  );
+}
+
 interface PettyCashRequest {
   tenantId: string;
   branchId: string;

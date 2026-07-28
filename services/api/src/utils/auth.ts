@@ -18,6 +18,7 @@ export const auth = betterAuth({
   user: {
     additionalFields: {
       tenantId: { type: 'string', required: true, input: false },
+      status: { type: 'string', required: true, input: false, defaultValue: 'ACTIVE' },
     },
   },
   emailAndPassword: {

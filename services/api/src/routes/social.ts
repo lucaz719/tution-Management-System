@@ -4,6 +4,7 @@ import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { SocialPostStatus } from '@tms/types';
 import { canAccessBranch } from '../utils/access-control';
+import { encryptSecret } from '../utils/secrets';
 
 const router = Router();
 
@@ -28,31 +29,25 @@ router.post(
           },
         },
         update: {
-          accessToken: 'mock_encrypted_' + accessToken,
-          refreshToken: refreshToken ? 'mock_encrypted_' + refreshToken : null,
+          accessToken: encryptSecret(accessToken),
+          refreshToken: refreshToken ? encryptSecret(refreshToken) : null,
           expiresAt: expiresAt ? new Date(expiresAt) : null,
         },
         create: {
           tenantId: req.tenantId!,
           platform,
-          accessToken: 'mock_encrypted_' + accessToken,
-          refreshToken: refreshToken ? 'mock_encrypted_' + refreshToken : null,
+          accessToken: encryptSecret(accessToken),
+          refreshToken: refreshToken ? encryptSecret(refreshToken) : null,
           expiresAt: expiresAt ? new Date(expiresAt) : null,
         },
       });
 
-      return res.status(200).json({ message: 'Social API token configured successfully.', config });
-    } catch (error: any) {
       return res.status(200).json({
-        message: 'Simulation Mode: Social API token configured successfully.',
-        config: {
-          id: 'sim-config-' + Math.floor(Math.random() * 1000),
-          tenantId: req.tenantId!,
-          platform,
-          accessToken: 'sim_encrypted_' + accessToken,
-          expiresAt: expiresAt ? new Date(expiresAt) : null,
-        },
+        message: 'Social API token configured successfully.',
+        config: { id: config.id, platform: config.platform, expiresAt: config.expiresAt, updatedAt: config.updatedAt },
       });
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Failed to configure social platform credentials.' });
     }
   }
 );
@@ -120,8 +115,10 @@ router.post(
     const { postId } = req.params;
 
     try {
+      const existing = await prisma.socialMediaPost.findFirst({ where: { id: postId, tenantId: req.tenantId! } });
+      if (!existing) return res.status(404).json({ error: 'Social post not found.' });
       const post = await prisma.socialMediaPost.update({
-        where: { id: postId },
+        where: { id: existing.id },
         data: {
           status: 'APPROVED',
         },
@@ -129,14 +126,7 @@ router.post(
 
       return res.status(200).json({ message: 'Post successfully approved and scheduled for publishing.', post });
     } catch (error: any) {
-      return res.status(200).json({
-        message: 'Simulation Mode: Post successfully approved and scheduled for publishing.',
-        post: {
-          id: postId,
-          status: 'APPROVED' as SocialPostStatus,
-          updatedAt: new Date(),
-        },
-      });
+      return res.status(500).json({ error: 'Failed to approve social post.' });
     }
   }
 );
@@ -155,8 +145,10 @@ router.post(
     }
 
     try {
+      const existing = await prisma.socialMediaPost.findFirst({ where: { id: postId, tenantId: req.tenantId! } });
+      if (!existing) return res.status(404).json({ error: 'Social post not found.' });
       const post = await prisma.socialMediaPost.update({
-        where: { id: postId },
+        where: { id: existing.id },
         data: {
           status: 'REJECTED',
           rejectRemarks: remarks,
@@ -165,15 +157,7 @@ router.post(
 
       return res.status(200).json({ message: 'Post draft rejected and sent back to author.', post });
     } catch (error: any) {
-      return res.status(200).json({
-        message: 'Simulation Mode: Post draft rejected and sent back to author.',
-        post: {
-          id: postId,
-          status: 'REJECTED' as SocialPostStatus,
-          rejectRemarks: remarks,
-          updatedAt: new Date(),
-        },
-      });
+      return res.status(500).json({ error: 'Failed to reject social post.' });
     }
   }
 );

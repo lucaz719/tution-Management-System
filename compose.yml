@@ -1,0 +1,88 @@
+name: tms
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-tms}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - tms_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-tms}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  migrate:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-tms}?schema=public
+    command: ["npx", "prisma", "migrate", "deploy"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-tms}?schema=public
+      PORT: 3001
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-local-development-secret-change-before-sharing}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3001}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:5173}
+      PLATFORM_ADMIN_ENABLED: ${PLATFORM_ADMIN_ENABLED:-false}
+      SMS_PROVIDER: ${SMS_PROVIDER:-MOCK}
+      NEPALPAY_WEBHOOK_SECRET: ${NEPALPAY_WEBHOOK_SECRET:-local-nepalpay-webhook-secret-change-me}
+      SOCIAL_TOKEN_ENCRYPTION_KEY: ${SOCIAL_TOKEN_ENCRYPTION_KEY:-local-social-token-key-change-me}
+      CONNECTIPS_ENABLED: ${CONNECTIPS_ENABLED:-false}
+      CONNECTIPS_MERCHANT_ID: ${CONNECTIPS_MERCHANT_ID:-}
+      CONNECTIPS_APP_ID: ${CONNECTIPS_APP_ID:-}
+      CONNECTIPS_APP_NAME: ${CONNECTIPS_APP_NAME:-}
+      CONNECTIPS_PFX_BASE64: ${CONNECTIPS_PFX_BASE64:-}
+      CONNECTIPS_PFX_PASSWORD: ${CONNECTIPS_PFX_PASSWORD:-}
+      CONNECTIPS_VALIDATE_PASSWORD: ${CONNECTIPS_VALIDATE_PASSWORD:-}
+      CONNECTIPS_GATEWAY_URL: ${CONNECTIPS_GATEWAY_URL:-https://uat.connectips.com/connectipswebgw/loginpage}
+      CONNECTIPS_VALIDATE_URL: ${CONNECTIPS_VALIDATE_URL:-https://uat.connectips.com/connectipswebws/api/creditor/validatetxn}
+    ports:
+      - "${API_PORT:-3001}:3001"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:3001/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-5173}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  tms_postgres_data:

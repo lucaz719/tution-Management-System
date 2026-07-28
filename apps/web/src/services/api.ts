@@ -136,6 +136,22 @@ export const api = {
         body: JSON.stringify({ transactionId }),
       });
     },
+    initiateConnectIps: async (invoiceId: string) => {
+      return request<{
+        payment: { txnId: string; invoiceId: string; amountPaisa: string; status: string };
+        gatewayUrl: string;
+        fields: Record<string, string>;
+      }>(`/finances/connectips/initiate/${invoiceId}`, { method: 'POST' });
+    },
+    getConnectIpsStatus: async (txnId: string) => {
+      return request<{
+        txnId: string;
+        invoiceId: string;
+        status: string;
+        gatewayStatus: string | null;
+        confirmedAt: string | null;
+      }>(`/finances/connectips/status/${encodeURIComponent(txnId)}`);
+    },
     generateInvoices: async () => {
       return request<{ message: string; created: number; billingPeriod: string; skipped: number }>('/finances/generate-invoices', {
         method: 'POST',

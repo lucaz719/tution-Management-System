@@ -3,6 +3,8 @@ import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware } from '../middleware/auth';
 import { MockSmsSender, MockPushNotificationService } from '../utils/notifications';
+import { isTenantAdmin } from '../utils/access-control';
+import { reconcilePendingConnectIps } from '../utils/connectips';
 
 const router = Router();
 
@@ -11,6 +13,9 @@ router.post(
   '/trigger',
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
+    if (!isTenantAdmin(req.user!)) {
+      return res.status(403).json({ error: 'Only the Tenant Admin may run institution automation.' });
+    }
     const { taskName } = req.body;
 
     if (!taskName) {
@@ -29,10 +34,17 @@ router.post(
           });
           
           await prisma.enrollment.updateMany({
-            where: { student: { invoices: { some: { status: 'OVERDUE' } } } },
+            where: {
+              student: {
+                user: { tenantId: req.tenantId! },
+                invoices: { some: { tenantId: req.tenantId!, status: 'OVERDUE' } },
+              },
+            },
             data: { status: 'BLOCKED' },
           });
-        } catch (dbErr) {}
+        } catch (dbErr) {
+          throw dbErr;
+        }
 
         logs.push('Verified unpaid invoices, updated status to OVERDUE, and blocked enrollments.');
       } else if (taskName === 'fee-reminder-sms') {
@@ -56,6 +68,7 @@ router.post(
         try {
           await prisma.maintenanceTask.updateMany({
             where: {
+              branch: { tenantId: req.tenantId! },
               status: 'PENDING',
               createdAt: { lt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) },
             },
@@ -63,8 +76,13 @@ router.post(
               status: 'ESCALATED',
             },
           });
-        } catch (dbErr) {}
+        } catch (dbErr) {
+          throw dbErr;
+        }
         logs.push('Escalated pending maintenance tasks older than 3 days.');
+      } else if (taskName === 'connectips-revalidate') {
+        const result = await reconcilePendingConnectIps();
+        logs.push(`Revalidated ${result.checked} pending connectIPS payment(s); confirmed ${result.confirmed}.`);
       } else {
         return res.status(400).json({ error: `Unknown taskName: ${taskName}.` });
       }

@@ -4,9 +4,133 @@ import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { MockSmsSender } from '../utils/notifications';
 import { getBillingPeriod } from '../utils/nepali';
-import { canApprovePettyCashL1, canReleasePettyCash, isTenantAdmin } from '../utils/access-control';
+import { canApprovePettyCashL1, canReleasePettyCash, hasBranchPermission, isTenantAdmin } from '../utils/access-control';
+import crypto from 'node:crypto';
+import { recurringInvoiceType } from '../utils/billing-rules';
+import { createConnectIpsForm, validateAndConfirmConnectIps } from '../utils/connectips';
 
 const router = Router();
+
+async function loadInvoicePaymentAccess(req: TenantRequest, invoiceId: string) {
+  const invoice = await prisma.invoice.findFirst({
+    where: { id: invoiceId, tenantId: req.tenantId! },
+    include: {
+      student: {
+        include: {
+          user: { include: { userRoles: true } },
+          studentParents: { include: { parent: true } },
+        },
+      },
+    },
+  });
+  if (!invoice) return null;
+  const ownStudent = invoice.student.userId === req.user!.id;
+  const ownParent = invoice.student.studentParents.some((link) => link.parent.userId === req.user!.id);
+  const branchIds = invoice.student.user.userRoles
+    .map((assignment) => assignment.branchId)
+    .filter((branchId): branchId is string => Boolean(branchId));
+  const staffAccess = branchIds.some((branchId) =>
+    hasBranchPermission(req.user!, 'manage_billing', branchId) || hasBranchPermission(req.user!, 'manage_students', branchId),
+  );
+  return ownStudent || ownParent || isTenantAdmin(req.user!) || staffAccess ? invoice : null;
+}
+
+router.post('/connectips/initiate/:invoiceId', authMiddleware, async (req: TenantRequest, res: Response) => {
+  try {
+    const invoice = await loadInvoicePaymentAccess(req, req.params.invoiceId);
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found or unavailable to this account.' });
+    if (invoice.status === 'PAID') return res.status(409).json({ error: 'Invoice is already paid.' });
+    const amountPaisa = BigInt(Math.round(Number(invoice.netPayable) * 100));
+    if (amountPaisa <= 0n) return res.status(422).json({ error: 'Invoice amount must be positive.' });
+
+    let attempt = await prisma.paymentAttempt.findFirst({
+      where: { invoiceId: invoice.id, provider: 'CONNECTIPS', status: { in: ['PENDING', 'INCOMPLETE'] } },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!attempt) {
+      const txnId = crypto.randomBytes(10).toString('hex');
+      attempt = await prisma.paymentAttempt.create({
+        data: {
+          tenantId: req.tenantId!,
+          invoiceId: invoice.id,
+          provider: 'CONNECTIPS',
+          status: 'PENDING',
+          txnId,
+          referenceId: txnId,
+          amountPaisa,
+          createdBy: req.user!.id,
+        },
+      });
+    }
+    if (attempt.amountPaisa !== amountPaisa) {
+      return res.status(409).json({ error: 'Invoice amount changed after payment initiation. Start a new payment attempt.' });
+    }
+    const form = createConnectIpsForm(
+      attempt.txnId,
+      attempt.amountPaisa,
+      `TMS invoice ${invoice.id.slice(0, 8)}`,
+      `${invoice.invoiceType} fee payment`,
+    );
+    return res.status(201).json({
+      payment: {
+        txnId: attempt.txnId,
+        invoiceId: invoice.id,
+        amountPaisa: attempt.amountPaisa.toString(),
+        status: attempt.status,
+      },
+      ...form,
+    });
+  } catch (error: any) {
+    const configurationError = /CONNECTIPS_|connectIPS is not enabled|private key/i.test(error.message || '');
+    return res.status(configurationError ? 503 : 500).json({
+      error: configurationError ? 'connectIPS is not configured.' : 'Failed to initiate connectIPS payment.',
+    });
+  }
+});
+
+// Static NCHL success URL may point here directly, or the frontend may call it
+// after receiving ?TXNID=. The gateway redirect itself is never trusted.
+router.get('/connectips/return/success', async (req: TenantRequest, res: Response) => {
+  const txnId = typeof req.query.TXNID === 'string' ? req.query.TXNID : '';
+  if (!/^[A-Za-z0-9_-]{1,20}$/.test(txnId)) return res.status(400).json({ error: 'Valid TXNID is required.' });
+  try {
+    const attempt = await validateAndConfirmConnectIps(txnId);
+    if (!attempt) return res.status(404).json({ error: 'Payment attempt not found.' });
+    return res.json({ txnId: attempt.txnId, status: attempt.status });
+  } catch {
+    return res.status(502).json({ error: 'connectIPS validation is temporarily unavailable.' });
+  }
+});
+
+router.get('/connectips/return/failure', async (req: TenantRequest, res: Response) => {
+  const txnId = typeof req.query.TXNID === 'string' ? req.query.TXNID : '';
+  if (!/^[A-Za-z0-9_-]{1,20}$/.test(txnId)) return res.status(400).json({ error: 'Valid TXNID is required.' });
+  const attempt = await prisma.paymentAttempt.findUnique({ where: { txnId } });
+  if (!attempt || attempt.provider !== 'CONNECTIPS') return res.status(404).json({ error: 'Payment attempt not found.' });
+  if (attempt.status !== 'SUCCESS') {
+    await prisma.paymentAttempt.update({
+      where: { id: attempt.id },
+      data: { gatewayStatus: 'USER_RETURNED_FAILURE', gatewayMessage: 'User returned through the failure URL.' },
+    });
+  }
+  return res.json({ txnId, status: attempt.status });
+});
+
+router.get('/connectips/status/:txnId', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const attempt = await prisma.paymentAttempt.findFirst({
+    where: { txnId: req.params.txnId, tenantId: req.tenantId! },
+  });
+  if (!attempt) return res.status(404).json({ error: 'Payment attempt not found.' });
+  const invoice = await loadInvoicePaymentAccess(req, attempt.invoiceId);
+  if (!invoice) return res.status(404).json({ error: 'Payment attempt not found.' });
+  return res.json({
+    txnId: attempt.txnId,
+    invoiceId: attempt.invoiceId,
+    status: attempt.status,
+    gatewayStatus: attempt.gatewayStatus,
+    confirmedAt: attempt.confirmedAt,
+  });
+});
 
 // ── Fee aggregation helpers ────────────────────────────────────────────────
 const num = (v: any) => Number(v ?? 0);
@@ -164,16 +288,37 @@ router.post(
       ? req.body.transactionId.trim()
       : 'CASH';
     try {
-      const invoice = await prisma.invoice.findUnique({ where: { id } });
+      const invoice = await prisma.invoice.findUnique({
+        where: { id },
+        include: { student: { include: { user: { include: { userRoles: true } } } } },
+      });
       if (!invoice || invoice.tenantId !== req.tenantId) {
         return res.status(404).json({ error: 'Invoice not found in your institution.' });
+      }
+      const studentBranchIds = invoice.student.user.userRoles
+        .map((assignment) => assignment.branchId)
+        .filter((branchId): branchId is string => Boolean(branchId));
+      if (
+        !isTenantAdmin(req.user!) &&
+        !studentBranchIds.some((branchId) => hasBranchPermission(req.user!, 'manage_billing', branchId))
+      ) {
+        return res.status(403).json({ error: 'You cannot record payments for this student branch.' });
       }
       if (invoice.status === 'PAID') {
         return res.status(400).json({ error: 'This invoice is already paid.' });
       }
-      const updated = await prisma.invoice.update({
-        where: { id },
-        data: { status: 'PAID', paymentDate: new Date(), transactionId },
+      const updated = await prisma.$transaction(async (tx) => {
+        const paid = await tx.invoice.update({
+          where: { id },
+          data: { status: 'PAID', paymentDate: new Date(), transactionId },
+        });
+        if (paid.invoiceType === 'ADMISSION') {
+          await tx.student.update({
+            where: { id: paid.studentId },
+            data: { admissionStatus: 'READY_FOR_LOGIN' },
+          });
+        }
+        return paid;
       });
       return res.json({ message: 'Payment recorded.', invoice: { id: updated.id, status: updated.status, paymentDate: updated.paymentDate } });
     } catch (error: any) {
@@ -195,43 +340,69 @@ router.post(
 
       // Monthly bill per student = their grade's base tuition (all subjects) +
       // net fees of their active extra-activity enrolments.
-      const feeByStudent = new Map<string, number>();
+      const fees = new Map<string, { studentId: string; invoiceType: 'TUITION' | 'SUBJECT' | 'ACTIVITY'; amount: number }>();
+      const addFee = (studentId: string, invoiceType: 'TUITION' | 'SUBJECT' | 'ACTIVITY', amount: number) => {
+        const key = `${studentId}:${invoiceType}`;
+        const current = fees.get(key);
+        fees.set(key, { studentId, invoiceType, amount: (current?.amount ?? 0) + amount });
+      };
 
       // 1. Grade base tuition for every student who has a graded level.
       const students = await prisma.student.findMany({
-        where: { user: { tenantId: req.tenantId! }, gradeId: { not: null } },
-        include: { grade: { select: { monthlyFee: true } } },
+        where: {
+          user: { tenantId: req.tenantId!, status: 'ACTIVE' },
+          admissionStatus: 'ACTIVE',
+          gradeId: { not: null },
+        },
+        include: { grade: { select: { monthlyFee: true, billingMode: true } } },
       });
       for (const s of students) {
-        if (s.grade && s.grade.monthlyFee > 0) feeByStudent.set(s.id, s.grade.monthlyFee);
+        if (s.grade?.billingMode === 'GRADE' && s.grade.monthlyFee > 0) {
+          addFee(s.id, 'TUITION', s.grade.monthlyFee);
+        }
       }
 
       // 2. Add active extra-activity enrolment fees.
       const enrollments = await prisma.enrollment.findMany({
-        where: { status: 'ACTIVE', course: { tenantId: req.tenantId! } },
-        include: { course: true },
+        where: {
+          status: 'ACTIVE',
+          student: { admissionStatus: 'ACTIVE', user: { status: 'ACTIVE' } },
+          course: { tenantId: req.tenantId! },
+        },
+        include: { course: true, student: { include: { grade: true } } },
       });
       for (const e of enrollments) {
+        const invoiceType = recurringInvoiceType(
+          e.student.grade?.billingMode ?? 'GRADE',
+          e.course.isExtraActivity,
+        );
+        if (!invoiceType) continue;
         const fee = (e.course.feeStructure ?? {}) as { monthlyBase?: number };
         const base = Number(fee.monthlyBase || 0);
         const net = e.course.isTaxExempt ? base : base * (1 + Number(e.course.taxPercentage || 13) / 100);
-        feeByStudent.set(e.studentId, (feeByStudent.get(e.studentId) ?? 0) + net);
+        addFee(e.studentId, invoiceType, net);
       }
 
       // Students already invoiced for this cycle.
       const existing = await prisma.invoice.findMany({
-        where: { tenantId: req.tenantId!, billingCycleStart: period.cycleStart },
-        select: { studentId: true },
+        where: {
+          tenantId: req.tenantId!,
+          billingCycleStart: period.cycleStart,
+          invoiceType: { in: ['TUITION', 'SUBJECT', 'ACTIVITY'] },
+        },
+        select: { studentId: true, invoiceType: true },
       });
-      const alreadyBilled = new Set(existing.map((i) => i.studentId));
+      const alreadyBilled = new Set(existing.map((i) => `${i.studentId}:${i.invoiceType}`));
 
       let created = 0;
-      for (const [studentId, net] of feeByStudent) {
-        if (alreadyBilled.has(studentId) || net <= 0) continue;
+      for (const [key, charge] of fees) {
+        if (alreadyBilled.has(key) || charge.amount <= 0) continue;
+        const net = charge.amount;
         await prisma.invoice.create({
           data: {
             tenantId: req.tenantId!,
-            studentId,
+            studentId: charge.studentId,
+            invoiceType: charge.invoiceType,
             amount: Math.round(net * 100) / 100,
             discount: 0,
             fine: 0,
@@ -245,7 +416,7 @@ router.post(
         created += 1;
       }
 
-      return res.json({ message: `Generated ${created} invoice(s) for ${period.label}.`, created, billingPeriod: period.label, skipped: feeByStudent.size - created });
+      return res.json({ message: `Generated ${created} invoice(s) for ${period.label}.`, created, billingPeriod: period.label, skipped: fees.size - created });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to generate invoices.', details: error.message });
     }
@@ -398,28 +569,42 @@ router.post(
     if (!invoiceId || !transactionId || !status || !paymentAmount) {
       return res.status(400).json({ error: 'Missing required parameters: invoiceId, transactionId, status, paymentAmount.' });
     }
+    const webhookSecret = process.env.NEPALPAY_WEBHOOK_SECRET;
+    const suppliedSignature = req.header('x-nepalpay-signature') || '';
+    if (!webhookSecret) {
+      return res.status(503).json({ error: 'Payment webhook is not configured.' });
+    }
+    const expectedSignature = crypto
+      .createHmac('sha256', webhookSecret)
+      .update(JSON.stringify(req.body))
+      .digest('hex');
+    const validSignature =
+      suppliedSignature.length === expectedSignature.length &&
+      crypto.timingSafeEqual(Buffer.from(suppliedSignature), Buffer.from(expectedSignature));
+    if (!validSignature) {
+      return res.status(401).json({ error: 'Invalid payment webhook signature.' });
+    }
 
     try {
       if (status === 'SUCCESS') {
-        let invoice: any = null;
-        try {
-          invoice = await prisma.invoice.findUnique({
-            where: { id: invoiceId },
-          });
-        } catch (dbErr) {
-          invoice = {
-            id: invoiceId,
-            studentId: 'st-01-shyam',
-            netPayable: paymentAmount,
-          };
+        const duplicate = await prisma.invoice.findFirst({ where: { transactionId } });
+        if (duplicate && duplicate.id !== invoiceId) {
+          return res.status(409).json({ error: 'Transaction has already been used.' });
         }
+        const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } });
 
         if (!invoice) {
           return res.status(404).json({ error: 'Invoice not found.' });
         }
+        if (invoice.status === 'PAID') {
+          return res.status(200).json({ message: 'Payment was already recorded.', invoiceId });
+        }
+        if (Number(invoice.netPayable) !== Number(paymentAmount)) {
+          return res.status(422).json({ error: 'Payment amount does not match the invoice.' });
+        }
 
-        try {
-          await prisma.invoice.update({
+        await prisma.$transaction(async (tx) => {
+          await tx.invoice.update({
             where: { id: invoiceId },
             data: {
               status: 'PAID',
@@ -428,13 +613,17 @@ router.post(
             },
           });
 
-          await prisma.enrollment.updateMany({
+          await tx.enrollment.updateMany({
             where: { studentId: invoice.studentId, status: 'BLOCKED' },
             data: { status: 'ACTIVE' },
           });
-        } catch (dbErr) {
-          // Simulation mode fallback
-        }
+          if (invoice.invoiceType === 'ADMISSION') {
+            await tx.student.update({
+              where: { id: invoice.studentId },
+              data: { admissionStatus: 'READY_FOR_LOGIN' },
+            });
+          }
+        });
 
         const smsSender = new MockSmsSender();
         await smsSender.sendSms(

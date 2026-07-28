@@ -12,6 +12,9 @@ export type SessionStatus =
 export type StudentAttendanceStatus = 'PRESENT' | 'ABSENT' | 'EXCUSED' | 'BLOCKED';
 
 export type InvoiceStatus = 'UNPAID' | 'PAID' | 'OVERDUE' | 'BLOCKED_OVERRIDE';
+export type InvoiceType = 'ADMISSION' | 'TUITION' | 'SUBJECT' | 'ACTIVITY';
+export type GradeBillingMode = 'GRADE' | 'SUBJECT';
+export type AdmissionStatus = 'PENDING_PAYMENT' | 'READY_FOR_LOGIN' | 'ACTIVE';
 
 export type LeaveType = 'CASUAL' | 'SICK' | 'LONG_SICK' | 'EARLY_OUT';
 

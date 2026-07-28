@@ -3,6 +3,7 @@ import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware } from '../middleware/auth';
 import { MockPushNotificationService } from '../utils/notifications';
+import { canAccessBranch, hasBranchPermission } from '../utils/access-control';
 
 const router = Router();
 
@@ -19,6 +20,9 @@ router.post(
         error: 'Missing required parameters: classroomId, itemsCondition, actionRequired, branchId.',
       });
     }
+    if (!hasBranchPermission(req.user!, 'manage_resource_tasks', branchId)) {
+      return res.status(403).json({ error: 'You cannot manage resources for this branch.' });
+    }
 
     try {
       const defaultAssignee = await prisma.userRole.findFirst({
@@ -29,9 +33,7 @@ router.post(
         return res.status(422).json({ error: 'No Janitor is assigned to this branch. Assign one before logging maintenance work.' });
       }
       const assignedStaffId = defaultAssignee.userId;
-      let resourceLog: any = null;
-      try {
-        resourceLog = await prisma.resourceLog.create({
+      const resourceLog = await prisma.resourceLog.create({
           data: {
             branchId,
             classroomId,
@@ -41,23 +43,10 @@ router.post(
             remarks,
           },
         });
-      } catch (dbErr) {
-        resourceLog = {
-          id: 'log-' + Math.floor(Math.random() * 1000),
-          branchId,
-          classroomId,
-          staffId,
-          itemsCondition,
-          actionRequired,
-          remarks,
-          createdAt: new Date(),
-        };
-      }
 
       let maintenanceTask: any = null;
       if (actionRequired) {
-        try {
-          maintenanceTask = await prisma.maintenanceTask.create({
+        maintenanceTask = await prisma.maintenanceTask.create({
             data: {
               branchId,
               description: `Issues logged by staff: ${remarks || 'None specified'}. Condition: ${JSON.stringify(itemsCondition)}`,
@@ -65,16 +54,6 @@ router.post(
               status: 'PENDING',
             },
           });
-        } catch (dbErr) {
-          maintenanceTask = {
-            id: 'task-' + Math.floor(Math.random() * 1000),
-            branchId,
-            description: `Issues logged by staff: ${remarks || 'None'}.`,
-          assignedStaffId,
-            status: 'PENDING',
-            createdAt: new Date(),
-          };
-        }
 
         await MockPushNotificationService.sendPush(
           assignedStaffId,
@@ -101,15 +80,13 @@ router.get(
   async (req: TenantRequest, res: Response) => {
     const branchId = req.query.branchId as string | undefined;
     if (!branchId) return res.status(400).json({ error: 'branchId is required.' });
+    if (!canAccessBranch(req.user!, branchId) && !hasBranchPermission(req.user!, 'view_tasks', branchId)) {
+      return res.status(403).json({ error: 'You cannot view tasks for this branch.' });
+    }
     try {
-      let tasks: any[] = [];
-      try {
-        tasks = await prisma.maintenanceTask.findMany({
+      const tasks = await prisma.maintenanceTask.findMany({
           where: { branchId },
         });
-      } catch (dbErr) {
-        tasks = [];
-      }
       return res.status(200).json({ tasks });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to retrieve tasks.' });
@@ -125,17 +102,21 @@ router.post(
     const { taskId } = req.params;
 
     try {
-      try {
-        await prisma.maintenanceTask.update({
+      const task = await prisma.maintenanceTask.findFirst({
+        where: { id: taskId, branch: { tenantId: req.tenantId! } },
+      });
+      if (!task) return res.status(404).json({ error: 'Maintenance task not found.' });
+      const ownsTask = task.assignedStaffId === req.user!.id;
+      if (!ownsTask && !hasBranchPermission(req.user!, 'manage_resource_tasks', task.branchId)) {
+        return res.status(403).json({ error: 'You cannot complete this maintenance task.' });
+      }
+      await prisma.maintenanceTask.update({
           where: { id: taskId },
           data: {
             status: 'COMPLETED',
             completionTimestamp: new Date(),
           },
         });
-      } catch (dbErr) {
-        // simulation fallback
-      }
 
       return res.status(200).json({
         message: 'Maintenance task successfully resolved.',
