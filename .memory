@@ -190,32 +190,5 @@ Known non-blocking warnings:
 
 ## Current uncommitted work
 
-- `.gitignore`
-- `.memory`
-- `apps/web/Dockerfile`
-- `services/api/Dockerfile`
-- `services/api/package.json`
-- `services/api/prisma/migrations/20260728170000_add_better_auth_core/migration.sql`
-- `services/api/prisma/migrations/20260728230000_remove_social_media/migration.sql`
-- `services/api/prisma/schema.prisma`
-- `services/api/prisma/seed.ts`
-- `services/api/src/integration/tenant-admin.integration.test.ts`
-- `services/api/src/routes/courses.ts`
-- `services/api/src/routes/academic-events.ts`
-- `services/api/src/routes/attendance.ts`
-- `services/api/src/routes/finances.ts`
-- `services/api/src/routes/hr.ts`
-- `services/api/src/routes/leaves.ts`
-- `services/api/src/routes/resources.ts`
-- `services/api/src/routes/onboarding.ts`
-- `services/api/src/server.ts`
-- `services/api/src/utils/auth.ts`
-- `services/api/src/utils/roles.ts`
-- `services/api/src/utils/nepali.ts`
-- `apps/web/src/components/patterns/dashboardNavigation.ts`
-- `packages/types/src/index.ts`
-- `compose.yml`
-- `.env.docker.example`
-- `services/api/.env.example`
 
-These changes have been tested but have not yet been committed or pushed.
+These changes have been tested and have  been committed  and pushed.
