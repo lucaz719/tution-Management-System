@@ -212,7 +212,7 @@ export function TenantAdminDashboard() {
                   tabIndex={0}
                   onClick={() => navigate('/tenant/branches')}
                   onKeyDown={(e) => { if (e.key === 'Enter') navigate('/tenant/branches'); }}
-                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '13px 15px', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--color-bg)', cursor: 'pointer' }}
+                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '12px 14px', borderRadius: '10px', background: 'rgba(248, 250, 252, 0.6)', cursor: 'pointer', transition: 'all 0.15s ease' }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
                     <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'color-mix(in srgb, var(--color-primary) 10%, transparent)', color: 'var(--color-primary)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
@@ -259,21 +259,21 @@ export function TenantAdminDashboard() {
             </div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '14px' }}>
-            <div style={{ padding: '18px', borderRadius: '12px', background: 'rgba(0, 171, 102, 0.08)', border: '1px solid rgba(0, 171, 102, 0.18)' }}>
+            <div style={{ padding: '16px 18px', borderRadius: '12px', background: 'rgba(0, 171, 102, 0.06)' }}>
               <p style={{ color: 'rgba(44, 62, 80, 0.7)', fontSize: '12px', fontWeight: 700 }}>COLLECTED REVENUE</p>
               <p style={{ marginTop: '8px', fontFamily: 'var(--font-display)', fontSize: '24px', fontWeight: 600, color: 'var(--color-success)' }}>
                 NPR {(pl?.revenue ?? 0).toLocaleString()}
               </p>
               <p style={{ marginTop: '6px', color: 'rgba(44, 62, 80, 0.62)', fontSize: '11px' }}>Paid tuition invoices</p>
             </div>
-            <div style={{ padding: '18px', borderRadius: '12px', background: 'rgba(214, 69, 69, 0.08)', border: '1px solid rgba(214, 69, 69, 0.18)' }}>
+            <div style={{ padding: '16px 18px', borderRadius: '12px', background: 'rgba(239, 68, 68, 0.06)' }}>
               <p style={{ color: 'rgba(44, 62, 80, 0.7)', fontSize: '12px', fontWeight: 700 }}>OPERATING COSTS</p>
               <p style={{ marginTop: '8px', fontFamily: 'var(--font-display)', fontSize: '24px', fontWeight: 600, color: 'var(--color-error)' }}>
                 NPR {(pl?.operatingCosts ?? 0).toLocaleString()}
               </p>
               <p style={{ marginTop: '6px', color: 'rgba(44, 62, 80, 0.62)', fontSize: '11px' }}>Expenses + payroll + petty cash</p>
             </div>
-            <div style={{ padding: '18px', borderRadius: '12px', background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-light) 100%)', color: '#FFFFFF' }}>
+            <div style={{ padding: '16px 18px', borderRadius: '12px', background: 'linear-gradient(135deg, #0F172A 0%, var(--color-primary-light) 100%)', color: '#FFFFFF' }}>
               <p style={{ opacity: 0.78, fontSize: '12px', fontWeight: 700 }}>NET MARGIN</p>
               <p style={{ marginTop: '8px', fontFamily: 'var(--font-display)', fontSize: '24px', fontWeight: 600 }}>
                 NPR {(pl?.netMargin ?? 0).toLocaleString()}
@@ -292,7 +292,7 @@ export function TenantAdminDashboard() {
                 type="number"
                 value={vatRate}
                 onChange={(event) => setVatRate(Number(event.target.value))}
-                style={{ padding: '12px 14px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.14)', background: '#FFFFFF', color: 'var(--color-text)', fontFamily: 'var(--font-ui)' }}
+                style={{ padding: '10px 14px', borderRadius: '10px', border: '1px solid #E2E8F0', background: '#F8FAFC', color: 'var(--color-text)', fontFamily: 'var(--font-ui)', fontSize: '14px' }}
               />
               <p style={{ color: 'rgba(44, 62, 80, 0.62)', fontSize: '11px' }}>Required for Nepalese VAT compliance.</p>
             </div>
@@ -302,7 +302,7 @@ export function TenantAdminDashboard() {
                 type="number"
                 value={gracePeriod}
                 onChange={(event) => setGracePeriod(Number(event.target.value))}
-                style={{ padding: '12px 14px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.14)', background: '#FFFFFF', color: 'var(--color-text)', fontFamily: 'var(--font-ui)' }}
+                style={{ padding: '10px 14px', borderRadius: '10px', border: '1px solid #E2E8F0', background: '#F8FAFC', color: 'var(--color-text)', fontFamily: 'var(--font-ui)', fontSize: '14px' }}
               />
               <p style={{ color: 'rgba(44, 62, 80, 0.62)', fontSize: '11px' }}>Late attendance buffer before automatic mark out.</p>
             </div>
@@ -312,7 +312,7 @@ export function TenantAdminDashboard() {
                 type="number"
                 value={pettyCashCap}
                 onChange={(event) => setPettyCashCap(Number(event.target.value))}
-                style={{ padding: '12px 14px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.14)', background: '#FFFFFF', color: 'var(--color-text)', fontFamily: 'var(--font-ui)' }}
+                style={{ padding: '10px 14px', borderRadius: '10px', border: '1px solid #E2E8F0', background: '#F8FAFC', color: 'var(--color-text)', fontFamily: 'var(--font-ui)', fontSize: '14px' }}
               />
               <p style={{ color: 'rgba(44, 62, 80, 0.62)', fontSize: '11px' }}>Resets automatically on the first day of each month.</p>
             </div>

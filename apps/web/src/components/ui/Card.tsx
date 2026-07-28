@@ -11,14 +11,14 @@ export function Card({ hoverable = true, className, children, ...props }: CardPr
       data-slot="tms-card"
       className={cn('tms-panel', className)}
       style={{
-        background: 'var(--bg-card)',
-        backdropFilter: 'blur(16px)',
-        WebkitBackdropFilter: 'blur(16px)',
-        border: '1px solid var(--border-border)',
+        background: 'var(--panel-bg)',
+        backdropFilter: 'blur(20px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+        border: '1px solid var(--border)',
         boxShadow: 'var(--shadow-card)',
-        borderRadius: '14px',
+        borderRadius: '16px',
         padding: '20px',
-        transition: 'transform var(--duration-fast) var(--ease-default), box-shadow var(--duration-fast)',
+        transition: 'all 0.25s var(--ease-silk)',
         cursor: hoverable ? 'pointer' : 'default',
         ...props.style
       }}

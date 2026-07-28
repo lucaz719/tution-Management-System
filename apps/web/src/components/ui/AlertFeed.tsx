@@ -43,14 +43,12 @@ function AlertRow({ item, onSelect }: { item: AlertFeedItem; onSelect?: (href: s
         padding: '14px 16px',
         borderRadius: '12px',
         borderLeft: `4px solid ${borderColorByVariant[item.tagVariant]}`,
-        background: 'var(--color-bg)',
-        borderTop: '1px solid var(--border)',
-        borderRight: '1px solid var(--border)',
-        borderBottom: '1px solid var(--border)',
+        background: 'rgba(248, 250, 252, 0.7)',
+        border: 'none',
+        borderLeft: `4px solid ${borderColorByVariant[item.tagVariant]}`,
         cursor: clickable ? 'pointer' : 'default',
         transform: clickable && hovered ? 'translateX(3px)' : 'translateX(0)',
-        boxShadow: clickable && hovered ? 'var(--shadow-card)' : 'none',
-        transition: 'transform 160ms var(--ease-silk), box-shadow 160ms var(--ease-silk)',
+        transition: 'all 160ms var(--ease-silk)',
       }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', minWidth: 0 }}>

@@ -73,7 +73,7 @@ export function KPICard({
       role={clickable ? 'button' : undefined}
       tabIndex={clickable ? 0 : undefined}
       onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick?.(); } } : undefined}
-      style={{ padding: '18px', minHeight: '112px', background: 'var(--color-bg)', boxShadow: 'var(--shadow-card)' }}
+      style={{ padding: '18px', minHeight: '112px' }}
     >
       {loading ? (
         <SkeletonCard rows={3} height={16} />

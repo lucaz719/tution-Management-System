@@ -6,12 +6,12 @@
   --color-accent-hover: #ffcb63;
   --color-bg: #ffffff;
   --color-surface: #f5f7fa;
-  --color-text: #1b1f3b;
+  --color-text: #0f172a;
   --color-error: #e63946;
   --color-success: #00ab66;
   --color-warning: #e08e00;
-  --font-display: 'Fraunces', serif;
-  --font-ui: 'Roboto', sans-serif;
+  --font-display: 'Plus Jakarta Sans', 'Inter', sans-serif;
+  --font-ui: 'Plus Jakarta Sans', 'Inter', sans-serif;
   --radius-sm: 7px;
   --radius-md: 12px;
   --radius-lg: 18px;
