@@ -28,6 +28,9 @@ jobs:
       - name: Web lint
         run: npm run lint --workspace=web
 
+      - name: Shared types build
+        run: npm run build --workspace=@tms/types
+
       - name: Web build
         run: npm run build --workspace=web
 
@@ -35,6 +38,8 @@ jobs:
         run: npm run build --workspace=@tms/api
 
       - name: Prisma schema validation
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tms?schema=public
         run: npx prisma validate --schema services/api/prisma/schema.prisma
 
       - name: Authorization scope tests
