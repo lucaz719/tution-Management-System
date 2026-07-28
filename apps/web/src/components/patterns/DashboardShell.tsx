@@ -59,6 +59,15 @@ export function DashboardShell({ role, children }: DashboardShellProps) {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isCompactViewport, setIsCompactViewport] = useState(() => window.innerWidth < 1280);
   const [lastUpdated, setLastUpdated] = useState(Date.now());
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    return (localStorage.getItem('tms_theme') as 'light' | 'dark') || 'light';
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    document.documentElement.style.colorScheme = theme;
+    localStorage.setItem('tms_theme', theme);
+  }, [theme]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -285,7 +294,7 @@ export function DashboardShell({ role, children }: DashboardShellProps) {
               height: '44px',
               borderRadius: '14px',
               border: '1px solid rgba(21, 96, 189, 0.12)',
-              background: '#FFFFFF',
+            background: 'var(--bg-card)',
               color: 'var(--color-primary)',
               boxShadow: 'var(--shadow-card)',
               display: 'grid',
@@ -338,7 +347,7 @@ export function DashboardShell({ role, children }: DashboardShellProps) {
             position: 'sticky',
             top: 0,
             zIndex: 10,
-            background: 'rgba(245, 247, 250, 0.92)',
+            background: 'color-mix(in srgb, var(--color-surface) 92%, transparent)',
             backdropFilter: 'blur(12px)',
             borderBottom: '1px solid rgba(21, 96, 189, 0.08)',
             padding: isCompactViewport ? '18px 24px 18px 76px' : '22px 28px',
@@ -347,7 +356,7 @@ export function DashboardShell({ role, children }: DashboardShellProps) {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
             <div>
               <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '22px', fontWeight: 600, color: 'var(--color-text)' }}>{pageTitle}</h1>
-              <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px', fontWeight: 500 }}>
+              <p style={{ marginTop: '4px', color: 'var(--text-muted)', fontSize: '13px', fontWeight: 500 }}>
                 {roleLabel} workspace
               </p>
             </div>
@@ -356,7 +365,28 @@ export function DashboardShell({ role, children }: DashboardShellProps) {
                 <div style={{ color: 'var(--color-primary-light)', fontSize: '12px', fontWeight: 700 }}>{updatedLabel}</div>
                 <div style={{ color: 'rgba(44, 62, 80, 0.62)', fontSize: '11px', fontWeight: 600 }}>Auto-refresh every 5 min</div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', borderRadius: '999px', background: '#FFFFFF', boxShadow: '0 8px 20px -18px rgba(21, 96, 189, 0.8)' }}>
+              <button
+                type="button"
+                onClick={() => setTheme((current) => (current === 'light' ? 'dark' : 'light'))}
+                aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
+                title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
+                style={{
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '50%',
+                  border: '1px solid var(--border)',
+                  background: 'var(--bg-card)',
+                  color: 'var(--color-primary)',
+                  display: 'grid',
+                  placeItems: 'center',
+                  cursor: 'pointer',
+                }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>
+                  {theme === 'light' ? 'dark_mode' : 'light_mode'}
+                </span>
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', borderRadius: '999px', background: 'var(--bg-card)', boxShadow: '0 8px 20px -18px rgba(21, 96, 189, 0.8)' }}>
                 <div
                   style={{
                     width: '38px',
@@ -373,7 +403,7 @@ export function DashboardShell({ role, children }: DashboardShellProps) {
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ color: 'var(--color-text)', fontSize: '13px', fontWeight: 700, whiteSpace: 'nowrap' }}>{userName}</div>
-                  <div style={{ color: 'rgba(44, 62, 80, 0.62)', fontSize: '11px', fontWeight: 600 }}>{roleLabel}</div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '11px', fontWeight: 600 }}>{roleLabel}</div>
                 </div>
                 <button
                   type="button"
