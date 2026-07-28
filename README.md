@@ -254,5 +254,6 @@ Production requirements:
 - [Authentication and authorization handoff](documents/AUTH_AND_AUTHORIZATION_HANDOFF.md)
 - [Authentication security audit](documents/audit-auth-security.md)
 - [Web/backend audit](documents/audit-web-backend-codebase.md)
+- and kindly read .memory folder before development and update afterward
 
 The handoff document is the operational source of truth for continuing authentication, authorization, testing, and deployment work.
