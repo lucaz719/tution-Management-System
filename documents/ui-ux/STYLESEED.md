@@ -1,5 +1,7 @@
 # StyleSeed — Design Lock
+
 <!-- Locked design decisions. The agent re-reads this every prompt and must obey it. -->
+
 - App domain:        SaaS Multi-tenant Tuition Management Dashboard
 - Skin:              trust-corporate
 - Primary brand:     #1560BD (Sanskardip brand blue — sidebar, headings, gradients)
