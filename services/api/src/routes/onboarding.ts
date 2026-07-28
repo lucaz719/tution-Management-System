@@ -1,13 +1,26 @@
-import { Router, Response } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import prisma from '../utils/db';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 
 const router = Router();
 
+// Tenant provisioning is a development operator tool only. Production runs
+// one institution and must not expose platform/white-label administration.
+function platformAdminOnly(_req: TenantRequest, res: Response, next: NextFunction) {
+  if (process.env.PLATFORM_ADMIN_ENABLED !== 'true') {
+    return res.status(404).json({ error: 'Platform administration is disabled in this deployment.' });
+  }
+  return next();
+}
+
 // 1. Public endpoint to submit onboarding request
 router.post('/request', async (req: TenantRequest, res: Response) => {
+  if (process.env.PLATFORM_ADMIN_ENABLED !== 'true') {
+    return res.status(404).json({ error: 'Institution onboarding is disabled in this deployment.' });
+  }
   const { name, email, phone, panNumber, remarks } = req.body;
 
   if (!name || !email || !phone || !panNumber) {
@@ -40,6 +53,7 @@ router.post('/request', async (req: TenantRequest, res: Response) => {
 // 2. Super Admin only: List onboarding requests
 router.get(
   '/requests',
+  platformAdminOnly,
   authMiddleware,
   hasPermission('super_admin_manage_tenants'),
   async (req: TenantRequest, res: Response) => {
@@ -57,27 +71,12 @@ router.get(
 // 3. Super Admin only: Approve onboarding request & provision tenant structures
 router.post(
   '/approve/:id',
+  platformAdminOnly,
   authMiddleware,
   hasPermission('super_admin_manage_tenants'),
   async (req: TenantRequest, res: Response) => {
     const { id } = req.params;
     const { defaultBranchName, branchAddress, latitude, longitude } = req.body;
-
-    // White-label license enforcement: when WHITE_LABEL_TENANT_LIMIT is set,
-    // refuse to provision beyond that many client tenants. Internal tenants
-    // (platform + demo, identified by reserved PANs) are not counted.
-    const RESERVED_PANS = ['000000000', '111111111'];
-    const tenantLimit = Number(process.env.WHITE_LABEL_TENANT_LIMIT);
-    if (Number.isFinite(tenantLimit) && tenantLimit > 0) {
-      const clientTenantCount = await prisma.tenant.count({
-        where: { panNumber: { notIn: RESERVED_PANS } },
-      });
-      if (clientTenantCount >= tenantLimit) {
-        return res.status(403).json({
-          error: `White-label license limit reached (${tenantLimit} client tenant${tenantLimit === 1 ? '' : 's'}). This deployment is licensed exclusively; additional institutions cannot be provisioned.`,
-        });
-      }
-    }
 
     let onboardingRequest: any = null;
     try {
@@ -133,7 +132,7 @@ router.post(
       });
 
       // Generate random temporary password
-      const tempPassword = 'TMSWelcome' + Math.floor(1000 + Math.random() * 9000) + '!';
+      const tempPassword = `Tms!${crypto.randomBytes(12).toString('base64url')}A9`;
       const passwordHash = await bcrypt.hash(tempPassword, 10);
 
       // Create primary Tenant Admin User
@@ -141,11 +140,21 @@ router.post(
         data: {
           tenantId: tenant.id,
           email: onboardingRequest.email,
+          name: onboardingRequest.name,
           phone: onboardingRequest.phone,
           firstName: onboardingRequest.name.split(' ')[0],
           lastName: onboardingRequest.name.split(' ')[1] || 'Administrator',
           passwordHash,
           status: 'ACTIVE',
+        },
+      });
+
+      await prisma.account.create({
+        data: {
+          accountId: user.id,
+          providerId: 'credential',
+          userId: user.id,
+          password: passwordHash,
         },
       });
 
@@ -188,6 +197,7 @@ router.post(
 // 3b. Super Admin only: Reject onboarding request
 router.post(
   '/reject/:id',
+  platformAdminOnly,
   authMiddleware,
   hasPermission('super_admin_manage_tenants'),
   async (req: TenantRequest, res: Response) => {
@@ -219,6 +229,7 @@ router.post(
 // 3c. Super Admin only: List provisioned tenants with headline counts
 router.get(
   '/tenants',
+  platformAdminOnly,
   authMiddleware,
   hasPermission('super_admin_manage_tenants'),
   async (req: TenantRequest, res: Response) => {

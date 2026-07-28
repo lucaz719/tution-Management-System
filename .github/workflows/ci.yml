@@ -7,8 +7,8 @@ on:
     branches: [main, develop]
 
 jobs:
-  build-and-lint:
-    name: Build & Lint
+  validate:
+    name: Build, lint, schema, and authorization checks
     runs-on: ubuntu-latest
 
     steps:
@@ -25,8 +25,28 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: TypeScript build check
+      - name: Web lint
+        run: npm run lint --workspace=web
+
+      - name: Web build
         run: npm run build --workspace=web
+
+      - name: API build
+        run: npm run build --workspace=@tms/api
+
+      - name: Prisma schema validation
+        run: npx prisma validate --schema services/api/prisma/schema.prisma
+
+      - name: Authorization scope tests
+        run: npx ts-node services/api/src/utils/access-control.test.ts
+
+      - name: Secret and fixed-identifier scan
+        shell: bash
+        run: |
+          ! grep -RInE --exclude-dir=node_modules --exclude-dir=.git --exclude='test-*.ts' --exclude='smoke.js' \
+            -e 'TMSWelcome[0-9]' -e 'PinnacleAdmin' -e 'BaneshworAdmin' \
+            -e 'b-baneshwor-01' -e 'janitor-staff-user-300' \
+            apps services packages
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

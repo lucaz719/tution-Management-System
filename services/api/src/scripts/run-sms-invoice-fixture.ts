@@ -4,7 +4,8 @@ import prisma from '../utils/db';
 import { getBillingPeriod } from '../utils/nepali';
 import { getSmsSender } from '../utils/sms';
 
-const FIXTURE_PASSWORD_HASH = 'test-fixture-not-for-login';
+// Fixtures are inactive and must never be usable for authentication.
+const FIXTURE_PASSWORD_HASH = crypto.createHash('sha256').update(`fixture:${crypto.randomUUID()}`).digest('hex');
 const FIXTURE_DOMAIN = 'fixture.tms.local';
 
 function readFixturePhones(): string[] {
@@ -54,6 +55,7 @@ async function main(): Promise<void> {
       data: {
         tenantId: tenant.id,
         email: `sms-test-${runId}-teacher@${FIXTURE_DOMAIN}`,
+        name: 'SMS Test Teacher',
         passwordHash: FIXTURE_PASSWORD_HASH,
         firstName: 'SMS',
         lastName: 'Test Teacher',
@@ -94,6 +96,7 @@ async function main(): Promise<void> {
         data: {
           tenantId: tenant.id,
           email: `sms-test-${runId}-parent-${number}@${FIXTURE_DOMAIN}`,
+          name: `Test Parent ${number}`,
           passwordHash: FIXTURE_PASSWORD_HASH,
           firstName: 'Test',
           lastName: `Parent ${number}`,
@@ -107,6 +110,7 @@ async function main(): Promise<void> {
         data: {
           tenantId: tenant.id,
           email: `sms-test-${runId}-student-${number}@${FIXTURE_DOMAIN}`,
+          name: `Test Student ${number}`,
           passwordHash: FIXTURE_PASSWORD_HASH,
           firstName: 'Test',
           lastName: `Student ${number}`,

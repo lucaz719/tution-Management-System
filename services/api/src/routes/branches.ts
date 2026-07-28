@@ -6,7 +6,7 @@ import { authMiddleware, hasPermission } from '../middleware/auth';
 const router = Router();
 
 // All branch operations are tenant-scoped: the tenant comes from the caller's
-// JWT/X-Tenant-Id context, so one tenant can never see or touch another's branches.
+// verified session, so client-controlled tenant headers cannot cross boundaries.
 
 // List branches for the current tenant
 router.get('/', authMiddleware, async (req: TenantRequest, res: Response) => {

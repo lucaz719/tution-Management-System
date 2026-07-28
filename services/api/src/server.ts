@@ -32,8 +32,10 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3001;
 
 // Enable CORS and parsing of JSON payloads
-app.use(cors());
-app.use(express.json());
+app.use(cors({
+  origin: process.env.WEB_ORIGIN || 'http://localhost:5173',
+  credentials: true,
+}));
 
 // Health check endpoint (no tenant required)
 app.get('/api/health', (req: TenantRequest, res: Response) => {
@@ -47,20 +49,22 @@ app.get('/api/health', (req: TenantRequest, res: Response) => {
 // Serve static login UI without tenant isolation
 app.use('/login', staticRouter);
 
-// Mount Better Auth handler (bypassing tenant isolation middleware, except for legacy login)
-app.all('/api/auth/*', (req, res, next) => {
-  if (req.path === '/api/auth/login') {
-    return next();
-  }
-  return toNodeHandler(auth)(req, res);
-});
+// Better Auth must receive the request before express.json() so its body
+// parser and cookie/session handling remain intact.
+app.all('/api/auth/*', toNodeHandler(auth));
 
-// Global Tenant Isolation Middleware (Automatically extracts x-tenant-id or auth claims)
+app.use(express.json());
+
+// Global tenant middleware; authenticated scope comes from the verified session.
 app.use(tenantMiddleware);
 
 // Bind domain routers
 app.use('/api/auth', authRouter);
-app.use('/api/onboarding', onboardingRouter);
+// Tenant provisioning is a development operator surface only. It is not
+// mounted in the single-institution production deployment.
+if (process.env.PLATFORM_ADMIN_ENABLED === 'true') {
+  app.use('/api/onboarding', onboardingRouter);
+}
 app.use('/api/branches', branchesRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/teacher', teacherRouter);

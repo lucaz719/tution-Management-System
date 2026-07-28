@@ -3,8 +3,7 @@ import jwt from 'jsonwebtoken';
 import { TenantRequest } from './tenant';
 import { UserPayload } from '@tms/types';
 import { auth } from '../utils/auth';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'tms_default_secret_jwt_2026';
+import { JWT_SECRET } from '../utils/env';
 
 export async function authMiddleware(req: TenantRequest, res: Response, next: NextFunction) {
   const authHeader = req.headers['authorization'];
@@ -17,14 +16,18 @@ export async function authMiddleware(req: TenantRequest, res: Response, next: Ne
 
     if (session && session.user) {
       const user = session.user as any;
+      if (!user.tenantId) {
+        return res.status(403).json({ error: 'Authenticated account has no institution scope.' });
+      }
       req.user = {
         id: user.id,
         email: user.email,
         firstName: user.firstName || user.name?.split(' ')[0] || '',
         lastName: user.lastName || user.name?.split(' ')[1] || '',
-        tenantId: user.tenantId || req.tenantId || '',
+        tenantId: user.tenantId,
         roles: user.roles || [],
       };
+      req.tenantId = req.user.tenantId;
       return next();
     }
   } catch (err) {
@@ -41,6 +44,7 @@ export async function authMiddleware(req: TenantRequest, res: Response, next: Ne
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as UserPayload;
     req.user = decoded;
+    req.tenantId = decoded.tenantId;
     next();
   } catch (error) {
     return res.status(401).json({ error: 'Invalid or expired authentication token.' });
@@ -76,7 +80,7 @@ export function hasPermission(requiredPermission: string) {
       req.params.branchId ||
       req.body.branchId ||
       req.query.branchId ||
-      (req.headers['x-branch-id'] as string);
+      undefined;
 
     // Verify if the user has the required permission in a relevant branch context
     const hasAccess = user.roles.some(role => {

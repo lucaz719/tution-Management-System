@@ -238,45 +238,10 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ),
 
-            const SizedBox(height: 24),
-            const Divider(),
-            const SizedBox(height: 12),
-            Text(
-              'DEMO CREDENTIALS QUICK-FILL',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: kColorText.withOpacity(0.6),
-                    letterSpacing: 1.2,
-                  ),
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _buildQuickChip('Teacher', 'teacher@tms.edu.np', 'Teacher@123'),
-                _buildQuickChip('Student', 'student@tms.edu.np', 'Student@123'),
-                _buildQuickChip('Parent', 'parent@tms.edu.np', 'Parent@123'),
-                _buildQuickChip('Staff', 'staff@tms.edu.np', 'Staff@123'),
-                _buildQuickChip('Admin', 'branchadmin@tms.edu.np', 'Admin@123'),
-              ],
-            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildQuickChip(String label, String email, String password) {
-    return ActionChip(
-      avatar: const Icon(Icons.person_rounded, size: 16, color: kColorPrimary),
-      label: Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-      onPressed: () {
-        setState(() {
-          _emailController.text = email;
-          _passwordController.text = password;
-        });
-      },
-    );
-  }
 }

@@ -8,14 +8,13 @@ const prisma = new PrismaClient();
 // Reserved PAN for the internal platform tenant that hosts the Super Admin.
 const SYSTEM_TENANT_PAN = '000000000';
 
-function generatePassword(): string {
-  // Satisfies the UI password rules: length, upper, lower, digit, special.
-  return `Tms!${crypto.randomBytes(9).toString('hex')}A7`;
-}
-
 async function main() {
-  const adminEmail = (process.env.SEED_ADMIN_EMAIL ?? 'superadmin@tms.local').trim().toLowerCase();
+  if (process.env.PLATFORM_ADMIN_ENABLED === 'true') {
+  const adminEmail = (process.env.SEED_ADMIN_EMAIL ?? '').trim().toLowerCase();
   const envPassword = process.env.SEED_ADMIN_PASSWORD;
+  if (!adminEmail || !envPassword) {
+    throw new Error('SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD are required when PLATFORM_ADMIN_ENABLED=true.');
+  }
   // SEED_ADMIN_2FA=true/false toggles two-factor auth on the admin account.
   const twoFactorSetting =
     process.env.SEED_ADMIN_2FA === 'true' ? true : process.env.SEED_ADMIN_2FA === 'false' ? false : undefined;
@@ -47,13 +46,14 @@ async function main() {
   const existingAdmin = await prisma.user.findUnique({ where: { email: adminEmail } });
 
   let adminUserId: string;
-  let printedPassword: string | null = null;
-
+  let adminPasswordHash: string | null = null;
   if (existingAdmin) {
     adminUserId = existingAdmin.id;
+    adminPasswordHash = existingAdmin.passwordHash;
     const updates: { passwordHash?: string; status?: 'ACTIVE'; twoFactorEnabled?: boolean } = {};
     if (envPassword) {
       updates.passwordHash = await bcrypt.hash(envPassword, 10);
+      adminPasswordHash = updates.passwordHash;
       updates.status = 'ACTIVE';
     }
     if (twoFactorSetting !== undefined) {
@@ -71,19 +71,16 @@ async function main() {
       console.log(`[seed] Two-factor auth for ${adminEmail}: ${twoFactorSetting ? 'ENABLED' : 'DISABLED'}.`);
     }
   } else {
-    const password = envPassword ?? generatePassword();
-    if (!envPassword) {
-      printedPassword = password;
-    }
-
+    adminPasswordHash = await bcrypt.hash(envPassword, 10);
     const adminUser = await prisma.user.create({
       data: {
         tenantId: systemTenant.id,
         email: adminEmail,
+        name: 'System Administrator',
         firstName: 'System',
         lastName: 'Administrator',
         phone: '0000000000',
-        passwordHash: await bcrypt.hash(password, 10),
+        passwordHash: adminPasswordHash,
         status: 'ACTIVE',
         twoFactorEnabled: twoFactorSetting ?? false,
       },
@@ -104,24 +101,29 @@ async function main() {
     });
   }
 
+  if (adminPasswordHash) {
+    await prisma.account.upsert({
+      where: { providerId_accountId: { providerId: 'credential', accountId: adminUserId } },
+      update: { password: adminPasswordHash },
+      create: { accountId: adminUserId, providerId: 'credential', userId: adminUserId, password: adminPasswordHash },
+    });
+  }
+
   console.log('[seed] Bootstrap complete.');
   console.log(`[seed]   Tenant:  ${systemTenant.name} (${systemTenant.id})`);
   console.log(`[seed]   Account: ${adminEmail} (role: Super Admin)`);
-  if (printedPassword) {
-    console.log(`[seed]   Password (generated once, store it now): ${printedPassword}`);
   }
 
-  if (process.env.SEED_DEMO === 'true') {
+  if (process.env.NODE_ENV !== 'production' && process.env.SEED_DEMO === 'true') {
     await seedDemoTenant();
   }
 
-  await seedSanskardip();
 }
 
 // ---------------------------------------------------------------------------
 // Demo tenant: one user per role so every dashboard can be exercised locally.
-// Run with SEED_DEMO=true. Passwords are generated at runtime and printed —
-// re-running with SEED_DEMO=true rotates and reprints them.
+// Run with SEED_DEMO=true in a non-production environment. Passwords are
+// generated only for local fixtures and are never printed or returned.
 // ---------------------------------------------------------------------------
 
 const DEMO_TENANT_PAN = '111111111';
@@ -175,8 +177,6 @@ async function seedDemoTenant(): Promise<void> {
     });
   }
 
-  const credentials: Array<{ email: string; role: string; password: string }> = [];
-
   for (const spec of DEMO_USERS) {
     let role = await prisma.role.findFirst({ where: { tenantId: tenant.id, name: spec.roleName } });
     if (!role) {
@@ -185,8 +185,7 @@ async function seedDemoTenant(): Promise<void> {
       });
     }
 
-    const password = generatePassword();
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await bcrypt.hash(crypto.randomUUID(), 10);
 
     const user = await prisma.user.upsert({
       where: { email: spec.email },
@@ -194,12 +193,19 @@ async function seedDemoTenant(): Promise<void> {
       create: {
         tenantId: tenant.id,
         email: spec.email,
+        name: `${spec.firstName} ${spec.lastName}`,
         firstName: spec.firstName,
         lastName: spec.lastName,
         phone: '9800000000',
         passwordHash,
         status: 'ACTIVE',
       },
+    });
+
+    await prisma.account.upsert({
+      where: { providerId_accountId: { providerId: 'credential', accountId: user.id } },
+      update: { password: passwordHash },
+      create: { accountId: user.id, providerId: 'credential', userId: user.id, password: passwordHash },
     });
 
     const branchId = spec.branchScoped ? branch.id : null;
@@ -240,7 +246,6 @@ async function seedDemoTenant(): Promise<void> {
       }
     }
 
-    credentials.push({ email: spec.email, role: spec.roleName, password });
   }
 
   // Link the demo student to the demo parent.
@@ -259,165 +264,6 @@ async function seedDemoTenant(): Promise<void> {
 
   console.log('[seed] Demo tenant ready.');
   console.log(`[seed]   Tenant: ${tenant.name} (${tenant.id}) — branch: ${branch.name}`);
-  console.log('[seed]   Demo credentials (rotated on every SEED_DEMO run — store them now):');
-  for (const cred of credentials) {
-    console.log(`[seed]     ${cred.role.padEnd(12)} ${cred.email.padEnd(30)} ${cred.password}`);
-  }
-}
-
-async function seedSanskardip(): Promise<void> {
-  console.log('[seed] Seeding Sanskardip tenant and demo users...');
-  
-  const sanskardipTenant = await prisma.tenant.upsert({
-    where: { panNumber: '999999999' },
-    update: {},
-    create: {
-      name: 'Sanskardip',
-      panNumber: '999999999',
-      status: 'ACTIVE',
-    },
-  });
-
-  let damakBranch = await prisma.branch.findFirst({
-    where: { tenantId: sanskardipTenant.id, name: 'Damak' },
-  });
-  if (!damakBranch) {
-    damakBranch = await prisma.branch.create({
-      data: {
-        tenantId: sanskardipTenant.id,
-        name: 'Damak',
-        address: 'Damak, Jhapa, Nepal',
-        latitude: 26.6667,
-        longitude: 87.6833,
-        radiusMeters: 500,
-      },
-    });
-  }
-
-  // Create roles
-  let tenantAdminRole = await prisma.role.findFirst({
-    where: { tenantId: sanskardipTenant.id, name: 'Tenant Admin' },
-  });
-  if (!tenantAdminRole) {
-    tenantAdminRole = await prisma.role.create({
-      data: {
-        tenantId: sanskardipTenant.id,
-        name: 'Tenant Admin',
-        permissions: [
-          'manage_branches', 'manage_staff', 'manage_courses', 'manage_billing',
-          'view_reports', 'approve_petty_cash_l2', 'approve_social_media'
-        ],
-      },
-    });
-  }
-
-  let branchAdminRole = await prisma.role.findFirst({
-    where: { tenantId: sanskardipTenant.id, name: 'Branch Admin' },
-  });
-  if (!branchAdminRole) {
-    branchAdminRole = await prisma.role.create({
-      data: {
-        tenantId: sanskardipTenant.id,
-        name: 'Branch Admin',
-        permissions: [
-          'manage_staff', 'manage_courses', 'view_reports', 'approve_petty_cash_l1', 'approve_leave_l1'
-        ],
-      },
-    });
-  }
-
-  let teacherRole = await prisma.role.findFirst({
-    where: { tenantId: sanskardipTenant.id, name: 'Teacher' },
-  });
-  if (!teacherRole) {
-    teacherRole = await prisma.role.create({
-      data: {
-        tenantId: sanskardipTenant.id,
-        name: 'Teacher',
-        permissions: [
-          'mark_attendance', 'manage_homework', 'view_own_schedule', 'submit_lesson_update'
-        ],
-      },
-    });
-  }
-
-  // 1. Tenant Admin
-  const hash1 = await bcrypt.hash('TMSWelcome2413!', 10);
-  const u1 = await prisma.user.upsert({
-    where: { email: 'sanskardipoffice@gmail.com' },
-    update: { passwordHash: hash1, status: 'ACTIVE' },
-    create: {
-      tenantId: sanskardipTenant.id,
-      email: 'sanskardipoffice@gmail.com',
-      firstName: 'Sanskardip',
-      lastName: 'Office',
-      phone: '9800000010',
-      passwordHash: hash1,
-      status: 'ACTIVE',
-    },
-  });
-  const assign1 = await prisma.userRole.findFirst({
-    where: { userId: u1.id, roleId: tenantAdminRole.id },
-  });
-  if (!assign1) {
-    await prisma.userRole.create({
-      data: { userId: u1.id, roleId: tenantAdminRole.id, branchId: null },
-    });
-  }
-
-  // 2. Branch Manager
-  const hash2 = await bcrypt.hash('Tms!886be88a0537A9', 10);
-  const u2 = await prisma.user.upsert({
-    where: { email: 'ui.manager@sanskardip.local' },
-    update: { passwordHash: hash2, status: 'ACTIVE' },
-    create: {
-      tenantId: sanskardipTenant.id,
-      email: 'ui.manager@sanskardip.local',
-      firstName: 'Damak Branch',
-      lastName: 'Manager',
-      phone: '9800000011',
-      passwordHash: hash2,
-      status: 'ACTIVE',
-    },
-  });
-  const assign2 = await prisma.userRole.findFirst({
-    where: { userId: u2.id, roleId: branchAdminRole.id },
-  });
-  if (!assign2) {
-    await prisma.userRole.create({
-      data: { userId: u2.id, roleId: branchAdminRole.id, branchId: damakBranch.id },
-    });
-  }
-
-  // 3. Teacher
-  const hash3 = await bcrypt.hash('Tms!teacher2026A9', 10);
-  const u3 = await prisma.user.upsert({
-    where: { email: 'ui.teacher@sanskardip.local' },
-    update: { passwordHash: hash3, status: 'ACTIVE' },
-    create: {
-      tenantId: sanskardipTenant.id,
-      email: 'ui.teacher@sanskardip.local',
-      firstName: 'Damak',
-      lastName: 'Teacher',
-      phone: '9800000012',
-      passwordHash: hash3,
-      status: 'ACTIVE',
-    },
-  });
-  const assign3 = await prisma.userRole.findFirst({
-    where: { userId: u3.id, roleId: teacherRole.id },
-  });
-  if (!assign3) {
-    await prisma.userRole.create({
-      data: { userId: u3.id, roleId: teacherRole.id, branchId: damakBranch.id },
-    });
-  }
-
-  console.log('[seed] Sanskardip tenant ready.');
-  console.log('  Accounts:');
-  console.log('    Tenant Admin: sanskardipoffice@gmail.com / TMSWelcome2413!');
-  console.log('    Branch Manager: ui.manager@sanskardip.local / Tms!886be88a0537A9');
-  console.log('    Teacher: ui.teacher@sanskardip.local / Tms!teacher2026A9');
 }
 
 main()

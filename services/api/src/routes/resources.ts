@@ -21,6 +21,14 @@ router.post(
     }
 
     try {
+      const defaultAssignee = await prisma.userRole.findFirst({
+        where: { branchId, role: { name: 'Janitor' } },
+        select: { userId: true },
+      });
+      if (!defaultAssignee) {
+        return res.status(422).json({ error: 'No Janitor is assigned to this branch. Assign one before logging maintenance work.' });
+      }
+      const assignedStaffId = defaultAssignee.userId;
       let resourceLog: any = null;
       try {
         resourceLog = await prisma.resourceLog.create({
@@ -53,7 +61,7 @@ router.post(
             data: {
               branchId,
               description: `Issues logged by staff: ${remarks || 'None specified'}. Condition: ${JSON.stringify(itemsCondition)}`,
-              assignedStaffId: 'janitor-staff-user-300',
+              assignedStaffId,
               status: 'PENDING',
             },
           });
@@ -62,14 +70,14 @@ router.post(
             id: 'task-' + Math.floor(Math.random() * 1000),
             branchId,
             description: `Issues logged by staff: ${remarks || 'None'}.`,
-            assignedStaffId: 'janitor-staff-user-300',
+          assignedStaffId,
             status: 'PENDING',
             createdAt: new Date(),
           };
         }
 
         await MockPushNotificationService.sendPush(
-          'janitor-staff-user-300',
+          assignedStaffId,
           'New Maintenance Task Auto-Assigned',
           `Room ${classroomId} requires check. Reason: ${remarks}`
         );
@@ -91,22 +99,16 @@ router.get(
   '/tasks',
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
-    const branchId = req.headers['x-branch-id'] as string || req.query.branchId as string || 'b-baneshwor-01';
+    const branchId = req.query.branchId as string | undefined;
+    if (!branchId) return res.status(400).json({ error: 'branchId is required.' });
     try {
-      let tasks = [];
+      let tasks: any[] = [];
       try {
         tasks = await prisma.maintenanceTask.findMany({
           where: { branchId },
         });
       } catch (dbErr) {
-        tasks = [
-          {
-            id: 'task-999',
-            description: 'Fix white board alignment',
-            status: 'PENDING',
-            assignedStaffId: 'janitor-staff-user-300',
-          },
-        ];
+        tasks = [];
       }
       return res.status(200).json({ tasks });
     } catch (error: any) {

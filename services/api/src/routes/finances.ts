@@ -4,6 +4,7 @@ import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { MockSmsSender } from '../utils/notifications';
 import { getBillingPeriod } from '../utils/nepali';
+import { canApprovePettyCashL1, canReleasePettyCash, isTenantAdmin } from '../utils/access-control';
 
 const router = Router();
 
@@ -622,44 +623,28 @@ router.post(
   async (req: TenantRequest, res: Response) => {
     const { id } = req.params;
     const { remarks } = req.body;
-    const approverRole = req.user!.roles[0]?.roleName;
-
-    if (approverRole !== 'Branch Admin' && approverRole !== 'Tenant Admin') {
-      return res.status(403).json({ error: 'Only Branch Admins can perform L1 approval.' });
-    }
-
     try {
-      let pc: any = null;
-      try {
-        pc = await prisma.pettyCash.findUnique({ where: { id } });
-      } catch (dbErr) {
-        pc = {
-          id,
-          amount: 5000,
-          purpose: 'Office supplies',
-          status: 'PENDING',
-          approvalChain: [],
-        };
-      }
+      const pc = await prisma.pettyCash.findUnique({ where: { id } });
 
       if (!pc) return res.status(404).json({ error: 'Petty cash request not found.' });
+      if (!canApprovePettyCashL1(req.user!, pc)) {
+        return res.status(403).json({ error: 'Only the assigned Branch Admin can approve a pending petty-cash request at Level 1.' });
+      }
 
       const updatedChain = [...(pc.approvalChain as any[] || []), {
-        role: approverRole,
+        role: 'Branch Admin',
         action: 'APPROVED_L1',
         timestamp: new Date().toISOString(),
         comment: remarks || '',
       }];
 
-      try {
-        await prisma.pettyCash.update({
-          where: { id },
-          data: {
-            status: 'APPROVED_LEVEL1',
-            approvalChain: updatedChain,
-          },
-        });
-      } catch (dbErr) {}
+      await prisma.pettyCash.update({
+        where: { id },
+        data: {
+          status: 'APPROVED_LEVEL1',
+          approvalChain: updatedChain,
+        },
+      });
 
       return res.status(200).json({
         message: 'L1 approval completed.',
@@ -678,44 +663,28 @@ router.post(
   async (req: TenantRequest, res: Response) => {
     const { id } = req.params;
     const { remarks } = req.body;
-    const approverRole = req.user!.roles[0]?.roleName;
-
-    if (approverRole !== 'Tenant Admin') {
-      return res.status(403).json({ error: 'Only Tenant Admins can perform L2 approval.' });
-    }
-
     try {
-      let pc: any = null;
-      try {
-        pc = await prisma.pettyCash.findUnique({ where: { id } });
-      } catch (dbErr) {
-        pc = {
-          id,
-          amount: 5000,
-          purpose: 'Office supplies',
-          status: 'APPROVED_LEVEL1',
-          approvalChain: [],
-        };
-      }
+      const pc = await prisma.pettyCash.findUnique({ where: { id } });
 
       if (!pc) return res.status(404).json({ error: 'Petty cash request not found.' });
+      if (!canReleasePettyCash(req.user!, pc)) {
+        return res.status(403).json({ error: 'Only the Tenant Admin can release a Level-1-approved petty-cash request.' });
+      }
 
       const updatedChain = [...(pc.approvalChain as any[] || []), {
-        role: approverRole,
+        role: 'Tenant Admin',
         action: 'APPROVED_L2',
         timestamp: new Date().toISOString(),
         comment: remarks || '',
       }];
 
-      try {
-        await prisma.pettyCash.update({
-          where: { id },
-          data: {
-            status: 'RELEASED',
-            approvalChain: updatedChain,
-          },
-        });
-      } catch (dbErr) {}
+      await prisma.pettyCash.update({
+        where: { id },
+        data: {
+          status: 'RELEASED',
+          approvalChain: updatedChain,
+        },
+      });
 
       return res.status(200).json({
         message: 'L2 approval completed. Funds released.',
@@ -780,10 +749,8 @@ router.post(
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
     const { id } = req.params;
-    const approverRole = req.user!.roles[0]?.roleName;
-
-    if (approverRole !== 'Branch Admin' && approverRole !== 'Tenant Admin') {
-      return res.status(403).json({ error: 'Unauthorized to close petty cash.' });
+    if (!isTenantAdmin(req.user!)) {
+      return res.status(403).json({ error: 'Only the Tenant Admin can close petty cash after receipt verification.' });
     }
 
     try {

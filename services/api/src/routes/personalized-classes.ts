@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
+import { canAccessBranch } from '../utils/access-control';
 
 const router = Router();
 
@@ -9,7 +10,7 @@ const router = Router();
 router.post(
   '/',
   authMiddleware,
-  hasPermission('manage_branches'),
+  hasPermission('manage_personalized_classes'),
   async (req: TenantRequest, res: Response) => {
     const { branchId, name, courseId, schedule, feeStructure } = req.body;
 
@@ -17,6 +18,9 @@ router.post(
       return res.status(400).json({
         error: 'Missing required parameters: branchId, name, courseId, schedule, feeStructure.',
       });
+    }
+    if (!canAccessBranch(req.user!, branchId)) {
+      return res.status(403).json({ error: 'You may only create personalized classes for your assigned branch.' });
     }
 
     try {
@@ -54,7 +58,7 @@ router.post(
 router.post(
   '/enroll',
   authMiddleware,
-  hasPermission('manage_branches'),
+  hasPermission('manage_personalized_classes'),
   async (req: TenantRequest, res: Response) => {
     const { studentId, courseId, classId, admissionDate } = req.body;
 

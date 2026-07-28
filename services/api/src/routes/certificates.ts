@@ -3,6 +3,7 @@ import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { CertificateType } from '@tms/types';
+import { canAccessBranch } from '../utils/access-control';
 
 const router = Router();
 
@@ -10,7 +11,7 @@ const router = Router();
 router.post(
   '/templates',
   authMiddleware,
-  hasPermission('manage_certificates'),
+  hasPermission('issue_certificates'),
   async (req: TenantRequest, res: Response) => {
     const { name, type, layoutConfig } = req.body;
 
@@ -55,6 +56,9 @@ router.post(
 
     if (!studentId || !templateId || !branchId) {
       return res.status(400).json({ error: 'Missing required parameters: studentId, templateId, branchId.' });
+    }
+    if (!canAccessBranch(req.user!, branchId)) {
+      return res.status(403).json({ error: 'You may only issue certificates for your assigned branch.' });
     }
 
     // Generate unique verification ID

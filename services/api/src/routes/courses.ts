@@ -469,7 +469,7 @@ router.get(
         class: {
           id: classId,
           courseId: 'sim-course-101',
-          branchId: 'b-baneshwor-01',
+          branchId: null,
           name: 'Grade 12 Physics Core',
           schedule: [
             { day: 'Monday', startTime: '08:00', endTime: '09:30' },

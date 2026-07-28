@@ -102,7 +102,7 @@ router.get(
   authMiddleware,
   hasPermission('view_reports'),
   async (req: TenantRequest, res: Response) => {
-    const branchId = req.headers['x-branch-id'] as string || req.query.branchId as string;
+    const branchId = req.query.branchId as string | undefined;
 
     // Load or calculate composite staff performance scores
     // Source metrics weights: Attendance 40%, Class Update 30%, Student/Parent Feedback 20%, Leave Compliance 10%.

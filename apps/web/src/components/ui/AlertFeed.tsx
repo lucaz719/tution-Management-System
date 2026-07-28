@@ -45,7 +45,6 @@ function AlertRow({ item, onSelect }: { item: AlertFeedItem; onSelect?: (href: s
         borderLeft: `4px solid ${borderColorByVariant[item.tagVariant]}`,
         background: 'rgba(248, 250, 252, 0.7)',
         border: 'none',
-        borderLeft: `4px solid ${borderColorByVariant[item.tagVariant]}`,
         cursor: clickable ? 'pointer' : 'default',
         transform: clickable && hovered ? 'translateX(3px)' : 'translateX(0)',
         transition: 'all 160ms var(--ease-silk)',

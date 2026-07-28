@@ -1,5 +1,5 @@
 // API Client Service for Tuition Management System (TMS)
-// Scoped contextually by JWT and X-Tenant-Id for row-level isolation
+// Tenant scope is authoritative from the signed session on the API.
 
 const API_BASE_URL = 'http://localhost:3001/api';
 
@@ -36,20 +36,17 @@ export function setTenantId(tenantId: string) {
 // Generic Request wrapper
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getAuthToken();
-  const tenantId = getTenantId();
 
   const headers = new Headers(options.headers || {});
   headers.set('Content-Type', 'application/json');
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
-  if (tenantId) {
-    headers.set('X-Tenant-Id', tenantId);
-  }
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers,
+    credentials: 'include',
   });
 
   if (!response.ok) {

@@ -163,6 +163,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (res?.data) {
           const { data: sessionData } = await authClient.getSession();
           if (sessionData && sessionData.user) {
+            const sessionRoles = Array.isArray((sessionData.user as any).roles)
+              ? (sessionData.user as any).roles
+              : [];
+            const rolePriority = ['Tenant Admin', 'Branch Admin', 'Teacher', 'Accountant', 'Receptionist', 'Janitor', 'Student', 'Parent'];
+            const roleName = rolePriority.find((candidate) =>
+              sessionRoles.some((entry: any) => entry?.roleName === candidate)
+            ) ?? sessionRoles[0]?.roleName ?? 'Teacher';
             session = {
               token: sessionData.session.token,
               user: {
@@ -170,7 +177,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 email: sessionData.user.email,
                 firstName: sessionData.user.name?.split(' ')[0] || '',
                 lastName: sessionData.user.name?.split(' ')[1] || '',
-                role: (sessionData.user as any).role || 'TEACHER',
+                role: roleName.toUpperCase().replace(/\s+/g, '_'),
                 requiresTwoFactor: false,
                 firstLogin: false,
               },

@@ -77,11 +77,21 @@ async function provisionUser(params: {
       data: {
         tenantId: params.tenantId,
         email: params.email,
+        name: `${params.firstName} ${params.lastName}`.trim(),
         firstName: params.firstName,
         lastName: params.lastName,
         phone: params.phone || '',
         passwordHash,
         status: 'ACTIVE',
+      },
+    });
+
+    await tx.account.create({
+      data: {
+        accountId: created.id,
+        providerId: 'credential',
+        userId: created.id,
+        password: passwordHash,
       },
     });
 

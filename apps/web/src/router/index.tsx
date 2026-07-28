@@ -20,8 +20,6 @@ const TwoFactorPage = lazy(() => import('../pages/auth/TwoFactorPage').then((mod
 const TenantSetupWizard = lazy(() => import('../pages/setup/TenantSetupWizard').then((module) => ({ default: module.TenantSetupWizard })));
 const BranchSetupWizard = lazy(() => import('../pages/setup/BranchSetupWizard').then((module) => ({ default: module.BranchSetupWizard })));
 
-const SuperAdminDashboard = lazy(() => import('../pages/SuperAdminDashboard').then((module) => ({ default: module.SuperAdminDashboard })));
-const SuperAdminTenants = lazy(() => import('../pages/SuperAdminTenants').then((module) => ({ default: module.SuperAdminTenants })));
 const TenantAdminDashboard = lazy(() => import('../pages/TenantAdminDashboard').then((module) => ({ default: module.TenantAdminDashboard })));
 const TenantBranches = lazy(() => import('../pages/TenantBranches').then((module) => ({ default: module.TenantBranches })));
 const PeopleDirectory = lazy(() => import('../pages/PeopleDirectory').then((module) => ({ default: module.PeopleDirectory })));
@@ -217,15 +215,6 @@ const router = createBrowserRouter([
         children: [
           { path: '/setup/tenant', element: <Suspense fallback={<FullPageSpinner />}><TenantSetupWizard /></Suspense> },
           { path: '/setup/branch', element: <Suspense fallback={<FullPageSpinner />}><BranchSetupWizard /></Suspense> },
-
-          {
-            element: <RequireRole allowedRoles={['SUPER_ADMIN']} />,
-            children: [
-              { path: '/super-admin/dashboard', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard /></Suspense> },
-              { path: '/super-admin/tenants', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminTenants /></Suspense> },
-              { path: '/super-admin/tenants/:id', element: <PlaceholderPage title="Tenant Detail" /> },
-            ],
-          },
 
           {
             element: <RequireRole allowedRoles={['TENANT_ADMIN']} />,

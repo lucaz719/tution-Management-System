@@ -989,7 +989,7 @@ async function runTests() {
         },
         body: JSON.stringify({
           platform: 'FACEBOOK',
-          accessToken: 'fb_live_app_secret_abc123xyz',
+          accessToken: process.env.TEST_SOCIAL_ACCESS_TOKEN || `test-token-${Date.now()}`,
         }),
       });
       const data12a = await res12a.json();

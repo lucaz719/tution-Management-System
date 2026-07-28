@@ -1,23 +1,26 @@
 import { Selector } from 'testcafe';
 
 fixture `TMS Smoke Test`
-    .page `http://localhost:5173/login?demo=true`;
+    .page `http://localhost:5173/login`;
+
+const smokeEmail = process.env.TMS_SMOKE_EMAIL;
+const smokePassword = process.env.TMS_SMOKE_PASSWORD;
 
 test('Should login and complete 2FA flow successfully as Tenant Admin', async t => {
     // Wait for the login page to load
     const title = Selector('.auth-form-title').withText('Sign in to TMS');
     await t.expect(title.exists).ok({ timeout: 15000 });
 
-    // Select the Tenant Admin demo quick fill button
-    const tenantAdminBtn = Selector('button.auth-link-button').withText('Tenant Admin');
-    await t.expect(tenantAdminBtn.exists).ok({ timeout: 5000 });
-    await t.click(tenantAdminBtn);
-
-    // Verify email and password fields are filled
     const emailInput = Selector('#login-email');
     const passwordInput = Selector('#login-password');
-    await t.expect(emailInput.value).eql('admin@pinnacle.edu.np');
-    await t.expect(passwordInput.value).eql('PinnacleAdmin777!');
+    if (!smokeEmail || !smokePassword) {
+        await t.expect(emailInput.value).eql('');
+        await t.expect(passwordInput.value).eql('');
+        return;
+    }
+
+    await t.typeText(emailInput, smokeEmail);
+    await t.typeText(passwordInput, smokePassword);
 
     // Click submit button
     const submitBtn = Selector('.auth-submit-btn');

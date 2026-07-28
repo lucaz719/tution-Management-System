@@ -3,6 +3,7 @@ import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { EventType } from '@tms/types';
+import { canAccessBranch, isTenantAdmin } from '../utils/access-control';
 
 const router = Router();
 
@@ -10,7 +11,7 @@ const router = Router();
 router.post(
   '/',
   authMiddleware,
-  hasPermission('manage_calendar'),
+  hasPermission('manage_branch_calendar'),
   async (req: TenantRequest, res: Response) => {
     const { title, description, eventType, startDate, endDate, branchId } = req.body;
 
@@ -18,6 +19,9 @@ router.post(
       return res.status(400).json({
         error: 'Missing required parameters: title, eventType, startDate, endDate.',
       });
+    }
+    if (!isTenantAdmin(req.user!) && (!branchId || !canAccessBranch(req.user!, branchId))) {
+      return res.status(403).json({ error: 'Branch Admins may only create events for their assigned branch.' });
     }
 
     try {
@@ -58,7 +62,7 @@ router.get(
   '/',
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
-    const branchId = req.headers['x-branch-id'] as string || req.query.branchId as string;
+    const branchId = req.query.branchId as string | undefined;
 
     try {
       const events = await prisma.academicEvent.findMany({
@@ -87,7 +91,7 @@ router.get(
           {
             id: 'sim-event-102',
             tenantId: req.tenantId!,
-            branchId: branchId || 'b-baneshwor-01',
+            branchId: branchId || null,
             title: 'Mid-Term Physics Exam',
             description: 'Mandatory exams in physical test centers.',
             eventType: 'EXAM' as EventType,

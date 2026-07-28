@@ -1,4 +1,4 @@
-export type DashboardRole = 'super-admin' | 'tenant-admin' | 'branch-admin' | 'teacher' | 'student' | 'parent';
+export type DashboardRole = 'tenant-admin' | 'branch-admin' | 'teacher' | 'student' | 'parent';
 
 export interface DashboardNavItem {
   label: string;
@@ -9,7 +9,6 @@ export interface DashboardNavItem {
 }
 
 const ROLE_LABELS: Record<DashboardRole, string> = {
-  'super-admin': 'Super Admin',
   'tenant-admin': 'Tenant Admin',
   'branch-admin': 'Branch Admin',
   teacher: 'Teacher',
@@ -18,10 +17,6 @@ const ROLE_LABELS: Record<DashboardRole, string> = {
 };
 
 export const DASHBOARD_NAVIGATION: Record<DashboardRole, DashboardNavItem[]> = {
-  'super-admin': [
-    { section: 'Platform', label: 'Dashboard', icon: 'space_dashboard', path: '/super-admin/dashboard' },
-    { section: 'Platform', label: 'Tenants', icon: 'domain', path: '/super-admin/tenants' },
-  ],
   'tenant-admin': [
     { section: 'Main', label: 'Dashboard', icon: 'dashboard', path: '/tenant/dashboard' },
     { section: 'Main', label: 'Branches', icon: 'domain', path: '/tenant/branches' },
@@ -101,8 +96,6 @@ export function getDashboardRoleLabel(role: DashboardRole): string {
 
 export function mapAuthRoleToDashboardRole(role: string): DashboardRole | null {
   switch (role) {
-    case 'SUPER_ADMIN':
-      return 'super-admin';
     case 'TENANT_ADMIN':
       return 'tenant-admin';
     case 'BRANCH_ADMIN':

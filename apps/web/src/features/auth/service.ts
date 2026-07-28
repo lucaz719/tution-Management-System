@@ -25,7 +25,6 @@ const STORAGE_KEYS = {
 const LEGACY_STORAGE_KEYS = ['tms_mock_accounts', 'tms_two_factor_challenge'] as const;
 
 export const ROLE_DEFAULT_PATHS: Record<UserRole, string> = {
-  SUPER_ADMIN: '/super-admin/dashboard',
   TENANT_ADMIN: '/tenant/dashboard',
   BRANCH_ADMIN: '/branch/dashboard',
   TEACHER: '/teacher/dashboard',

@@ -3,6 +3,7 @@ import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { SocialPostStatus } from '@tms/types';
+import { canAccessBranch } from '../utils/access-control';
 
 const router = Router();
 
@@ -60,7 +61,7 @@ router.post(
 router.post(
   '/posts',
   authMiddleware,
-  hasPermission('manage_branches'),
+  hasPermission('draft_social_media'),
   async (req: TenantRequest, res: Response) => {
     const { branchId, title, contentText, mediaUrls, platforms, scheduledPublishTime } = req.body;
 
@@ -68,6 +69,9 @@ router.post(
       return res.status(400).json({
         error: 'Missing required parameters: branchId, title, contentText, platforms, scheduledPublishTime.',
       });
+    }
+    if (!canAccessBranch(req.user!, branchId)) {
+      return res.status(403).json({ error: 'You may only draft posts for your assigned branch.' });
     }
 
     try {
@@ -191,7 +195,7 @@ router.get(
           {
             id: 'sim-post-101',
             tenantId: req.tenantId!,
-            branchId: 'b-baneshwor-01',
+            branchId: null,
             title: 'Science Fair Announcement',
             contentText: 'Join us at Kathmandu Science Fair this Friday! High school student admissions open!',
             status: 'PUBLISHED' as SocialPostStatus,
@@ -201,7 +205,7 @@ router.get(
           {
             id: 'sim-post-102',
             tenantId: req.tenantId!,
-            branchId: 'b-baneshwor-01',
+            branchId: null,
             title: 'Dashain Greetings',
             contentText: 'Wishing everyone a happy Dashain from all of us at Pinnacle!',
             status: 'APPROVED' as SocialPostStatus,

@@ -74,8 +74,11 @@ router.post(
     const approverId = req.user!.id;
     const approverRole = req.user!.roles[0]?.roleName; // Main role name
 
-    if (!action) {
+    if (!action || !['APPROVE', 'REJECT'].includes(action)) {
       return res.status(400).json({ error: 'Missing required parameter: action (APPROVE or REJECT).' });
+    }
+    if (action === 'REJECT' && (!remarks || !String(remarks).trim())) {
+      return res.status(400).json({ error: 'A rejection reason is required.' });
     }
 
     try {
@@ -99,28 +102,22 @@ router.post(
 
       let newStatus: LeaveStatus = 'PENDING';
 
-      if (action === 'REJECT') {
-        newStatus = 'REJECTED';
-      } else {
-        if (leave.leaveType === 'LONG_SICK') {
-          // Two-level approval: Branch Admin (L1) -> Tenant Admin (L2)
-          if (approverRole === 'Branch Admin' && leave.status === 'PENDING') {
-            newStatus = 'APPROVED_LEVEL1';
-          } else if (approverRole === 'Tenant Admin' && leave.status === 'APPROVED_LEVEL1') {
-            newStatus = 'APPROVED_LEVEL2';
-          } else {
-            return res.status(403).json({
-              error: `Invalid approval flow: Role '${approverRole}' cannot approve Long Sick Leave in its current status '${leave.status}'.`,
-            });
-          }
-        } else {
-          // Casual / Sick / Early Out: Approved by Branch Admin directly to L2 status (fully approved)
-          if (approverRole === 'Branch Admin' || approverRole === 'Tenant Admin') {
-            newStatus = 'APPROVED_LEVEL2';
-          } else {
-            return res.status(403).json({ error: 'Only Branch Admins or Tenant Admins can approve leaves.' });
-          }
+      const isBranchAdmin = approverRole === 'Branch Admin';
+      const isTenantAdmin = approverRole === 'Tenant Admin';
+      if (leave.leaveType === 'LONG_SICK') {
+        // Long Sick: Branch Admin performs L1; Tenant Admin performs the final L2 decision.
+        const validL1 = isBranchAdmin && leave.status === 'PENDING';
+        const validL2 = isTenantAdmin && leave.status === 'APPROVED_LEVEL1';
+        if (!validL1 && !validL2) {
+          return res.status(403).json({ error: 'Long Sick Leave requires Branch Admin L1, then Tenant Admin L2 approval.' });
         }
+        newStatus = action === 'REJECT' ? 'REJECTED' : validL1 ? 'APPROVED_LEVEL1' : 'APPROVED_LEVEL2';
+      } else {
+        // Casual, sick, and early-out requests are branch decisions only; Tenant Admin is not an alternate approver.
+        if (!isBranchAdmin || leave.status !== 'PENDING') {
+          return res.status(403).json({ error: 'Only the assigned Branch Admin can finalize this leave type.' });
+        }
+        newStatus = action === 'REJECT' ? 'REJECTED' : 'APPROVED_LEVEL2';
       }
 
       try {

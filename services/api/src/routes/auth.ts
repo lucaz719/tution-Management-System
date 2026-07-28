@@ -254,10 +254,16 @@ router.post('/reset-password', async (req: TenantRequest, res: Response) => {
       return res.status(410).json({ error: 'This reset link is invalid or has expired.' });
     }
 
+    const nextPasswordHash = await bcrypt.hash(newPassword, 10);
     await prisma.$transaction([
       prisma.user.update({
         where: { id: user.id },
-        data: { passwordHash: await bcrypt.hash(newPassword, 10) },
+        data: { passwordHash: nextPasswordHash },
+      }),
+      prisma.account.upsert({
+        where: { providerId_accountId: { providerId: 'credential', accountId: user.id } },
+        update: { password: nextPasswordHash },
+        create: { accountId: user.id, providerId: 'credential', userId: user.id, password: nextPasswordHash },
       }),
       prisma.verificationCode.update({
         where: { id: record.id },

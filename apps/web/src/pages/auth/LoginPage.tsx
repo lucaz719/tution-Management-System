@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { useToast } from '../../components/ui/Toast';
 import { useAuth } from '../../context/AuthContext';
@@ -21,13 +21,6 @@ const FEATURE_BULLETS = [
     title: 'Smart fee tracking',
     text: 'Follow invoices, dues, and financial health with branch-aware reporting built in.',
   },
-] as const;
-
-const DEMO_USERS = [
-  { label: 'Tenant Admin', email: 'admin@pinnacle.edu.np', password: 'PinnacleAdmin777!' },
-  { label: 'Branch Admin', email: 'branch-admin@pinnacle.edu.np', password: 'BaneshworAdmin888!' },
-  { label: 'Teacher', email: 'shyam@pinnacle.edu.np', password: 'PhysicsPass999!' },
-  { label: 'Parent', email: 'parent.shyam@gmail.com', password: 'ShyamParent123!' },
 ] as const;
 
 function validateLoginEmail(email: string): string {
@@ -77,11 +70,6 @@ export function LoginPage() {
   const [rememberMe, setRememberMe] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lockDialogOpen, setLockDialogOpen] = useState(false);
-
-  const isDemoMode = useMemo(
-    () => new URLSearchParams(window.location.search).get('demo') === 'true',
-    []
-  );
 
   const canSubmit = email.trim().length > 0 && password.trim().length > 0;
 
@@ -263,35 +251,6 @@ export function LoginPage() {
               </button>
             </form>
 
-            {isDemoMode ? (
-              <div className="auth-step-shell" style={{ marginTop: '18px' }}>
-                <div className="auth-helper-text">Demo quick fill</div>
-                <div className="auth-form" style={{ gap: '10px' }}>
-                  {DEMO_USERS.map((demoUser) => (
-                    <button
-                      key={demoUser.label}
-                      type="button"
-                      className="auth-link-button"
-                      style={{
-                        padding: '12px 14px',
-                        borderRadius: 'var(--radius-md)',
-                        border: '1px solid rgba(21, 96, 189, 0.14)',
-                        textAlign: 'left',
-                        color: 'var(--color-text)',
-                      }}
-                      onClick={() => {
-                        setEmail(demoUser.email);
-                        setPassword(demoUser.password);
-                        setEmailTouched(false);
-                        setEmailError('');
-                      }}
-                    >
-                      {demoUser.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
           </div>
         </section>
       </div>

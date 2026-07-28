@@ -178,7 +178,7 @@ model User {
   assignedClasses   Class[]             @relation("AssignedClasses")
 
   // Better Auth support
-  name              String?
+  name              String
   emailVerified     Boolean             @default(false)
   twoFactorEnabled  Boolean             @default(false)
   image             String?
@@ -775,6 +775,9 @@ model Account {
   user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   accessToken           String?
   refreshToken          String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
   idToken               String?
   expiresAt             DateTime?
   password              String?
