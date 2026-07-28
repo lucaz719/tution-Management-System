@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
-import { canAccessBranch } from '../utils/access-control';
+import { canAccessBranch, isTenantAdmin } from '../utils/access-control';
 
 const router = Router();
 
@@ -464,26 +464,13 @@ router.get(
   async (req: TenantRequest, res: Response) => {
     const { classId } = req.params;
     try {
-      const cls = await prisma.class.findUnique({
-        where: { id: classId },
-      });
+      const cls = await prisma.class.findFirst({ where: { id: classId, course: { tenantId: req.tenantId! } } });
       if (!cls) {
         return res.status(404).json({ error: 'Class not found.' });
       }
       return res.json({ class: cls });
     } catch (error: any) {
-      return res.json({
-        class: {
-          id: classId,
-          courseId: 'sim-course-101',
-          branchId: null,
-          name: 'Grade 12 Physics Core',
-          schedule: [
-            { day: 'Monday', startTime: '08:00', endTime: '09:30' },
-            { day: 'Wednesday', startTime: '08:00', endTime: '09:30' },
-          ],
-        },
-      });
+      return res.status(500).json({ error: 'Failed to load class.' });
     }
   }
 );
@@ -496,7 +483,7 @@ router.get(
     const { studentId } = req.params;
     try {
       const enrollments = await prisma.enrollment.findMany({
-        where: { studentId, status: 'ACTIVE' },
+        where: { studentId, status: 'ACTIVE', student: { user: { tenantId: req.tenantId! } } },
         include: { class: true },
       });
       const timetable = enrollments.map(e => ({
@@ -507,19 +494,7 @@ router.get(
       }));
       return res.json({ timetable });
     } catch (error: any) {
-      return res.json({
-        timetable: [
-          {
-            classId: 'c-phys-12',
-            className: 'Grade 12 Physics Core',
-            courseId: 'sim-course-101',
-            schedule: [
-              { day: 'Monday', startTime: '08:00', endTime: '09:30' },
-              { day: 'Wednesday', startTime: '08:00', endTime: '09:30' },
-            ],
-          },
-        ],
-      });
+      return res.status(500).json({ error: 'Failed to load student timetable.' });
     }
   }
 );
@@ -532,7 +507,7 @@ router.get(
     const { teacherId } = req.params;
     try {
       const sessions = await prisma.teacherSession.findMany({
-        where: { teacherId },
+        where: { teacherId, class: { course: { tenantId: req.tenantId! } } },
         include: { class: true },
       });
       
@@ -549,19 +524,7 @@ router.get(
       }));
       return res.json({ timetable });
     } catch (error: any) {
-      return res.json({
-        timetable: [
-          {
-            classId: 'c-phys-12',
-            className: 'Grade 12 Physics Core',
-            courseId: 'sim-course-101',
-            schedule: [
-              { day: 'Monday', startTime: '08:00', endTime: '09:30' },
-              { day: 'Wednesday', startTime: '08:00', endTime: '09:30' },
-            ],
-          },
-        ],
-      });
+      return res.status(500).json({ error: 'Failed to load teacher timetable.' });
     }
   }
 );
@@ -583,14 +546,7 @@ router.post(
       });
       return res.json({ message: 'Student enrollment successfully blocked due to unpaid dues.' });
     } catch (error: any) {
-      return res.json({
-        message: 'Simulation Mode: Student enrollment successfully blocked due to unpaid dues.',
-        enrollment: {
-          studentId,
-          courseId,
-          status: 'BLOCKED',
-        },
-      });
+      return res.status(500).json({ error: 'Failed to block enrollment.' });
     }
   }
 );
@@ -616,15 +572,7 @@ router.post(
         reason,
       });
     } catch (error: any) {
-      return res.json({
-        message: 'Simulation Mode: Admin override processed successfully. Student access unblocked.',
-        enrollment: {
-          studentId,
-          courseId,
-          status: 'ACTIVE',
-          overrideReason: reason,
-        },
-      });
+      return res.status(500).json({ error: 'Failed to override enrollment block.' });
     }
   }
 );
@@ -642,9 +590,7 @@ router.post(
     }
 
     try {
-      let enrollment: any = null;
-      try {
-        enrollment = await prisma.enrollment.create({
+      const enrollment = await prisma.enrollment.create({
           data: {
             studentId,
             courseId,
@@ -653,16 +599,6 @@ router.post(
             admissionDate: new Date(),
           },
         });
-      } catch (dbErr) {
-        enrollment = {
-          id: 'sim-special-enroll-' + Math.floor(Math.random() * 1000),
-          studentId,
-          courseId,
-          classId,
-          status: 'ACTIVE',
-          admissionDate: new Date(),
-        };
-      }
 
       let billingDetails = {};
       if (type === 'MUSIC') {
@@ -709,9 +645,8 @@ router.post(
     }
 
     try {
-      let refund: any = null;
-      try {
-        refund = await prisma.refundRequest.create({
+      const tenantPolicy = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+      const refund = await prisma.refundRequest.create({
           data: {
             tenantId,
             studentId,
@@ -720,21 +655,12 @@ router.post(
             refundAmount: Number(refundAmount),
             deductionAmount: 0.0,
             status: 'PENDING',
+            policySnapshot: {
+              refundPolicy: tenantPolicy.refundPolicy,
+              requestedAt: new Date().toISOString(),
+            },
           },
         });
-      } catch (dbErr) {
-        refund = {
-          id: 'ref-' + Math.floor(Math.random() * 1000),
-          tenantId,
-          studentId,
-          courseId,
-          reason,
-          refundAmount: Number(refundAmount),
-          deductionAmount: 0.0,
-          status: 'PENDING',
-          createdAt: new Date(),
-        };
-      }
       return res.status(201).json({ message: 'Refund request logged successfully.', refund });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to log refund request.', details: error.message });
@@ -756,39 +682,30 @@ router.post(
     }
 
     try {
-      let refund: any = null;
-      try {
-        refund = await prisma.refundRequest.findUnique({ where: { id } });
-      } catch (dbErr) {
-        refund = {
-          id,
-          studentId: 'st-01-shyam',
-          courseId: 'course-123',
-          refundAmount: 5000,
-          deductionAmount: 0,
-          status: 'PENDING',
-        };
-      }
+      if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may process refunds.' });
+      const refund = await prisma.refundRequest.findFirst({ where: { id, tenantId: req.tenantId! } });
 
       if (!refund) return res.status(404).json({ error: 'Refund request not found.' });
+      if (refund.status !== 'PENDING') return res.status(409).json({ error: 'Refund request has already been processed.' });
 
-      const finalStatus = action === 'APPROVE' ? 'APPROVED' : 'REJECTED';
+      const finalStatus = action === 'APPROVE' ? 'APPROVED_FOR_MANUAL_REFUND' : 'REJECTED';
       const actualDeduction = deductionAmount !== undefined ? Number(deductionAmount) : 500.00;
       const netRefundAmount = refund.refundAmount - actualDeduction;
 
-      try {
-        await prisma.refundRequest.update({
+      await prisma.refundRequest.update({
           where: { id },
           data: {
             status: finalStatus,
             deductionAmount: actualDeduction,
             approvedBy: req.user!.id,
+            approvedAt: new Date(),
           },
         });
-      } catch (dbErr) {}
 
       return res.status(200).json({
-        message: `Refund request was ${finalStatus.toLowerCase()}.`,
+        message: action === 'APPROVE'
+          ? 'Refund approved for manual settlement. No money has been sent by TMS.'
+          : 'Refund request rejected.',
         refund: {
           ...refund,
           status: finalStatus,
@@ -803,6 +720,29 @@ router.post(
     }
   }
 );
+
+router.post('/refund/settle/:id', authMiddleware, async (req: TenantRequest, res: Response) => {
+  if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may reconcile a manual refund.' });
+  const reference = typeof req.body?.reference === 'string' ? req.body.reference.trim() : '';
+  const remarks = typeof req.body?.remarks === 'string' ? req.body.remarks.trim() : '';
+  if (!reference) return res.status(400).json({ error: 'External settlement reference is required.' });
+  const refund = await prisma.refundRequest.findFirst({ where: { id: req.params.id, tenantId: req.tenantId! } });
+  if (!refund) return res.status(404).json({ error: 'Refund request not found.' });
+  if (refund.status !== 'APPROVED_FOR_MANUAL_REFUND') {
+    return res.status(409).json({ error: 'Refund must be approved for manual settlement first.' });
+  }
+  const settled = await prisma.refundRequest.update({
+    where: { id: refund.id },
+    data: {
+      status: 'MANUALLY_REFUNDED',
+      settlementReference: reference,
+      settlementRemarks: remarks || null,
+      settledAt: new Date(),
+      settledBy: req.user!.id,
+    },
+  });
+  return res.json({ message: 'Manual refund reconciled. TMS did not transfer funds.', refund: settled });
+});
 
 // Unenroll a student (delete the enrolment row) — frees a course for deletion.
 router.delete(

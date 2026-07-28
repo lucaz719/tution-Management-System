@@ -39,20 +39,7 @@ router.post(
 
       return res.status(201).json({ message: 'Academic event created successfully.', event });
     } catch (error: any) {
-      return res.status(201).json({
-        message: 'Simulation Mode: Academic event created successfully.',
-        event: {
-          id: 'sim-event-' + Math.floor(Math.random() * 1000),
-          tenantId: req.tenantId!,
-          branchId: branchId || null,
-          title,
-          description,
-          eventType,
-          startDate: new Date(startDate),
-          endDate: new Date(endDate),
-          createdAt: new Date(),
-        },
-      });
+      return res.status(500).json({ error: 'Failed to create academic event.' });
     }
   }
 );
@@ -76,30 +63,7 @@ router.get(
       });
       return res.status(200).json({ events });
     } catch (error: any) {
-      return res.status(200).json({
-        events: [
-          {
-            id: 'sim-event-101',
-            tenantId: req.tenantId!,
-            branchId: null,
-            title: 'Dashain Festival Break',
-            description: 'All branches closed for standard Nepalese holidays.',
-            eventType: 'HOLIDAY' as EventType,
-            startDate: new Date(Date.now() + 86400000 * 5),
-            endDate: new Date(Date.now() + 86400000 * 15),
-          },
-          {
-            id: 'sim-event-102',
-            tenantId: req.tenantId!,
-            branchId: branchId || null,
-            title: 'Mid-Term Physics Exam',
-            description: 'Mandatory exams in physical test centers.',
-            eventType: 'EXAM' as EventType,
-            startDate: new Date(Date.now() + 86400000 * 2),
-            endDate: new Date(Date.now() + 86400000 * 2 + 10800000),
-          },
-        ],
-      });
+      return res.status(500).json({ error: 'Failed to load academic events.' });
     }
   }
 );
@@ -149,49 +113,7 @@ router.get(
 
       return res.status(200).json({ paymentEvents });
     } catch (error: any) {
-      // Simulation Fallback
-      const today = new Date();
-      
-      const overdueDate = new Date(today);
-      overdueDate.setDate(today.getDate() - 5);
-
-      const dueSoonDate = new Date(today);
-      dueSoonDate.setDate(today.getDate() + 2);
-
-      const upcomingDate = new Date(today);
-      upcomingDate.setDate(today.getDate() + 12);
-
-      return res.status(200).json({
-        paymentEvents: [
-          {
-            invoiceId: 'sim-inv-red',
-            studentId: studentId || 'st-01-shyam',
-            dueDate: overdueDate,
-            amount: 5650,
-            status: 'UNPAID',
-            urgencyColor: 'red',
-            nepalPayQrCode: `nepalpay://pay?merchant=tms_pinnacle&amount=5650&invoice=sim-inv-red`,
-          },
-          {
-            invoiceId: 'sim-inv-amber',
-            studentId: studentId || 'st-01-shyam',
-            dueDate: dueSoonDate,
-            amount: 3500,
-            status: 'UNPAID',
-            urgencyColor: 'amber',
-            nepalPayQrCode: `nepalpay://pay?merchant=tms_pinnacle&amount=3500&invoice=sim-inv-amber`,
-          },
-          {
-            invoiceId: 'sim-inv-green',
-            studentId: studentId || 'st-01-shyam',
-            dueDate: upcomingDate,
-            amount: 4500,
-            status: 'PAID',
-            urgencyColor: 'green',
-            nepalPayQrCode: `nepalpay://pay?merchant=tms_pinnacle&amount=4500&invoice=sim-inv-green`,
-          },
-        ],
-      });
+      return res.status(500).json({ error: 'Failed to load payment calendar.' });
     }
   }
 );

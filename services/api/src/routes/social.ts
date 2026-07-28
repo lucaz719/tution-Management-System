@@ -86,22 +86,7 @@ router.post(
 
       return res.status(201).json({ message: 'Draft post submitted for administrative review.', post });
     } catch (error: any) {
-      return res.status(201).json({
-        message: 'Simulation Mode: Draft post submitted for administrative review.',
-        post: {
-          id: 'sim-post-' + Math.floor(Math.random() * 1000),
-          tenantId: req.tenantId!,
-          branchId,
-          title,
-          contentText,
-          mediaUrls: mediaUrls || [],
-          platforms,
-          scheduledPublishTime: new Date(scheduledPublishTime),
-          status: 'PENDING_APPROVAL' as SocialPostStatus,
-          createdBy: req.user!.id,
-          createdAt: new Date(),
-        },
-      });
+      return res.status(500).json({ error: 'Failed to submit social post.' });
     }
   }
 );
@@ -174,30 +159,7 @@ router.get(
       });
       return res.status(200).json({ posts });
     } catch (error: any) {
-      return res.status(200).json({
-        posts: [
-          {
-            id: 'sim-post-101',
-            tenantId: req.tenantId!,
-            branchId: null,
-            title: 'Science Fair Announcement',
-            contentText: 'Join us at Kathmandu Science Fair this Friday! High school student admissions open!',
-            status: 'PUBLISHED' as SocialPostStatus,
-            platforms: ['FACEBOOK', 'INSTAGRAM'],
-            publishedAt: new Date(),
-          },
-          {
-            id: 'sim-post-102',
-            tenantId: req.tenantId!,
-            branchId: null,
-            title: 'Dashain Greetings',
-            contentText: 'Wishing everyone a happy Dashain from all of us at Pinnacle!',
-            status: 'APPROVED' as SocialPostStatus,
-            platforms: ['FACEBOOK', 'INSTAGRAM', 'LINKEDIN'],
-            scheduledPublishTime: new Date(Date.now() + 86400000 * 3),
-          },
-        ],
-      });
+      return res.status(500).json({ error: 'Failed to load social posts.' });
     }
   }
 );

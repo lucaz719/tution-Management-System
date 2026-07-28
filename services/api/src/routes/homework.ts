@@ -34,21 +34,7 @@ router.post(
 
       return res.status(201).json({ message: 'Homework created and distributed successfully.', homework });
     } catch (error: any) {
-      // In-Memory Simulation Fallback
-      return res.status(201).json({
-        message: 'Simulation Mode: Homework created and distributed successfully.',
-        homework: {
-          id: 'sim-homework-' + Math.floor(Math.random() * 1000),
-          classId,
-          subject,
-          title,
-          description,
-          contentUrl,
-          deadline: new Date(deadline),
-          createdBy: req.user!.id,
-          createdAt: new Date(),
-        },
-      });
+      return res.status(500).json({ error: 'Failed to create homework.' });
     }
   }
 );
@@ -79,17 +65,7 @@ router.post(
 
       return res.status(201).json({ message: 'Homework submitted successfully.', submission });
     } catch (error: any) {
-      return res.status(201).json({
-        message: 'Simulation Mode: Homework submitted successfully.',
-        submission: {
-          id: 'sim-sub-' + Math.floor(Math.random() * 1000),
-          homeworkId,
-          studentId,
-          submissionUrl,
-          remarks,
-          createdAt: new Date(),
-        },
-      });
+      return res.status(500).json({ error: 'Failed to submit homework.' });
     }
   }
 );
@@ -119,16 +95,7 @@ router.post(
 
       return res.status(200).json({ message: 'Submission graded successfully.', submission });
     } catch (error: any) {
-      return res.status(200).json({
-        message: 'Simulation Mode: Submission graded successfully.',
-        submission: {
-          id: submissionId,
-          grade,
-          remarks,
-          gradedBy: req.user!.id,
-          updatedAt: new Date(),
-        },
-      });
+      return res.status(500).json({ error: 'Failed to grade homework submission.' });
     }
   }
 );
@@ -147,20 +114,7 @@ router.get(
       });
       return res.status(200).json({ homework: homeworkList });
     } catch (error: any) {
-      return res.status(200).json({
-        homework: [
-          {
-            id: 'sim-homework-101',
-            classId,
-            subject: 'Mathematics',
-            title: 'Calculus Derivatives Exercise',
-            description: 'Solve problems 1 to 15 on page 42.',
-            deadline: new Date(Date.now() + 86400000 * 2), // 2 days from now
-            createdBy: 'teacher-user-500',
-            submissions: [],
-          },
-        ],
-      });
+      return res.status(500).json({ error: 'Failed to load homework.' });
     }
   }
 );

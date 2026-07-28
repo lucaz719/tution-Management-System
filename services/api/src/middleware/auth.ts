@@ -58,8 +58,9 @@ export function hasPermission(requiredPermission: string) {
       return next();
     }
 
-    // 3. Branch scope checking
-    // Determine the active branch context from request parameters, body, query, or headers
+    // 3. Branch scope checking. Branch-scoped permissions are default-deny:
+    // callers must provide a concrete branch context, and resource-by-id routes
+    // must perform their own ownership lookup before mutation.
     const branchId =
       req.params.branchId ||
       req.body.branchId ||
@@ -71,12 +72,11 @@ export function hasPermission(requiredPermission: string) {
       // Must possess the exact permission
       const hasPerm = role.permissions.includes(requiredPermission);
 
-      // Must be tenant-wide (branchId is null), match the exact branch,
-      // or if no branch context is provided in the request, allow access at the middleware level
+      // Tenant-wide role assignments may operate without a branch. A
+      // branch-scoped assignment must match an explicit branch exactly.
       const isCorrectBranch =
         role.branchId === null ||
-        branchId === undefined ||
-        role.branchId === branchId;
+        (typeof branchId === 'string' && role.branchId === branchId);
 
       return hasPerm && isCorrectBranch;
     });

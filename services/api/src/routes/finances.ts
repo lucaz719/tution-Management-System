@@ -337,6 +337,8 @@ router.post(
   async (req: TenantRequest, res: Response) => {
     try {
       const period = await getBillingPeriod(new Date(), 10);
+      const tenantConfig = await prisma.tenant.findUnique({ where: { id: req.tenantId! } });
+      if (!tenantConfig) return res.status(404).json({ error: 'Tenant not found.' });
 
       // Monthly bill per student = their grade's base tuition (all subjects) +
       // net fees of their active extra-activity enrolments.
@@ -403,6 +405,8 @@ router.post(
             tenantId: req.tenantId!,
             studentId: charge.studentId,
             invoiceType: charge.invoiceType,
+            panNumberSnapshot: tenantConfig.panNumber,
+            vatRateSnapshot: tenantConfig.vatRate,
             amount: Math.round(net * 100) / 100,
             discount: 0,
             fine: 0,
@@ -663,9 +667,7 @@ router.post(
     }
 
     try {
-      let expense: any = null;
-      try {
-        expense = await prisma.expense.create({
+      const expense = await prisma.expense.create({
           data: {
             tenantId,
             branchId,
@@ -674,17 +676,6 @@ router.post(
             purpose,
           },
         });
-      } catch (dbErr) {
-        expense = {
-          id: 'exp-' + Math.floor(Math.random() * 1000),
-          tenantId,
-          branchId,
-          category,
-          amount: Number(amount),
-          purpose,
-          date: new Date(),
-        };
-      }
       return res.status(201).json({ message: 'Expense logged successfully.', expense });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to record expense.', details: error.message });
@@ -700,26 +691,13 @@ router.get(
   async (req: TenantRequest, res: Response) => {
     const { category, branchId } = req.query;
     try {
-      let list = [];
-      try {
-        list = await prisma.expense.findMany({
+      const list = await prisma.expense.findMany({
           where: {
             tenantId: req.tenantId!,
             category: category ? String(category) : undefined,
             branchId: branchId ? String(branchId) : undefined,
           },
         });
-      } catch (dbErr) {
-        list = [
-          {
-            id: 'exp-sim-1',
-            category: category ? String(category) : 'RENT',
-            amount: 45000,
-            purpose: 'Office rent',
-            date: new Date(),
-          },
-        ];
-      }
       return res.status(200).json({ expenses: list });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to fetch expenses.' });
@@ -741,16 +719,24 @@ router.post(
     }
 
     try {
-      let pc: any = null;
-      try {
-        pc = await prisma.pettyCash.create({
+      if (!hasBranchPermission(req.user!, 'manage_petty_cash', branchId)) {
+        return res.status(403).json({ error: 'Only the assigned branch Accountant may request petty cash.' });
+      }
+      const requestedAmount = Number(amount);
+      if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
+        return res.status(400).json({ error: 'Petty cash amount must be positive.' });
+      }
+      const branch = await prisma.branch.findFirst({ where: { id: branchId, tenantId: req.tenantId! } });
+      if (!branch) return res.status(404).json({ error: 'Branch not found.' });
+      const tenantPolicy = await prisma.tenant.findUniqueOrThrow({ where: { id: req.tenantId! } });
+      const pc = await prisma.pettyCash.create({
           data: {
             tenantId: req.tenantId!,
             branchId,
             accountantId,
             purpose,
-            amount: Number(amount),
-            remainingBalance: Number(amount),
+            amount: requestedAmount,
+            remainingBalance: requestedAmount,
             approvalChain: [
               {
                 role: 'Accountant',
@@ -760,27 +746,12 @@ router.post(
               },
             ],
             status: 'PENDING',
+            policySnapshot: {
+              pettyCashCapNpr: tenantPolicy.pettyCashCapNpr,
+              requestedAt: new Date().toISOString(),
+            },
           },
         });
-      } catch (dbErr) {
-        pc = {
-          id: 'pc-' + Math.floor(Math.random() * 1000),
-          tenantId: req.tenantId!,
-          branchId,
-          accountantId,
-          purpose,
-          amount: Number(amount),
-          status: 'PENDING',
-          approvalChain: [
-            {
-              role: 'Accountant',
-              action: 'REQUESTED',
-              timestamp: new Date().toISOString(),
-              comment: 'Initial request.',
-            },
-          ],
-        };
-      }
       return res.status(201).json({ message: 'Petty cash request logged.', pettyCash: pc });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to request petty cash.', details: error.message });
@@ -898,29 +869,20 @@ router.post(
     }
 
     try {
-      let pc: any = null;
-      try {
-        pc = await prisma.pettyCash.findUnique({ where: { id } });
-      } catch (dbErr) {
-        pc = {
-          id,
-          amount: 5000,
-          status: 'RELEASED',
-          approvalChain: [],
-        };
-      }
+      const pc = await prisma.pettyCash.findFirst({ where: { id, tenantId: req.tenantId! } });
 
       if (!pc) return res.status(404).json({ error: 'Petty cash record not found.' });
+      if (pc.status !== 'RELEASED' || pc.accountantId !== req.user!.id) {
+        return res.status(403).json({ error: 'Only the requesting Accountant may submit a receipt for released petty cash.' });
+      }
 
-      try {
-        await prisma.pettyCash.update({
+      await prisma.pettyCash.update({
           where: { id },
           data: {
             status: 'RECEIPT_SUBMITTED',
             receiptProofUrl,
           },
         });
-      } catch (dbErr) {}
 
       return res.status(200).json({
         message: 'Receipt submitted successfully.',
@@ -943,28 +905,19 @@ router.post(
     }
 
     try {
-      let pc: any = null;
-      try {
-        pc = await prisma.pettyCash.findUnique({ where: { id } });
-      } catch (dbErr) {
-        pc = {
-          id,
-          amount: 5000,
-          status: 'RECEIPT_SUBMITTED',
-          approvalChain: [],
-        };
-      }
+      const pc = await prisma.pettyCash.findFirst({ where: { id, tenantId: req.tenantId! } });
 
       if (!pc) return res.status(404).json({ error: 'Petty cash record not found.' });
+      if (pc.status !== 'RECEIPT_SUBMITTED') {
+        return res.status(409).json({ error: 'A submitted receipt is required before closing petty cash.' });
+      }
 
-      try {
-        await prisma.pettyCash.update({
+      await prisma.pettyCash.update({
           where: { id },
           data: {
             status: 'CLOSED',
           },
         });
-      } catch (dbErr) {}
 
       return res.status(200).json({
         message: 'Petty cash verified and closed.',
@@ -1051,6 +1004,15 @@ router.get(
         vatRate: tenant.vatRate,
         gracePeriod: tenant.gracePeriodMinutes,
         pettyCashCap: tenant.pettyCashCapNpr,
+        refundPolicy: tenant.refundPolicy,
+        lateFeeEnabled: tenant.lateFeeEnabled,
+        lateFeeMode: tenant.lateFeeMode,
+        lateFeeValue: tenant.lateFeeValue,
+        lateFeeGraceDays: tenant.lateFeeGraceDays,
+        appointmentWindowHours: tenant.appointmentWindowHours,
+        maintenanceEscalationDays: tenant.maintenanceEscalationDays,
+        leavePolicy: tenant.leavePolicy,
+        performanceWeights: tenant.performanceWeights,
       });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to load tenant configuration.', details: error.message });
@@ -1061,9 +1023,15 @@ router.get(
 router.put(
   '/config',
   authMiddleware,
-  hasPermission('manage_billing'),
   async (req: TenantRequest, res: Response) => {
-    const { vatRate, gracePeriod, pettyCashCap } = req.body;
+    if (!isTenantAdmin(req.user!)) {
+      return res.status(403).json({ error: 'Only the Tenant Admin may change institution policies.' });
+    }
+    const {
+      vatRate, gracePeriod, pettyCashCap, refundPolicy, lateFeeEnabled,
+      lateFeeMode, lateFeeValue, lateFeeGraceDays, appointmentWindowHours,
+      maintenanceEscalationDays, leavePolicy, performanceWeights,
+    } = req.body;
 
     const nextVatRate = Number(vatRate);
     const nextGracePeriod = Number(gracePeriod);
@@ -1078,15 +1046,58 @@ router.put(
     if (!Number.isInteger(nextPettyCashCap) || nextPettyCashCap < 0) {
       return res.status(400).json({ error: 'Petty cash cap must be a non-negative amount.' });
     }
+    if (!['PRO_RATA', 'FIXED_DEDUCTION', 'NO_REFUND'].includes(refundPolicy)) {
+      return res.status(400).json({ error: 'Invalid refund policy.' });
+    }
+    const nextLateFeeValue = lateFeeEnabled ? Number(lateFeeValue) : null;
+    if (lateFeeEnabled && (!['FLAT', 'PERCENTAGE'].includes(lateFeeMode) || !Number.isFinite(nextLateFeeValue) || nextLateFeeValue! <= 0)) {
+      return res.status(400).json({ error: 'Enabled late fees require a valid mode and positive value.' });
+    }
+    const nextLateGrace = Number(lateFeeGraceDays);
+    const nextAppointmentWindow = Number(appointmentWindowHours);
+    const nextEscalationDays = Number(maintenanceEscalationDays);
+    if (![nextLateGrace, nextAppointmentWindow, nextEscalationDays].every(Number.isInteger) ||
+        nextLateGrace < 0 || nextAppointmentWindow < 1 || nextEscalationDays < 1) {
+      return res.status(400).json({ error: 'Policy thresholds must be valid non-negative integers.' });
+    }
+    const weights = performanceWeights as Record<string, unknown>;
+    const weightKeys = ['attendance', 'updateCompliance', 'feedback', 'leaveCompliance', 'taskCompletion'];
+    const weightValues = weightKeys.map((key) => Number(weights?.[key]));
+    if (weightValues.some((value) => !Number.isFinite(value) || value < 0) ||
+        Math.abs(weightValues.reduce((sum, value) => sum + value, 0) - 100) > 0.0001) {
+      return res.status(400).json({ error: 'Performance weights must be non-negative and sum to exactly 100.' });
+    }
 
     try {
-      const tenant = await prisma.tenant.update({
-        where: { id: req.tenantId! },
-        data: {
+      const config = {
           vatRate: nextVatRate,
           gracePeriodMinutes: nextGracePeriod,
           pettyCashCapNpr: nextPettyCashCap,
-        },
+          refundPolicy,
+          lateFeeEnabled: Boolean(lateFeeEnabled),
+          lateFeeMode: lateFeeEnabled ? lateFeeMode : null,
+          lateFeeValue: nextLateFeeValue,
+          lateFeeGraceDays: nextLateGrace,
+          appointmentWindowHours: nextAppointmentWindow,
+          maintenanceEscalationDays: nextEscalationDays,
+          leavePolicy: leavePolicy ?? {},
+          performanceWeights: Object.fromEntries(weightKeys.map((key, index) => [key, weightValues[index]])),
+      };
+      const latest = await prisma.tenantPolicyVersion.aggregate({
+        where: { tenantId: req.tenantId! },
+        _max: { version: true },
+      });
+      const tenant = await prisma.$transaction(async (tx) => {
+        const updated = await tx.tenant.update({ where: { id: req.tenantId! }, data: config });
+        await tx.tenantPolicyVersion.create({
+          data: {
+            tenantId: req.tenantId!,
+            version: (latest._max.version ?? 0) + 1,
+            config,
+            changedBy: req.user!.id,
+          },
+        });
+        return updated;
       });
 
       return res.json({
@@ -1095,6 +1106,8 @@ router.put(
           vatRate: tenant.vatRate,
           gracePeriod: tenant.gracePeriodMinutes,
           pettyCashCap: tenant.pettyCashCapNpr,
+          refundPolicy: tenant.refundPolicy,
+          policyVersion: (latest._max.version ?? 0) + 1,
         },
       });
     } catch (error: any) {
@@ -1110,22 +1123,34 @@ router.get(
   hasPermission('view_reports'),
   async (req: TenantRequest, res: Response) => {
     try {
+      const [invoices, expenses, payrolls] = await Promise.all([
+        prisma.invoice.findMany({ where: { tenantId: req.tenantId!, status: 'PAID' } }),
+        prisma.expense.findMany({ where: { tenantId: req.tenantId! } }),
+        prisma.payroll.findMany({ where: { tenantId: req.tenantId!, status: 'MANUALLY_PAID' } }),
+      ]);
       const ledgerEntries = [
-        {
-          date: new Date(),
+        ...invoices.map((invoice) => ({
+          date: invoice.paymentDate ?? invoice.updatedAt,
           accountDebit: 'Cash/Bank Account',
-          accountCredit: 'Tuition Fee Income',
-          amount: 5650,
-          description: 'Payment confirmation for invoice st-01-shyam',
-        },
-        {
-          date: new Date(),
-          accountDebit: 'Staff Payroll Salary Expense',
+          accountCredit: `${invoice.invoiceType} Income`,
+          amount: Number(invoice.netPayable),
+          description: `Payment for invoice ${invoice.id}`,
+        })),
+        ...expenses.map((expense) => ({
+          date: expense.date,
+          accountDebit: `${expense.category} Expense`,
           accountCredit: 'Cash/Bank Account',
-          amount: 25000,
-          description: 'Settlement for Ram Bahadur Physics',
-        },
-      ];
+          amount: Number(expense.amount),
+          description: expense.purpose,
+        })),
+        ...payrolls.map((payroll) => ({
+          date: payroll.paymentDate ?? payroll.updatedAt,
+          accountDebit: 'Payroll Expense',
+          accountCredit: 'Cash/Bank Account',
+          amount: payroll.netPayable,
+          description: `Payroll ${payroll.month}/${payroll.year}`,
+        })),
+      ].sort((a, b) => a.date.getTime() - b.date.getTime());
       return res.status(200).json({
         exportFormat: 'Excel Double-Entry Ledger',
         columns: ['Date', 'Debit Account', 'Credit Account', 'Amount (NPR)', 'Description'],

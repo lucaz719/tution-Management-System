@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
+import { canAccessBranch, isTenantAdmin } from '../utils/access-control';
 
 const router = Router();
 
@@ -81,7 +82,7 @@ router.post(
   authMiddleware,
   hasPermission('manage_staff'),
   async (req: TenantRequest, res: Response) => {
-    const { staffRecordId, resignationDate, reason, noticePeriodDays, monthlySalary } = req.body;
+    const { staffRecordId, resignationDate, reason, noticePeriodDays } = req.body;
 
     if (!staffRecordId || !resignationDate) {
       return res.status(400).json({
@@ -90,13 +91,20 @@ router.post(
     }
 
     try {
-      const salary = monthlySalary ? Number(monthlySalary) : 40000;
-      const proRatedSalary = Math.round((salary / 30) * 15 * 100) / 100; // Mock: pro-rated for 15 days of the month
+      const staff = await prisma.staffRecord.findFirst({
+        where: { id: staffRecordId, user: { tenantId: req.tenantId! } },
+      });
+      if (!staff) return res.status(404).json({ error: 'Staff record not found.' });
+      const resignation = new Date(resignationDate);
+      if (Number.isNaN(resignation.getTime())) return res.status(400).json({ error: 'Invalid resignationDate.' });
+      const structure = (staff.salaryStructure ?? {}) as { basicSalary?: number };
+      const salary = Number(structure.basicSalary ?? 0);
+      const proRatedSalary = Math.round((salary / 30) * Math.min(resignation.getDate(), 30) * 100) / 100;
 
       const exit = await prisma.exitClearance.create({
         data: {
           staffRecordId,
-          resignationDate: new Date(resignationDate),
+          resignationDate: resignation,
           reason,
           noticePeriodDays: noticePeriodDays || 30,
           clearanceChecklist: [
@@ -111,26 +119,7 @@ router.post(
 
       return res.status(201).json({ message: 'Exit clearance initiated successfully.', exit });
     } catch (error: any) {
-      const salary = monthlySalary ? Number(monthlySalary) : 40000;
-      const proRatedSalary = Math.round((salary / 30) * 15 * 100) / 100;
-
-      return res.status(201).json({
-        message: 'Simulation Mode: Exit clearance initiated successfully.',
-        exit: {
-          id: 'sim-exit-' + Math.floor(Math.random() * 1000),
-          staffRecordId,
-          resignationDate: new Date(resignationDate),
-          reason,
-          noticePeriodDays: noticePeriodDays || 30,
-          clearanceChecklist: [
-            { item: 'Return of Tuition Keys & Access Card', cleared: false, signature: null },
-            { item: 'Handover of Physical Textbooks & Curriculums', cleared: false, signature: null },
-            { item: 'Finalization of Class Grading Marks', cleared: false, signature: null },
-          ],
-          finalSettlementNpr: proRatedSalary,
-          status: 'PENDING',
-        },
-      });
+      return res.status(500).json({ error: 'Failed to initiate staff exit.' });
     }
   }
 );
@@ -139,7 +128,6 @@ router.post(
 router.post(
   '/exit/clear/:exitId',
   authMiddleware,
-  hasPermission('manage_branches'),
   async (req: TenantRequest, res: Response) => {
     const { exitId } = req.params;
     const { checklistItem } = req.body;
@@ -149,12 +137,27 @@ router.post(
     }
 
     try {
-      // In production, fetch current checklist, match item, mark cleared, update DB
-      return res.status(200).json({
-        message: 'Checklist item marked as cleared successfully.',
-        exitId,
-        clearedItem: checklistItem,
+      const exit = await prisma.exitClearance.findFirst({
+        where: { id: exitId, staffRecord: { user: { tenantId: req.tenantId! } } },
+        include: { staffRecord: { include: { user: { include: { userRoles: true } } } } },
       });
+      if (!exit) return res.status(404).json({ error: 'Exit clearance not found.' });
+      const branchIds = exit.staffRecord.user.userRoles
+        .map((assignment) => assignment.branchId)
+        .filter((branchId): branchId is string => Boolean(branchId));
+      if (!branchIds.some((branchId) => canAccessBranch(req.user!, branchId))) {
+        return res.status(403).json({ error: 'Only the assigned Branch Admin may clear this checklist.' });
+      }
+      const checklist = Array.isArray(exit.clearanceChecklist) ? [...exit.clearanceChecklist as any[]] : [];
+      const index = checklist.findIndex((item) => item.item === checklistItem);
+      if (index < 0) return res.status(404).json({ error: 'Checklist item not found.' });
+      checklist[index] = { ...checklist[index], cleared: true, signature: req.user!.id, clearedAt: new Date().toISOString() };
+      const completed = checklist.length > 0 && checklist.every((item) => item.cleared === true);
+      const updated = await prisma.exitClearance.update({
+        where: { id: exit.id },
+        data: { clearanceChecklist: checklist, status: completed ? 'CLEARANCE_COMPLETED' : 'PENDING' },
+      });
+      return res.status(200).json({ message: 'Checklist item cleared.', exit: updated });
     } catch (error: any) {
       return res.status(500).json({ error: 'Clearance sign-off failed.' });
     }
@@ -165,21 +168,25 @@ router.post(
 router.post(
   '/exit/settle/:exitId',
   authMiddleware,
-  hasPermission('manage_staff'),
   async (req: TenantRequest, res: Response) => {
     const { exitId } = req.params;
 
     try {
-      // Settle offboarding, update ExitClearance state, and deactivate core User record
-      return res.status(200).json({
-        message: 'Exit final settlement approved. Core user account successfully deactivated and archived.',
-        settlement: {
-          exitId,
-          status: 'SETTLED',
-          userAccountState: 'INACTIVE',
-          archiveTimestamp: new Date(),
-        },
+      if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may settle staff exits.' });
+      const exit = await prisma.exitClearance.findFirst({
+        where: { id: exitId, staffRecord: { user: { tenantId: req.tenantId! } } },
+        include: { staffRecord: true },
       });
+      if (!exit) return res.status(404).json({ error: 'Exit clearance not found.' });
+      if (exit.status !== 'CLEARANCE_COMPLETED') {
+        return res.status(409).json({ error: 'Branch clearance must be completed before final settlement.' });
+      }
+      await prisma.$transaction(async (tx) => {
+        await tx.exitClearance.update({ where: { id: exit.id }, data: { status: 'SETTLED' } });
+        await tx.user.update({ where: { id: exit.staffRecord.userId }, data: { status: 'INACTIVE' } });
+        await tx.session.deleteMany({ where: { userId: exit.staffRecord.userId } });
+      });
+      return res.status(200).json({ message: 'Exit settled and staff account deactivated.', exitId, status: 'SETTLED' });
     } catch (error: any) {
       return res.status(500).json({ error: 'Final settlement failed.' });
     }
@@ -200,28 +207,10 @@ router.post(
     }
 
     try {
-      let staffRecords: any[] = [];
-      try {
-        staffRecords = await prisma.staffRecord.findMany({
+      const staffRecords = await prisma.staffRecord.findMany({
           where: { user: { tenantId } },
           include: { user: true },
         });
-      } catch (dbErr) {
-        staffRecords = [
-          {
-            id: 'staff-rec-001',
-            contractType: 'FIXED',
-            salaryStructure: { basicSalary: 45000 },
-            user: { firstName: 'Ram', lastName: 'Bahadur' },
-          },
-          {
-            id: 'staff-rec-002',
-            contractType: 'HOUR_RATE',
-            salaryStructure: { hourlyRate: 500 },
-            user: { firstName: 'Sita', lastName: 'Kumari' },
-          },
-        ];
-      }
 
       const payrolls = [];
 
@@ -239,9 +228,7 @@ router.post(
           const struct = record.salaryStructure as any || {};
           const hourlyRate = Number(struct.hourlyRate) || 400;
           
-          let sessionsCount = 8;
-          try {
-            sessionsCount = await prisma.teacherSession.count({
+          const sessionsCount = await prisma.teacherSession.count({
               where: {
                 teacherId: record.userId,
                 status: 'PRESENT_CONFIRMED',
@@ -251,7 +238,6 @@ router.post(
                 },
               },
             });
-          } catch (dbErr) {}
 
           const hoursWorked = sessionsCount * 1.5;
           baseSalary = hoursWorked * hourlyRate;
@@ -261,9 +247,7 @@ router.post(
 
         const netPayable = baseSalary + bonuses - deductions;
 
-        let payRecord: any = null;
-        try {
-          payRecord = await prisma.payroll.create({
+        const payRecord = await prisma.payroll.create({
             data: {
               tenantId,
               staffRecordId: record.id,
@@ -276,22 +260,6 @@ router.post(
               status: 'PENDING',
             },
           });
-        } catch (dbErr) {
-          payRecord = {
-            id: 'pay-' + Math.floor(Math.random() * 1000),
-            tenantId,
-            staffRecordId: record.id,
-            month: Number(month),
-            year: Number(year),
-            baseSalary,
-            attendanceDeductions: deductions,
-            bonuses,
-            netPayable,
-            status: 'PENDING',
-            createdAt: new Date(),
-            staffRecord: record,
-          };
-        }
         payrolls.push(payRecord);
       }
 
@@ -312,26 +280,10 @@ router.get(
   hasPermission('manage_staff'),
   async (req: TenantRequest, res: Response) => {
     try {
-      let list = [];
-      try {
-        list = await prisma.payroll.findMany({
+      const list = await prisma.payroll.findMany({
           where: { tenantId: req.tenantId! },
           include: { staffRecord: { include: { user: true } } },
         });
-      } catch (dbErr) {
-        list = [
-          {
-            id: 'pay-sim-1',
-            month: 7,
-            year: 2026,
-            baseSalary: 45000,
-            bonuses: 2000,
-            attendanceDeductions: 0,
-            netPayable: 47000,
-            status: 'PENDING',
-          },
-        ];
-      }
       return res.status(200).json({ payrolls: list });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to retrieve payrolls.' });
@@ -339,36 +291,56 @@ router.get(
   }
 );
 
-// 8. Pay Payroll (Approve & Mark Paid)
+// 8. Approve payroll obligation. TMS does not transfer salary funds.
 router.post(
-  '/payroll/pay/:id',
+  '/payroll/approve/:id',
   authMiddleware,
   hasPermission('manage_staff'),
   async (req: TenantRequest, res: Response) => {
     const { id } = req.params;
     try {
-      try {
-        await prisma.payroll.update({
-          where: { id },
+      const payroll = await prisma.payroll.findFirst({ where: { id, tenantId: req.tenantId! } });
+      if (!payroll) return res.status(404).json({ error: 'Payroll record not found.' });
+      if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may approve payroll.' });
+      if (payroll.status !== 'PENDING') return res.status(409).json({ error: 'Payroll is not pending.' });
+      const approved = await prisma.payroll.update({
+          where: { id: payroll.id },
           data: {
-            status: 'PAID',
-            paymentDate: new Date(),
+            status: 'APPROVED_FOR_MANUAL_PAYMENT',
+            approvedBy: req.user!.id,
+            approvedAt: new Date(),
           },
         });
-      } catch (dbErr) {}
 
       return res.status(200).json({
-        message: 'Payroll successfully marked as PAID.',
-        payroll: {
-          id,
-          status: 'PAID',
-          paymentDate: new Date(),
-        },
+        message: 'Payroll approved for manual payment. No salary funds were transferred by TMS.',
+        payroll: approved,
       });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to process payroll payment.', details: error.message });
     }
   }
 );
+
+router.post('/payroll/reconcile/:id', authMiddleware, async (req: TenantRequest, res: Response) => {
+  if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may reconcile payroll.' });
+  const reference = typeof req.body?.reference === 'string' ? req.body.reference.trim() : '';
+  if (!reference) return res.status(400).json({ error: 'External payment reference is required.' });
+  const payroll = await prisma.payroll.findFirst({ where: { id: req.params.id, tenantId: req.tenantId! } });
+  if (!payroll) return res.status(404).json({ error: 'Payroll record not found.' });
+  if (payroll.status !== 'APPROVED_FOR_MANUAL_PAYMENT') {
+    return res.status(409).json({ error: 'Payroll must be approved before reconciliation.' });
+  }
+  const reconciled = await prisma.payroll.update({
+    where: { id: payroll.id },
+    data: {
+      status: 'MANUALLY_PAID',
+      settlementReference: reference,
+      reconciledBy: req.user!.id,
+      paymentDate: new Date(),
+    },
+  });
+  return res.json({ message: 'Manual salary payment reconciled. TMS did not transfer funds.', payroll: reconciled });
+});
 
 export default router;

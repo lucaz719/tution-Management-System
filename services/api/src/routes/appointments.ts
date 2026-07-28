@@ -48,12 +48,8 @@ router.post(
         },
       });
       if (enrollment) isAuthorized = true;
-    } catch (dbErr) {
-      if (req.body.simPrivacyViolation === true) {
-        isAuthorized = false;
-      } else {
-        isAuthorized = true;
-      }
+    } catch {
+      return res.status(500).json({ error: 'Unable to verify appointment authorization.' });
     }
 
     if (!isAuthorized) {
@@ -62,27 +58,7 @@ router.post(
       });
     }
 
-    const appointment = {
-      id: 'appt-' + Math.floor(Math.random() * 1000),
-      studentId,
-      parentId,
-      teacherId,
-      scheduledTime: scheduledDate,
-      remarks,
-      status: 'PENDING',
-      createdAt: new Date(),
-    };
-
-    await MockPushNotificationService.sendPush(
-      teacherId,
-      'New Appointment Request',
-      `Parent has requested a meeting on ${scheduledTime}.`
-    );
-
-    return res.status(201).json({
-      message: 'Appointment request submitted successfully.',
-      appointment,
-    });
+    return res.status(501).json({ error: 'Persistent appointments are not implemented.' });
   }
 );
 
@@ -99,46 +75,7 @@ router.post(
       return res.status(400).json({ error: 'Missing or invalid action parameter.' });
     }
 
-    const appointment = {
-      id: appointmentId,
-      studentId: 'st-01-shyam',
-      parentId: 'parent-user-400',
-      teacherId: responderId,
-      scheduledTime: new Date(Date.now() + 48 * 60 * 60 * 1000),
-      remarks: 'Discuss chemistry project.',
-      status: 'PENDING',
-    };
-
-    let finalStatus = 'PENDING';
-    let notifyMessage = '';
-
-    if (action === 'APPROVE') {
-      finalStatus = 'APPROVED';
-      notifyMessage = 'Your appointment request has been approved.';
-    } else if (action === 'REJECT') {
-      finalStatus = 'REJECTED';
-      notifyMessage = 'Your appointment request was declined.';
-    } else if (action === 'PROPOSE_ALTERNATIVE') {
-      if (!alternativeSlot) {
-        return res.status(400).json({ error: 'Missing alternativeSlot parameter for proposal.' });
-      }
-      finalStatus = 'ALTERNATIVE_PROPOSED';
-      appointment.scheduledTime = new Date(alternativeSlot);
-      notifyMessage = `Alternative slot proposed: ${alternativeSlot}.`;
-    }
-
-    await MockPushNotificationService.sendPush(appointment.parentId, 'Appointment Update', notifyMessage);
-    const smsSender = new MockSmsSender();
-    await smsSender.sendSms('98510XXXXX', `Appointment Alert: ${notifyMessage}`);
-
-    return res.status(200).json({
-      message: 'Response logged successfully.',
-      appointment: {
-        ...appointment,
-        status: finalStatus,
-        remarks: remarks || appointment.remarks,
-      },
-    });
+    return res.status(501).json({ error: 'Persistent appointments are not implemented.' });
   }
 );
 
@@ -147,17 +84,7 @@ router.get(
   '/',
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
-    const list = [
-      {
-        id: 'appt-1',
-        studentId: 'st-01-shyam',
-        parentId: 'parent-user-400',
-        teacherId: 'teacher-user-500',
-        scheduledTime: new Date(Date.now() + 48 * 60 * 60 * 1000),
-        status: 'APPROVED',
-      },
-    ];
-    return res.status(200).json({ appointments: list });
+    return res.status(501).json({ error: 'Persistent appointments are not implemented.' });
   }
 );
 

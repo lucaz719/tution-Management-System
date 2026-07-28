@@ -30,6 +30,7 @@ router.post(
         where: {
           teacherId,
           dailyUpdateSubmitted: false,
+          class: { course: { tenantId: req.tenantId! } },
         },
       });
       if (pendingSession) {
@@ -38,13 +39,8 @@ router.post(
           pendingSessionId: pendingSession.id,
         });
       }
-    } catch (dbErr) {
-      if (req.body.simPendingUpdate === true) {
-        return res.status(403).json({
-          error: 'Daily class update pending for previous sessions. Attendance marking blocked.',
-          pendingSessionId: 'sim-session-pending-456',
-        });
-      }
+    } catch {
+      return res.status(500).json({ error: 'Unable to verify pending class updates.' });
     }
 
     // 1. Validate GPS Accuracy threshold (must be precise to prevent coordinates spoofing)
@@ -56,21 +52,7 @@ router.post(
 
     try {
       // 2. Fetch the target branch's geofencing boundaries
-      let branch: any = null;
-      try {
-        branch = await prisma.branch.findUnique({
-          where: { id: branchId },
-        });
-      } catch (dbErr) {
-        // Fallback for simulation/demo
-        branch = {
-          id: branchId,
-          name: 'Main Center Kathmandu',
-          latitude: 27.6915,
-          longitude: 85.3422,
-          radiusMeters: 100.0,
-        };
-      }
+      const branch = await prisma.branch.findFirst({ where: { id: branchId, tenantId: req.tenantId! } });
 
       if (!branch) {
         return res.status(404).json({ error: 'Branch not found.' });
@@ -94,9 +76,7 @@ router.post(
       }
 
       // 5. Create Attendance Stamp
-      let stamp: any = null;
-      try {
-        stamp = await prisma.teacherAttendance.create({
+      const stamp = await prisma.teacherAttendance.create({
           data: {
             userId: teacherId,
             branchId,
@@ -106,15 +86,6 @@ router.post(
             gpsAccuracy: Number(gpsAccuracy),
           },
         });
-      } catch (dbErr) {
-        stamp = {
-          id: 'sim-stamp-' + Date.now(),
-          userId: teacherId,
-          branchId,
-          stampType: 'IN',
-          timestamp: new Date(),
-        };
-      }
 
       return res.status(200).json({
         message: 'Successfully marked IN. Session attendance validated server-side.',
@@ -152,20 +123,7 @@ router.post(
     }
 
     try {
-      let branch: any = null;
-      try {
-        branch = await prisma.branch.findUnique({
-          where: { id: branchId },
-        });
-      } catch (dbErr) {
-        branch = {
-          id: branchId,
-          name: 'Main Center Kathmandu',
-          latitude: 27.6915,
-          longitude: 85.3422,
-          radiusMeters: 100.0,
-        };
-      }
+      const branch = await prisma.branch.findFirst({ where: { id: branchId, tenantId: req.tenantId! } });
 
       if (!branch) {
         return res.status(404).json({ error: 'Branch not found.' });
@@ -185,9 +143,7 @@ router.post(
         });
       }
 
-      let stamp: any = null;
-      try {
-        stamp = await prisma.teacherAttendance.create({
+      const stamp = await prisma.teacherAttendance.create({
           data: {
             userId: teacherId,
             branchId,
@@ -197,15 +153,6 @@ router.post(
             gpsAccuracy: Number(gpsAccuracy),
           },
         });
-      } catch (dbErr) {
-        stamp = {
-          id: 'sim-stamp-out-' + Date.now(),
-          userId: teacherId,
-          branchId,
-          stampType: 'OUT',
-          timestamp: new Date(),
-        };
-      }
 
       return res.status(200).json({
         message: 'Successfully marked OUT. Core checkout logged.',
@@ -222,14 +169,20 @@ router.post(
   '/student',
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
-    const { classId, date, students } = req.body;
+    const { classId, date, students, sessionId } = req.body;
     const teacherId = req.user!.id;
 
-    if (!classId || !date || !students || !Array.isArray(students)) {
-      return res.status(400).json({ error: 'Missing required parameters: classId, date, students.' });
+    if (!classId || !sessionId || !date || !students || !Array.isArray(students)) {
+      return res.status(400).json({ error: 'Missing required parameters: classId, sessionId, date, students.' });
     }
 
     try {
+      const klass = await prisma.class.findFirst({
+        where: { id: classId, teacherId, course: { tenantId: req.tenantId! } },
+      });
+      if (!klass) return res.status(403).json({ error: 'You are not assigned to this class.' });
+      const session = await prisma.teacherSession.findFirst({ where: { id: sessionId, classId, teacherId } });
+      if (!session) return res.status(404).json({ error: 'Teacher session not found.' });
       const records = [];
       const queryDate = new Date(date);
 
@@ -237,17 +190,8 @@ router.post(
         const { studentId, status } = entry;
 
         // 1. Dues Block Check
-        let enrollment: any = null;
-        try {
-          enrollment = await prisma.enrollment.findFirst({
-            where: { studentId, classId },
-          });
-        } catch (dbErr) {
-          // Fallback simulation context check
-          enrollment = {
-            status: req.body.simEnrollmentStatus || 'ACTIVE',
-          };
-        }
+        const enrollment = await prisma.enrollment.findFirst({ where: { studentId, classId } });
+        if (!enrollment) return res.status(404).json({ error: `Student ${studentId} is not enrolled in this class.` });
 
         if (enrollment && enrollment.status === 'BLOCKED' && status === 'PRESENT') {
           return res.status(403).json({
@@ -256,9 +200,7 @@ router.post(
         }
 
         // 2. Approved Leave Check
-        let approvedLeave: any = null;
-        try {
-          approvedLeave = await prisma.leave.findFirst({
+        const approvedLeave = await prisma.leave.findFirst({
             where: {
               userId: studentId,
               status: 'APPROVED_LEVEL2',
@@ -266,40 +208,22 @@ router.post(
               endDate: { gte: queryDate },
             },
           });
-        } catch (dbErr) {
-          // Fallback simulation
-          if (req.body.simHasApprovedLeave === true && studentId === 'st-01-shyam') {
-            approvedLeave = { id: 'sim-leave-111' };
-          }
-        }
 
         let finalStatus = status;
         if (approvedLeave) {
           finalStatus = 'EXCUSED';
         }
 
-        let record: any = null;
-        try {
-          record = await prisma.studentAttendance.create({
+        const record = await prisma.studentAttendance.create({
             data: {
               studentId,
               classId,
-              sessionId: req.body.sessionId || 'sim-session-123',
+              sessionId,
               date: queryDate,
               status: finalStatus,
               markedBy: teacherId,
             },
           });
-        } catch (dbErr) {
-          record = {
-            id: 'sim-std-att-' + Math.floor(Math.random() * 1000),
-            studentId,
-            classId,
-            date: queryDate,
-            status: finalStatus,
-            markedBy: teacherId,
-          };
-        }
         records.push(record);
       }
 
@@ -327,8 +251,7 @@ router.post(
     }
 
     try {
-      try {
-        await prisma.teacherSession.updateMany({
+      const result = await prisma.teacherSession.updateMany({
           where: {
             teacherId,
             classId,
@@ -340,8 +263,8 @@ router.post(
             updateContent,
           },
         });
-      } catch (dbErr) {
-        // simulation
+      if (result.count === 0) {
+        return res.status(404).json({ error: 'Assigned teacher session not found.' });
       }
 
       return res.status(200).json({

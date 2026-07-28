@@ -33,6 +33,7 @@ router.post(
         return res.status(422).json({ error: 'No Janitor is assigned to this branch. Assign one before logging maintenance work.' });
       }
       const assignedStaffId = defaultAssignee.userId;
+      const tenantPolicy = await prisma.tenant.findUniqueOrThrow({ where: { id: req.tenantId! } });
       const resourceLog = await prisma.resourceLog.create({
           data: {
             branchId,
@@ -52,6 +53,7 @@ router.post(
               description: `Issues logged by staff: ${remarks || 'None specified'}. Condition: ${JSON.stringify(itemsCondition)}`,
               assignedStaffId,
               status: 'PENDING',
+              escalationDaysSnapshot: tenantPolicy.maintenanceEscalationDays,
             },
           });
 

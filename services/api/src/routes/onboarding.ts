@@ -321,23 +321,10 @@ router.get(
   async (req: TenantRequest, res: Response) => {
     const { studentId } = req.params;
     try {
-      let student: any = null;
-      try {
-        student = await prisma.student.findUnique({
-          where: { id: studentId },
+      const student = await prisma.student.findFirst({
+          where: { id: studentId, user: { tenantId: req.tenantId! } },
           include: { user: true },
         });
-      } catch (dbErr) {
-        student = {
-          id: studentId,
-          emergencyContact: '9851012345',
-          user: {
-            firstName: 'Shyam',
-            lastName: 'Bahadur',
-            email: 'shyam@student.com.np',
-          },
-        };
-      }
 
       if (!student) {
         return res.status(404).json({ error: 'Student record not found.' });
@@ -365,47 +352,17 @@ router.get(
   async (req: TenantRequest, res: Response) => {
     const { studentId } = req.params;
     try {
-      let student: any = null;
-      let enrollments: any[] = [];
-      let certificates: any[] = [];
-
-      try {
-        student = await prisma.student.findUnique({
-          where: { id: studentId },
+      const student = await prisma.student.findFirst({
+          where: { id: studentId, user: { tenantId: req.tenantId! } },
           include: { user: true },
         });
-        enrollments = await prisma.enrollment.findMany({
-          where: { studentId },
+      const enrollments = await prisma.enrollment.findMany({
+          where: { studentId, student: { user: { tenantId: req.tenantId! } } },
           include: { class: { include: { course: true } } },
         });
-        certificates = await prisma.certificate.findMany({
-          where: { studentId },
+      const certificates = await prisma.certificate.findMany({
+          where: { studentId, student: { user: { tenantId: req.tenantId! } } },
         });
-      } catch (dbErr) {
-        student = {
-          id: studentId,
-          user: { firstName: 'Shyam', lastName: 'Bahadur' },
-        };
-        enrollments = [
-          {
-            id: 'sim-enroll-123',
-            class: {
-              name: 'Grade 12 Physics Core',
-              course: { name: 'Grade 12 Physics', type: 'REGULAR' },
-            },
-            status: 'ACTIVE',
-            admissionDate: new Date('2026-01-15'),
-          },
-        ];
-        certificates = [
-          {
-            id: 'sim-cert-999',
-            certificateType: 'ACHIEVEMENT',
-            issueDate: new Date(),
-            verificationCode: 'CERT-2026-0CYUF87E0',
-          },
-        ];
-      }
 
       if (!student) {
         return res.status(404).json({ error: 'Student record not found.' });
@@ -425,14 +382,13 @@ router.get(
           admissionDate: e.admissionDate,
         })),
         academicSummary: {
-          gpaHint: '3.6 / 4.0',
-          averageAttendanceRate: '94.5%',
+          gpa: null,
+          averageAttendanceRate: null,
         },
         certificatesIssued: certificates.map(c => ({
-          certificateId: c.id,
-          type: c.certificateType,
-          issuedAt: c.issueDate,
-          verificationCode: c.verificationCode,
+          certificateId: c.certificateId,
+          issuedAt: c.issuedDate,
+          pdfUrl: c.pdfUrl,
         })),
       });
     } catch (error: any) {

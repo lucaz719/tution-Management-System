@@ -39,17 +39,7 @@ router.post(
         class: personalizedClass,
       });
     } catch (error: any) {
-      return res.status(201).json({
-        message: 'Simulation Mode: Personalized class created successfully.',
-        class: {
-          id: 'sim-class-' + Math.floor(Math.random() * 1000),
-          branchId,
-          courseId,
-          name,
-          schedule,
-          createdAt: new Date(),
-        },
-      });
+      return res.status(500).json({ error: 'Failed to create personalized class.' });
     }
   }
 );
@@ -84,17 +74,7 @@ router.post(
         enrollment,
       });
     } catch (error: any) {
-      return res.status(201).json({
-        message: 'Simulation Mode: Student enrolled in personalized class successfully.',
-        enrollment: {
-          id: 'sim-enroll-' + Math.floor(Math.random() * 1000),
-          studentId,
-          courseId,
-          classId,
-          status: 'ACTIVE',
-          admissionDate: new Date(),
-        },
-      });
+      return res.status(500).json({ error: 'Failed to enroll student in personalized class.' });
     }
   }
 );
@@ -134,22 +114,7 @@ router.post(
         session,
       });
     } catch (error: any) {
-      return res.status(201).json({
-        message: 'Simulation Mode: Personalized class session log saved successfully.',
-        session: {
-          id: 'sim-sess-' + Math.floor(Math.random() * 1000),
-          teacherId,
-          classId,
-          date: new Date(date),
-          status: 'PRESENT_CONFIRMED',
-          checkInTime: new Date(checkInTime),
-          checkOutTime: new Date(checkOutTime),
-          totalMinutes: totalMinutes || 60,
-          dailyUpdateSubmitted: true,
-          updateContent,
-          createdAt: new Date(),
-        },
-      });
+      return res.status(500).json({ error: 'Failed to save personalized class session.' });
     }
   }
 );

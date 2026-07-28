@@ -266,11 +266,14 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
       const parent = await tx.parent.create({ data: { userId: parentUser.id } });
       await tx.studentParent.create({ data: { studentId: student.id, parentId: parent.id } });
 
+      const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: req.tenantId! } });
       const invoice = await tx.invoice.create({
         data: {
           tenantId: req.tenantId!,
           studentId: student.id,
           invoiceType: 'ADMISSION',
+          panNumberSnapshot: tenant.panNumber,
+          vatRateSnapshot: tenant.vatRate,
           amount: grade.admissionFee,
           netPayable: grade.admissionFee,
           billingCycleStart: now,

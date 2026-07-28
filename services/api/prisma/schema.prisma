@@ -76,6 +76,17 @@ enum PaymentAttemptStatus {
   INCOMPLETE
 }
 
+enum RefundPolicy {
+  PRO_RATA
+  FIXED_DEDUCTION
+  NO_REFUND
+}
+
+enum LateFeeMode {
+  FLAT
+  PERCENTAGE
+}
+
 enum LeaveType {
   CASUAL
   SICK
@@ -120,33 +131,43 @@ model TenantRequest {
 
 // 1. Tenant / Institution
 model Tenant {
-  id                   String                @id @default(uuid())
-  name                 String
-  panNumber            String                @unique // Nepal 9-digit PAN/VAT
-  status               UserStatus            @default(ACTIVE)
-  vatRate              Float                 @default(13)
-  gracePeriodMinutes   Int                   @default(15)
-  pettyCashCapNpr      Int                   @default(20000)
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
-  branches             Branch[]
-  roles                Role[]
-  users                User[]
-  courses              Course[]
-  invoices             Invoice[]
-  leaves               Leave[]
-  pettyCash            PettyCash[]
-  grades               Grade[]
+  id                        String                @id @default(uuid())
+  name                      String
+  panNumber                 String                @unique // Nepal 9-digit PAN/VAT
+  status                    UserStatus            @default(ACTIVE)
+  vatRate                   Float                 @default(13)
+  gracePeriodMinutes        Int                   @default(15)
+  pettyCashCapNpr           Int                   @default(20000)
+  refundPolicy              RefundPolicy          @default(NO_REFUND)
+  lateFeeEnabled            Boolean               @default(false)
+  lateFeeMode               LateFeeMode?
+  lateFeeValue              Decimal?              @db.Decimal(12, 2)
+  lateFeeGraceDays          Int                   @default(0)
+  appointmentWindowHours    Int                   @default(24)
+  maintenanceEscalationDays Int                   @default(3)
+  leavePolicy               Json?
+  performanceWeights        Json?
+  createdAt                 DateTime              @default(now())
+  updatedAt                 DateTime              @updatedAt
+  branches                  Branch[]
+  roles                     Role[]
+  users                     User[]
+  courses                   Course[]
+  invoices                  Invoice[]
+  leaves                    Leave[]
+  pettyCash                 PettyCash[]
+  grades                    Grade[]
   // Phase 2 relations
-  academicEvents       AcademicEvent[]
-  socialConfigs        TenantSocialConfig[]
-  socialPosts          SocialMediaPost[]
-  certificateTemplates CertificateTemplate[]
-  vehicleRoutes        VehicleRoute[]
-  expenses             Expense[]
-  payrolls             Payroll[]
-  refunds              RefundRequest[]
-  paymentAttempts      PaymentAttempt[]
+  academicEvents            AcademicEvent[]
+  socialConfigs             TenantSocialConfig[]
+  socialPosts               SocialMediaPost[]
+  certificateTemplates      CertificateTemplate[]
+  vehicleRoutes             VehicleRoute[]
+  expenses                  Expense[]
+  payrolls                  Payroll[]
+  refunds                   RefundRequest[]
+  paymentAttempts           PaymentAttempt[]
+  policyVersions            TenantPolicyVersion[]
 }
 
 // 2. Branch / Center
@@ -439,6 +460,8 @@ model Invoice {
   dueDate           DateTime
   status            InvoiceStatus    @default(UNPAID)
   invoiceType       InvoiceType      @default(TUITION)
+  panNumberSnapshot String           @default("")
+  vatRateSnapshot   Decimal          @default(0.00) @db.Decimal(5, 2)
   nepalPayQrCode    String? // Storage for Nepal Pay QR string/image reference
   transactionId     String? // Nepal Pay transaction reference
   paymentDate       DateTime?
@@ -474,22 +497,23 @@ model PaymentAttempt {
 
 // 17. Leaves
 model Leave {
-  id         String      @id @default(uuid())
-  tenantId   String
-  tenant     Tenant      @relation(fields: [tenantId], references: [id])
-  branchId   String
-  branch     Branch      @relation(fields: [branchId], references: [id])
-  userId     String
-  user       User        @relation(fields: [userId], references: [id])
-  leaveType  LeaveType
-  startDate  DateTime
-  endDate    DateTime
-  reason     String
-  status     LeaveStatus @default(PENDING)
-  approvedBy String? // Approver User ID
-  remarks    String?
-  createdAt  DateTime    @default(now())
-  updatedAt  DateTime    @updatedAt
+  id             String      @id @default(uuid())
+  tenantId       String
+  tenant         Tenant      @relation(fields: [tenantId], references: [id])
+  branchId       String
+  branch         Branch      @relation(fields: [branchId], references: [id])
+  userId         String
+  user           User        @relation(fields: [userId], references: [id])
+  leaveType      LeaveType
+  startDate      DateTime
+  endDate        DateTime
+  reason         String
+  status         LeaveStatus @default(PENDING)
+  approvedBy     String? // Approver User ID
+  remarks        String?
+  policySnapshot Json?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 }
 
 // 18. Petty Cash Management
@@ -506,6 +530,7 @@ model PettyCash {
   receiptProofUrl  String?
   remainingBalance Decimal         @db.Decimal(12, 2)
   approvalChain    Json // Log of transitions: [{role, action, timestamp, comment}]
+  policySnapshot   Json?
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 }
@@ -528,15 +553,16 @@ model ResourceLog {
 
 // 20. Maintenance Tasks
 model MaintenanceTask {
-  id                  String    @id @default(uuid())
-  branchId            String
-  branch              Branch    @relation(fields: [branchId], references: [id])
-  assignedStaffId     String
-  description         String
-  status              String    @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED
-  completionTimestamp DateTime?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  id                     String    @id @default(uuid())
+  branchId               String
+  branch                 Branch    @relation(fields: [branchId], references: [id])
+  assignedStaffId        String
+  description            String
+  status                 String    @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED
+  completionTimestamp    DateTime?
+  escalationDaysSnapshot Int       @default(3)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 }
 
 // ==========================================
@@ -797,27 +823,51 @@ model Payroll {
   attendanceDeductions Float
   bonuses              Float
   netPayable           Float
-  status               String      @default("PENDING") // PENDING, PAID
+  status               String      @default("PENDING") // PENDING, APPROVED_FOR_MANUAL_PAYMENT, MANUALLY_PAID
+  approvedBy           String?
+  approvedAt           DateTime?
+  settlementReference  String?
+  reconciledBy         String?
   paymentDate          DateTime?
   createdAt            DateTime    @default(now())
   updatedAt            DateTime    @updatedAt
 }
 
 model RefundRequest {
-  id              String   @id @default(uuid())
-  tenantId        String
-  tenant          Tenant   @relation(fields: [tenantId], references: [id])
-  studentId       String
-  student         Student  @relation(fields: [studentId], references: [id])
-  courseId        String
-  course          Course   @relation(fields: [courseId], references: [id])
-  reason          String
-  refundAmount    Float
-  deductionAmount Float
-  status          String   @default("PENDING") // PENDING, APPROVED, REJECTED
-  approvedBy      String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                  String    @id @default(uuid())
+  tenantId            String
+  tenant              Tenant    @relation(fields: [tenantId], references: [id])
+  studentId           String
+  student             Student   @relation(fields: [studentId], references: [id])
+  courseId            String
+  course              Course    @relation(fields: [courseId], references: [id])
+  reason              String
+  refundAmount        Float
+  deductionAmount     Float
+  status              String    @default("PENDING") // PENDING, APPROVED_FOR_MANUAL_REFUND, MANUALLY_REFUNDED, REJECTED
+  approvedBy          String?
+  approvedAt          DateTime?
+  settlementReference String?
+  settledAt           DateTime?
+  settledBy           String?
+  settlementRemarks   String?
+  policySnapshot      Json?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+}
+
+model TenantPolicyVersion {
+  id            String   @id @default(uuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  version       Int
+  config        Json
+  effectiveFrom DateTime @default(now())
+  changedBy     String
+  createdAt     DateTime @default(now())
+
+  @@unique([tenantId, version])
+  @@index([tenantId, effectiveFrom])
 }
 
 model Session {

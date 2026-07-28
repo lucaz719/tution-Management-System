@@ -28,6 +28,8 @@ router.post(
     }
 
     try {
+      const tenantPolicy = await prisma.tenant.findUnique({ where: { id: tenantId } });
+      if (!tenantPolicy) return res.status(404).json({ error: 'Tenant not found.' });
       const leave = await prisma.leave.create({
         data: {
           tenantId,
@@ -38,6 +40,10 @@ router.post(
           endDate: new Date(endDate),
           reason,
           status: 'PENDING' as LeaveStatus,
+          policySnapshot: {
+            leavePolicy: tenantPolicy.leavePolicy ?? {},
+            submittedAt: new Date().toISOString(),
+          },
         },
       });
 
@@ -145,13 +151,18 @@ router.post(
     }
 
     try {
-      let emergencyLeave: any = null;
-      try {
-        emergencyLeave = await prisma.leave.create({
+      const student = await prisma.student.findFirst({
+        where: {
+          id: studentId,
+          user: { tenantId: req.tenantId!, userRoles: { some: { branchId } } },
+        },
+      });
+      if (!student) return res.status(404).json({ error: 'Student not found in your institution.' });
+      const emergencyLeave = await prisma.leave.create({
           data: {
             tenantId: req.tenantId!,
             branchId,
-            userId: studentId,
+            userId: student.userId,
             leaveType: 'EARLY_OUT',
             startDate: new Date(),
             endDate: new Date(),
@@ -160,18 +171,6 @@ router.post(
             approvedBy: req.user!.id,
           },
         });
-      } catch (e) {
-        emergencyLeave = {
-          id: 'sim-emergency-' + Date.now(),
-          tenantId: req.tenantId!,
-          branchId,
-          userId: studentId,
-          leaveType: 'EARLY_OUT',
-          reason: `Emergency Out: ${reason}`,
-          status: 'APPROVED_LEVEL2',
-          createdAt: new Date(),
-        };
-      }
 
       // Dispatch urgent SMS notification to parents
       const smsSender = new MockSmsSender();
