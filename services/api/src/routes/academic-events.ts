@@ -25,6 +25,10 @@ router.post(
     }
 
     try {
+      if (branchId) {
+        const branch = await prisma.branch.findFirst({ where: { id: branchId, tenantId: req.tenantId! } });
+        if (!branch) return res.status(404).json({ error: 'Branch not found in your institution.' });
+      }
       const event = await prisma.academicEvent.create({
         data: {
           tenantId: req.tenantId!,

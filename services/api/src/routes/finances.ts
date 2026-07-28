@@ -35,6 +35,25 @@ async function loadInvoicePaymentAccess(req: TenantRequest, invoiceId: string) {
   return ownStudent || ownParent || isTenantAdmin(req.user!) || staffAccess ? invoice : null;
 }
 
+async function loadStudentBillingAccess(req: TenantRequest, studentId: string) {
+  const student = await prisma.student.findFirst({
+    where: { id: studentId, user: { tenantId: req.tenantId! } },
+    include: {
+      user: { include: { userRoles: true } },
+      studentParents: { include: { parent: true } },
+    },
+  });
+  if (!student) return null;
+  const branchIds = student.user.userRoles
+    .map((assignment) => assignment.branchId)
+    .filter((branchId): branchId is string => Boolean(branchId));
+  const allowed = student.userId === req.user!.id
+    || student.studentParents.some((link) => link.parent.userId === req.user!.id)
+    || isTenantAdmin(req.user!)
+    || branchIds.some((branchId) => hasBranchPermission(req.user!, 'manage_billing', branchId));
+  return allowed ? student : null;
+}
+
 router.post('/connectips/initiate/:invoiceId', authMiddleware, async (req: TenantRequest, res: Response) => {
   try {
     const invoice = await loadInvoicePaymentAccess(req, req.params.invoiceId);
@@ -255,8 +274,10 @@ router.get(
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
     try {
+      const student = await loadStudentBillingAccess(req, req.params.studentId);
+      if (!student) return res.status(404).json({ error: 'Student fee record not found or unavailable.' });
       const invoices = await prisma.invoice.findMany({
-        where: { studentId: req.params.studentId, tenantId: req.tenantId! },
+        where: { studentId: student.id, tenantId: req.tenantId! },
         orderBy: { dueDate: 'desc' },
       });
       return res.json({
@@ -281,7 +302,6 @@ router.get(
 router.post(
   '/invoices/:id/pay',
   authMiddleware,
-  hasPermission('manage_billing'),
   async (req: TenantRequest, res: Response) => {
     const { id } = req.params;
     const transactionId = typeof req.body?.transactionId === 'string' && req.body.transactionId.trim()
@@ -308,10 +328,12 @@ router.post(
         return res.status(400).json({ error: 'This invoice is already paid.' });
       }
       const updated = await prisma.$transaction(async (tx) => {
-        const paid = await tx.invoice.update({
-          where: { id },
+        const transition = await tx.invoice.updateMany({
+          where: { id, tenantId: req.tenantId!, status: { not: 'PAID' } },
           data: { status: 'PAID', paymentDate: new Date(), transactionId },
         });
+        if (transition.count !== 1) return null;
+        const paid = await tx.invoice.findUniqueOrThrow({ where: { id } });
         if (paid.invoiceType === 'ADMISSION') {
           await tx.student.update({
             where: { id: paid.studentId },
@@ -320,6 +342,9 @@ router.post(
         }
         return paid;
       });
+      if (!updated) {
+        return res.status(409).json({ error: 'Invoice payment was already processed by another request.' });
+      }
       return res.json({ message: 'Payment recorded.', invoice: { id: updated.id, status: updated.status, paymentDate: updated.paymentDate } });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to record payment.', details: error.message });
@@ -433,14 +458,13 @@ router.get(
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
     try {
+      const authorizedInvoice = await loadInvoicePaymentAccess(req, req.params.invoiceId);
+      if (!authorizedInvoice) return res.status(404).json({ error: 'Invoice not found or unavailable to this account.' });
       const invoice = await prisma.invoice.findUnique({
-        where: { id: req.params.invoiceId },
+        where: { id: authorizedInvoice.id },
         include: { student: { include: { user: true } } },
       });
-
-      if (!invoice || invoice.tenantId !== req.tenantId) {
-        return res.status(404).json({ error: 'Invoice not found.' });
-      }
+      if (!invoice) return res.status(404).json({ error: 'Invoice not found.' });
 
       // Format NepalPay EMVCo static/dynamic payload string format
       const payload = {
@@ -798,13 +822,16 @@ router.post(
         comment: remarks || '',
       }];
 
-      await prisma.pettyCash.update({
-        where: { id },
+      const transition = await prisma.pettyCash.updateMany({
+        where: { id, tenantId: req.tenantId!, status: 'PENDING' },
         data: {
           status: 'APPROVED_LEVEL1',
           approvalChain: updatedChain,
         },
       });
+      if (transition.count !== 1) {
+        return res.status(409).json({ error: 'Petty-cash request was already processed.' });
+      }
 
       return res.status(200).json({
         message: 'L1 approval completed.',
@@ -838,13 +865,16 @@ router.post(
         comment: remarks || '',
       }];
 
-      await prisma.pettyCash.update({
-        where: { id },
+      const transition = await prisma.pettyCash.updateMany({
+        where: { id, tenantId: req.tenantId!, status: 'APPROVED_LEVEL1' },
         data: {
           status: 'RELEASED',
           approvalChain: updatedChain,
         },
       });
+      if (transition.count !== 1) {
+        return res.status(409).json({ error: 'Petty-cash request was already released.' });
+      }
 
       return res.status(200).json({
         message: 'L2 approval completed. Funds released.',
@@ -876,13 +906,21 @@ router.post(
         return res.status(403).json({ error: 'Only the requesting Accountant may submit a receipt for released petty cash.' });
       }
 
-      await prisma.pettyCash.update({
-          where: { id },
+      const transition = await prisma.pettyCash.updateMany({
+          where: {
+            id,
+            tenantId: req.tenantId!,
+            status: 'RELEASED',
+            accountantId: req.user!.id,
+          },
           data: {
             status: 'RECEIPT_SUBMITTED',
             receiptProofUrl,
           },
         });
+      if (transition.count !== 1) {
+        return res.status(409).json({ error: 'Receipt was already submitted.' });
+      }
 
       return res.status(200).json({
         message: 'Receipt submitted successfully.',
@@ -912,12 +950,15 @@ router.post(
         return res.status(409).json({ error: 'A submitted receipt is required before closing petty cash.' });
       }
 
-      await prisma.pettyCash.update({
-          where: { id },
+      const transition = await prisma.pettyCash.updateMany({
+          where: { id, tenantId: req.tenantId!, status: 'RECEIPT_SUBMITTED' },
           data: {
             status: 'CLOSED',
           },
         });
+      if (transition.count !== 1) {
+        return res.status(409).json({ error: 'Petty cash was already closed.' });
+      }
 
       return res.status(200).json({
         message: 'Petty cash verified and closed.',

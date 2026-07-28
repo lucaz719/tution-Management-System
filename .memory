@@ -1,0 +1,221 @@
+# TMS Working Memory
+
+Last updated: 2026-07-28
+Repository: `C:\Users\LENOVO\Desktop\tution-Management-System`
+Branch: `main`
+Last committed revision: `038a72f complete tenant security and manual finance workflows`
+
+## Current runtime
+
+- Docker Desktop is running with the WSL 2 Linux engine.
+- PostgreSQL 16 is healthy at `localhost:5432`.
+- API is healthy at `http://localhost:3001/api/health`.
+- Web is healthy at `http://localhost:5173`.
+- The `migrate` container exits with code 0 after applying migrations; this is expected.
+- All 13 Prisma migrations apply successfully from an empty database.
+- `.env.docker` is local-only and explicitly ignored by Git.
+- `.env.docker.example` is the safe tracked template.
+
+Start/check the stack:
+
+```powershell
+docker compose --env-file .env.docker up --build -d
+docker compose --env-file .env.docker ps -a
+docker compose --env-file .env.docker logs --tail 200
+```
+
+Do not use `docker compose down -v` unless intentionally deleting the local
+Docker database volume.
+
+## Completed backend work
+
+- Docker Compose stack for PostgreSQL, migration runner, API, and web.
+- Prisma/OpenSSL support in the API Docker build and runtime images.
+- API workspace dependencies, including Better Auth, copied into the runtime image.
+- Duplicate `User.twoFactorEnabled` operation removed from the Better Auth migration.
+- Web Docker health probe uses explicit IPv4 loopback and reports healthy.
+- Better Auth trusts only the configured `WEB_ORIGIN`; no wildcard origin.
+- Authenticated tenant context comes from the verified session, not request headers.
+- Branch-scoped middleware is default-deny when no explicit branch is proven.
+- Webhook signature, amount, replay, tenant, and invoice protections.
+- Cron restricted to tenant-wide Tenant Admin and tenant-scoped mutations.
+- Simulation/fail-open route behavior removed; unfinished modules return 501.
+- Tenant policy versions and historical policy snapshots added.
+- Manual-only refunds and payroll reconciliation; TMS does not send refund or salary funds.
+- connectIPS is inbound-only and validates payments with NCHL before confirmation.
+- Admission accounts remain inactive until the admission invoice is paid.
+- Only Tenant Admin or the assigned Branch Admin may issue student/parent credentials.
+- UKG-Class 10 grade billing, Class 11/12 subject billing, and extra-activity billing rules.
+- Invoice PAN/VAT, refund, leave, petty-cash, and other applicable policy snapshots.
+- Conditional atomic transitions for invoice payment, refund approval/settlement,
+  petty-cash approval/receipt/closure, and payroll approval/reconciliation.
+- Refund request IDOR fixed: student/course tenant ownership and caller authorization
+  are verified before creating the request.
+- Invoice payment authorization fixed so assigned accountants pass explicit
+  resource-level branch authorization.
+- Resource-by-ID authorization now resolves ownership from the stored resource
+  before access: course/class/enrollment mutations, class/timetable reads,
+  student invoice lists, NepalPay QR reads, teacher-session updates, and every
+  homework create/submit/grade/read path enforce tenant plus branch or direct
+  student/parent/teacher relationships.
+- Social-media management was removed by product decision: no API route, server
+  mount, Prisma models, permissions, navigation entries, configuration secret,
+  encryption helper, or integration cases remain. Migration
+  `20260728230000_remove_social_media` removes existing social tables and enum.
+
+## Integration coverage completed
+
+Test:
+
+```powershell
+npm run test:tenant-admin:integration --workspace @tms/api
+```
+
+The suite uses a separate PostgreSQL schema named `tenant_admin_integration`,
+runs real migrations and Better Auth sessions, and drops the schema afterward.
+
+Covered:
+
+- Missing-session rejection.
+- Real Tenant Admin, Branch Admin, and Accountant sign-in/session resolution.
+- Client-supplied tenant-header injection denial.
+- Tenant-scoped branch listing and creation.
+- Cross-tenant branch read/update denial.
+- Cross-tenant grade read/update/delete denial.
+- Grade creation and billing fields.
+- Tenant policy authorization, validation, update, and historical snapshot.
+- Admission creation with inactive accounts and admission invoice.
+- Credential issuance blocked before payment.
+- Accountant records admission payment; admission becomes ready for login.
+- Duplicate invoice payment rejection.
+- Student and parent activation after credential issuance.
+- Tenant-only cron execution and tenant-scoped cron mutation.
+- Refund cross-tenant IDOR denial.
+- Refund policy snapshot.
+- Concurrent refund approvals: exactly one succeeds and one returns conflict.
+- Manual refund settlement and duplicate settlement rejection.
+- Petty-cash request, L1 approval, L2 release, receipt, and closure.
+- Petty-cash wrong-role and cross-tenant denial.
+- Payroll wrong-role/cross-tenant denial, approval, and manual reconciliation.
+- Courses: create, bulk create, list, update, delete, class CRUD, enrollment,
+  specialized enrollment, billing block/override, unenrollment, and timetables.
+- Attendance: teacher IN/OUT geofence, student sheet, daily session update,
+  assignment checks, and foreign-branch denial.
+- HR: staff documents, expiry alerts, payroll calculation/listing, exit initiation,
+  Branch Admin clearance, Tenant Admin settlement, and account deactivation.
+- Leaves: submission, branch ownership, long-sick L1/L2 role separation,
+  emergency departure, and cross-tenant denial.
+- Certificates: Tenant-Admin-only templates, issuance ownership, and public verification.
+- Resources: branch ownership, Janitor assignment, task listing/completion,
+  duplicate completion conflict, and cross-tenant denial.
+- Academic events: tenant-wide and branch events, payment calendar, and
+  foreign-branch creation denial.
+- Users: directory, profiles, analytics, Branch Admin provisioning, role-safe
+  user creation, bulk student import, updates, soft deletion, and foreign-user denial.
+- Reporting: fee overview, student invoices, P&L, ledger export, and payroll listing.
+- Same-tenant/wrong-branch probes cover course/class/enrollment mutations,
+  class and student/teacher timetable reads, student invoice lists, NepalPay QR,
+  teacher sessions, and homework.
+- Foreign-tenant probes cover the matching changed resource-ID paths and verify
+  identifiers are hidden with 404 responses.
+- Homework covers assigned-teacher creation/grading, student self-submission,
+  linked-parent visibility, cross-student denial, wrong-branch denial, and
+  foreign-tenant hiding.
+
+Additional defects fixed during the full route pass:
+
+- Foreign branch IDs can no longer create leave, resource, or calendar records.
+- Billing block/override and specialized enrollment now verify tenant ownership,
+  branch authority, resource relationships, and valid workflow state.
+- Teacher session updates use explicit teacher/class/tenant authorization rather
+  than incompatible generic branch middleware.
+- Student approved-leave attendance checks now use the student's user ID.
+- Long-sick L1 requires an actual assigned Branch Admin; Tenant Admin is L2 only.
+- HR clearance requires an actual assigned Branch Admin; Tenant Admin performs
+  final settlement only.
+- Leave and maintenance completion transitions are conditional and atomic.
+- Nepali date library default/named ESM export shapes are normalized, restoring
+  executable billing overview/reporting.
+
+## Validation status
+
+Passing:
+
+```powershell
+npm run test:tenant-admin:integration --workspace @tms/api
+npm run test:access --workspace @tms/api
+npm run test:billing --workspace @tms/api
+npm run test:connectips --workspace @tms/api
+npm run build
+npx prisma validate --schema services/api/prisma/schema.prisma
+git diff --check
+```
+
+Known non-blocking warnings:
+
+- Webpack main bundle is approximately 394 KiB and exceeds its recommended size.
+- `npm audit --omit=dev` reports 3 production advisories:
+  - `body-parser`: 1 low; a non-breaking fix may be available.
+  - React Router: 2 moderate; remediation requires a controlled breaking upgrade.
+- Do not run `npm audit fix --force` without reviewing the React Router migration.
+- Docker builds report engine requirements from transitive packages:
+  `kysely` requests Node 22 and `nepali-date-library` requests Node 24,
+  while the current image uses Node 20. Builds and tests currently pass, but the
+  runtime version/dependency compatibility must be resolved before production.
+
+## Remaining work, in priority order
+
+1. Convert any remaining read-then-write workflow transitions to conditional,
+   atomic database transitions.
+2. Add strict shared input schemas, request body limits, Helmet/security headers,
+   standardized errors, and endpoint-specific rate limiting.
+3. Implement the modules that intentionally return 501:
+   appointments, parent-teacher communication persistence, broadcast persistence,
+   student performance, and staff performance reports.
+4. Enforce calendar immutability/update/delete policy from the Tenant Admin PRD.
+5. Complete petty-cash reject/send-back and monthly-cap behavior if required by PRD.
+6. Build connectIPS UI flows for web/mobile and validate with real NCHL UAT credentials.
+7. Build receipt, manual-refund, payroll-reconciliation, and audit-history screens.
+8. Resolve production dependency advisories and Node engine compatibility.
+9. Run final role-by-role, cross-tenant, cross-branch, backup/restore, HTTPS,
+    cookie, CORS, and rollback testing before production.
+
+## connectIPS and finance constraints
+
+- connectIPS credentials/PFX are not committed.
+- Real NCHL UAT validation is still pending credentials.
+- connectIPS is used only to receive payments.
+- Refunds are approved and reconciled manually using an external reference.
+- Payroll is calculated/approved/reconciled in TMS; salary funds are paid outside TMS.
+
+## Current uncommitted work
+
+- `.gitignore`
+- `.memory`
+- `apps/web/Dockerfile`
+- `services/api/Dockerfile`
+- `services/api/package.json`
+- `services/api/prisma/migrations/20260728170000_add_better_auth_core/migration.sql`
+- `services/api/prisma/migrations/20260728230000_remove_social_media/migration.sql`
+- `services/api/prisma/schema.prisma`
+- `services/api/prisma/seed.ts`
+- `services/api/src/integration/tenant-admin.integration.test.ts`
+- `services/api/src/routes/courses.ts`
+- `services/api/src/routes/academic-events.ts`
+- `services/api/src/routes/attendance.ts`
+- `services/api/src/routes/finances.ts`
+- `services/api/src/routes/hr.ts`
+- `services/api/src/routes/leaves.ts`
+- `services/api/src/routes/resources.ts`
+- `services/api/src/routes/onboarding.ts`
+- `services/api/src/server.ts`
+- `services/api/src/utils/auth.ts`
+- `services/api/src/utils/roles.ts`
+- `services/api/src/utils/nepali.ts`
+- `apps/web/src/components/patterns/dashboardNavigation.ts`
+- `packages/types/src/index.ts`
+- `compose.yml`
+- `.env.docker.example`
+- `services/api/.env.example`
+
+These changes have been tested but have not yet been committed or pushed.

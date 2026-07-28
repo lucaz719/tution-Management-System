@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
-import { canAccessBranch, isTenantAdmin } from '../utils/access-control';
+import { canAccessBranch, hasBranchPermission, isTenantAdmin } from '../utils/access-control';
 
 const router = Router();
 
@@ -374,7 +374,6 @@ async function ensureTodaySession(teacherId: string, classId: string, schedule: 
 router.put(
   '/classes/:id',
   authMiddleware,
-  hasPermission('manage_courses'),
   async (req: TenantRequest, res: Response) => {
     const { id } = req.params;
     const { name, schedule, teacherId } = req.body;
@@ -383,6 +382,9 @@ router.put(
       const cls = await prisma.class.findUnique({ where: { id }, include: { course: true } });
       if (!cls || cls.course.tenantId !== req.tenantId) {
         return res.status(404).json({ error: 'Class not found in your institution.' });
+      }
+      if (!hasBranchPermission(req.user!, 'manage_courses', cls.branchId)) {
+        return res.status(403).json({ error: 'You cannot update classes for this branch.' });
       }
 
       const data: Record<string, unknown> = {};
@@ -428,7 +430,6 @@ router.put(
 router.delete(
   '/classes/:id',
   authMiddleware,
-  hasPermission('manage_courses'),
   async (req: TenantRequest, res: Response) => {
     const { id } = req.params;
 
@@ -439,6 +440,9 @@ router.delete(
       });
       if (!cls || cls.course.tenantId !== req.tenantId) {
         return res.status(404).json({ error: 'Class not found in your institution.' });
+      }
+      if (!hasBranchPermission(req.user!, 'manage_courses', cls.branchId)) {
+        return res.status(403).json({ error: 'You cannot delete classes for this branch.' });
       }
       if (cls._count.enrollments > 0) {
         return res.status(409).json({ error: 'Cannot delete a class with enrolled students. Move or unenrol them first.' });
@@ -468,6 +472,10 @@ router.get(
       if (!cls) {
         return res.status(404).json({ error: 'Class not found.' });
       }
+      const hasBranchMembership = req.user!.roles.some((role: any) => role.branchId === cls.branchId);
+      if (!isTenantAdmin(req.user!) && !hasBranchMembership) {
+        return res.status(403).json({ error: 'You cannot view classes for this branch.' });
+      }
       return res.json({ class: cls });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to load class.' });
@@ -482,6 +490,22 @@ router.get(
   async (req: TenantRequest, res: Response) => {
     const { studentId } = req.params;
     try {
+      const student = await prisma.student.findFirst({
+        where: { id: studentId, user: { tenantId: req.tenantId! } },
+        include: {
+          user: { include: { userRoles: true } },
+          studentParents: { include: { parent: true } },
+        },
+      });
+      if (!student) return res.status(404).json({ error: 'Student not found in your institution.' });
+      const branchIds = student.user.userRoles
+        .map((assignment) => assignment.branchId)
+        .filter((branchId): branchId is string => Boolean(branchId));
+      const allowed = student.userId === req.user!.id
+        || student.studentParents.some((link) => link.parent.userId === req.user!.id)
+        || isTenantAdmin(req.user!)
+        || branchIds.some((branchId) => canAccessBranch(req.user!, branchId));
+      if (!allowed) return res.status(403).json({ error: 'You cannot view this student timetable.' });
       const enrollments = await prisma.enrollment.findMany({
         where: { studentId, status: 'ACTIVE', student: { user: { tenantId: req.tenantId! } } },
         include: { class: true },
@@ -506,6 +530,18 @@ router.get(
   async (req: TenantRequest, res: Response) => {
     const { teacherId } = req.params;
     try {
+      const teacher = await prisma.user.findFirst({
+        where: { id: teacherId, tenantId: req.tenantId!, userRoles: { some: { role: { name: 'Teacher' } } } },
+        include: { userRoles: true },
+      });
+      if (!teacher) return res.status(404).json({ error: 'Teacher not found in your institution.' });
+      const branchIds = teacher.userRoles
+        .map((assignment) => assignment.branchId)
+        .filter((branchId): branchId is string => Boolean(branchId));
+      const allowed = teacher.id === req.user!.id
+        || isTenantAdmin(req.user!)
+        || branchIds.some((branchId) => canAccessBranch(req.user!, branchId));
+      if (!allowed) return res.status(403).json({ error: 'You cannot view this teacher timetable.' });
       const sessions = await prisma.teacherSession.findMany({
         where: { teacherId, class: { course: { tenantId: req.tenantId! } } },
         include: { class: true },
@@ -540,10 +576,25 @@ router.post(
       return res.status(400).json({ error: 'Missing required parameters: studentId, courseId.' });
     }
     try {
-      await prisma.enrollment.updateMany({
-        where: { studentId, courseId, status: 'ACTIVE' },
+      const [student, course] = await Promise.all([
+        prisma.student.findFirst({ where: { id: studentId, user: { tenantId: req.tenantId! } } }),
+        prisma.course.findFirst({ where: { id: courseId, tenantId: req.tenantId! } }),
+      ]);
+      if (!student || !course) return res.status(404).json({ error: 'Student or course not found in your institution.' });
+      if (!canAccessBranch(req.user!, course.branchId)) {
+        return res.status(403).json({ error: 'You cannot manage billing for this course branch.' });
+      }
+      const transition = await prisma.enrollment.updateMany({
+        where: {
+          studentId,
+          courseId,
+          status: 'ACTIVE',
+          student: { user: { tenantId: req.tenantId! } },
+          course: { tenantId: req.tenantId! },
+        },
         data: { status: 'BLOCKED' },
       });
+      if (transition.count === 0) return res.status(404).json({ error: 'Active enrollment not found.' });
       return res.json({ message: 'Student enrollment successfully blocked due to unpaid dues.' });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to block enrollment.' });
@@ -562,10 +613,25 @@ router.post(
       return res.status(400).json({ error: 'Missing required parameters: studentId, courseId, reason.' });
     }
     try {
-      await prisma.enrollment.updateMany({
-        where: { studentId, courseId, status: 'BLOCKED' },
+      const [student, course] = await Promise.all([
+        prisma.student.findFirst({ where: { id: studentId, user: { tenantId: req.tenantId! } } }),
+        prisma.course.findFirst({ where: { id: courseId, tenantId: req.tenantId! } }),
+      ]);
+      if (!student || !course) return res.status(404).json({ error: 'Student or course not found in your institution.' });
+      if (!canAccessBranch(req.user!, course.branchId)) {
+        return res.status(403).json({ error: 'You cannot manage billing for this course branch.' });
+      }
+      const transition = await prisma.enrollment.updateMany({
+        where: {
+          studentId,
+          courseId,
+          status: 'BLOCKED',
+          student: { user: { tenantId: req.tenantId! } },
+          course: { tenantId: req.tenantId! },
+        },
         data: { status: 'ACTIVE' },
       });
+      if (transition.count === 0) return res.status(404).json({ error: 'Blocked enrollment not found.' });
       
       return res.json({
         message: 'Admin override processed successfully. Student access unblocked.',
@@ -590,6 +656,25 @@ router.post(
     }
 
     try {
+      const [student, course, klass] = await Promise.all([
+        prisma.student.findFirst({
+          where: { id: studentId, user: { tenantId: req.tenantId!, status: 'ACTIVE' }, admissionStatus: 'ACTIVE' },
+        }),
+        prisma.course.findFirst({ where: { id: courseId, tenantId: req.tenantId! } }),
+        prisma.class.findFirst({ where: { id: classId, course: { tenantId: req.tenantId! } } }),
+      ]);
+      if (!student || !course || !klass) {
+        return res.status(404).json({ error: 'Student, course, or class not found in your institution.' });
+      }
+      if (klass.courseId !== course.id) return res.status(400).json({ error: 'The selected class does not belong to this course.' });
+      if (!canAccessBranch(req.user!, course.branchId)) {
+        return res.status(403).json({ error: 'You cannot enroll students in this course branch.' });
+      }
+      if (!['MUSIC', 'SHORT_TERM', 'LONG_TERM', 'PERSONALIZED'].includes(type) || course.type !== type) {
+        return res.status(400).json({ error: 'Enrollment type must match the specialized course type.' });
+      }
+      const duplicate = await prisma.enrollment.findFirst({ where: { studentId, classId, status: 'ACTIVE' } });
+      if (duplicate) return res.status(409).json({ error: 'Student is already enrolled in this class.' });
       const enrollment = await prisma.enrollment.create({
           data: {
             studentId,
@@ -643,16 +728,35 @@ router.post(
     if (!studentId || !courseId || !reason || refundAmount === undefined) {
       return res.status(400).json({ error: 'Missing required parameters: studentId, courseId, reason, refundAmount.' });
     }
+    const requestedAmount = Number(refundAmount);
+    if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
+      return res.status(400).json({ error: 'Refund amount must be a positive number.' });
+    }
 
     try {
-      const tenantPolicy = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+      const [tenantPolicy, student, course] = await Promise.all([
+        prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } }),
+        prisma.student.findFirst({
+          where: { id: studentId, user: { tenantId } },
+          include: { studentParents: { include: { parent: true } } },
+        }),
+        prisma.course.findFirst({ where: { id: courseId, tenantId } }),
+      ]);
+      if (!student || !course) {
+        return res.status(404).json({ error: 'Student or course not found in your institution.' });
+      }
+      const isParent = student.studentParents.some((link) => link.parent.userId === req.user!.id);
+      const canManageBilling = hasBranchPermission(req.user!, 'manage_billing', course.branchId);
+      if (!isParent && !canManageBilling) {
+        return res.status(403).json({ error: 'Only the linked parent or assigned billing staff may request this refund.' });
+      }
       const refund = await prisma.refundRequest.create({
           data: {
             tenantId,
             studentId,
             courseId,
             reason,
-            refundAmount: Number(refundAmount),
+            refundAmount: requestedAmount,
             deductionAmount: 0.0,
             status: 'PENDING',
             policySnapshot: {
@@ -690,10 +794,13 @@ router.post(
 
       const finalStatus = action === 'APPROVE' ? 'APPROVED_FOR_MANUAL_REFUND' : 'REJECTED';
       const actualDeduction = deductionAmount !== undefined ? Number(deductionAmount) : 500.00;
+      if (!Number.isFinite(actualDeduction) || actualDeduction < 0 || actualDeduction > refund.refundAmount) {
+        return res.status(400).json({ error: 'Deduction must be between zero and the requested refund amount.' });
+      }
       const netRefundAmount = refund.refundAmount - actualDeduction;
 
-      await prisma.refundRequest.update({
-          where: { id },
+      const transition = await prisma.refundRequest.updateMany({
+          where: { id, tenantId: req.tenantId!, status: 'PENDING' },
           data: {
             status: finalStatus,
             deductionAmount: actualDeduction,
@@ -701,6 +808,9 @@ router.post(
             approvedAt: new Date(),
           },
         });
+      if (transition.count !== 1) {
+        return res.status(409).json({ error: 'Refund request was processed by another request.' });
+      }
 
       return res.status(200).json({
         message: action === 'APPROVE'
@@ -731,8 +841,8 @@ router.post('/refund/settle/:id', authMiddleware, async (req: TenantRequest, res
   if (refund.status !== 'APPROVED_FOR_MANUAL_REFUND') {
     return res.status(409).json({ error: 'Refund must be approved for manual settlement first.' });
   }
-  const settled = await prisma.refundRequest.update({
-    where: { id: refund.id },
+  const transition = await prisma.refundRequest.updateMany({
+    where: { id: refund.id, tenantId: req.tenantId!, status: 'APPROVED_FOR_MANUAL_REFUND' },
     data: {
       status: 'MANUALLY_REFUNDED',
       settlementReference: reference,
@@ -741,6 +851,10 @@ router.post('/refund/settle/:id', authMiddleware, async (req: TenantRequest, res
       settledBy: req.user!.id,
     },
   });
+  if (transition.count !== 1) {
+    return res.status(409).json({ error: 'Refund was reconciled by another request.' });
+  }
+  const settled = await prisma.refundRequest.findUniqueOrThrow({ where: { id: refund.id } });
   return res.json({ message: 'Manual refund reconciled. TMS did not transfer funds.', refund: settled });
 });
 
@@ -748,13 +862,15 @@ router.post('/refund/settle/:id', authMiddleware, async (req: TenantRequest, res
 router.delete(
   '/enrollments/:id',
   authMiddleware,
-  hasPermission('manage_billing'),
   async (req: TenantRequest, res: Response) => {
     const { id } = req.params;
     try {
       const enrollment = await prisma.enrollment.findUnique({ where: { id }, include: { course: true } });
       if (!enrollment || enrollment.course.tenantId !== req.tenantId) {
         return res.status(404).json({ error: 'Enrolment not found in your institution.' });
+      }
+      if (!hasBranchPermission(req.user!, 'manage_billing', enrollment.course.branchId)) {
+        return res.status(403).json({ error: 'You cannot remove enrollments for this branch.' });
       }
       await prisma.enrollment.delete({ where: { id } });
       return res.json({ message: 'Student unenrolled.' });
@@ -769,7 +885,6 @@ router.delete(
 router.put(
   '/:id',
   authMiddleware,
-  hasPermission('manage_courses'),
   async (req: TenantRequest, res: Response) => {
     const { id } = req.params;
     const { name, description, type, feeStructure, isTaxExempt, taxPercentage, gradeId, isExtraActivity } = req.body;
@@ -778,6 +893,9 @@ router.put(
       const course = await prisma.course.findUnique({ where: { id } });
       if (!course || course.tenantId !== req.tenantId) {
         return res.status(404).json({ error: 'Course not found in your institution.' });
+      }
+      if (!hasBranchPermission(req.user!, 'manage_courses', course.branchId)) {
+        return res.status(403).json({ error: 'You cannot update courses for this branch.' });
       }
 
       const data: Record<string, unknown> = {};
@@ -816,7 +934,6 @@ router.put(
 router.delete(
   '/:id',
   authMiddleware,
-  hasPermission('manage_courses'),
   async (req: TenantRequest, res: Response) => {
     const { id } = req.params;
     try {
@@ -826,6 +943,9 @@ router.delete(
       });
       if (!course || course.tenantId !== req.tenantId) {
         return res.status(404).json({ error: 'Course not found in your institution.' });
+      }
+      if (!hasBranchPermission(req.user!, 'manage_courses', course.branchId)) {
+        return res.status(403).json({ error: 'You cannot delete courses for this branch.' });
       }
       if (course._count.enrollments > 0) {
         return res.status(409).json({ error: 'Cannot delete a course with enrolled students. Unenrol them first.' });

@@ -1,5 +1,7 @@
 FROM node:20-alpine AS build
 
+RUN apk add --no-cache openssl
+
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/web/package.json apps/web/package.json
@@ -16,12 +18,15 @@ RUN npm run build --workspace @tms/types \
 
 FROM node:20-alpine AS runtime
 
+RUN apk add --no-cache openssl
+
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules node_modules
 COPY --from=build /app/packages/types packages/types
 COPY --from=build /app/services/api/package.json services/api/package.json
+COPY --from=build /app/services/api/node_modules services/api/node_modules
 COPY --from=build /app/services/api/dist services/api/dist
 COPY --from=build /app/services/api/prisma services/api/prisma
 COPY --from=build /app/services/api/public services/api/public
@@ -29,4 +34,3 @@ COPY --from=build /app/services/api/public services/api/public
 WORKDIR /app/services/api
 EXPOSE 3001
 CMD ["node", "dist/server.js"]
-

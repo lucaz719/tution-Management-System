@@ -12,7 +12,6 @@ export const ROLE_PERMISSIONS = {
     'view_reports',
     'approve_petty_cash_l2',
     'approve_leave_l2',
-    'approve_social_media',
   ],
   'Branch Admin': [
     'manage_staff',
@@ -25,7 +24,6 @@ export const ROLE_PERMISSIONS = {
     'manage_personalized_classes',
     'issue_certificates',
     'manage_branch_calendar',
-    'draft_social_media',
     'manage_resource_tasks',
   ],
   Teacher: ['mark_geo_attendance', 'mark_attendance', 'manage_homework', 'view_own_schedule', 'submit_lesson_update'],

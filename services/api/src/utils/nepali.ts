@@ -20,12 +20,14 @@ interface NepaliLib {
   NEPALI_DATE_MAP: Array<{ year: number; days: number[] }>;
 }
 
-const dynamicImport = new Function('m', 'return import(m)') as (m: string) => Promise<NepaliLib>;
+const dynamicImport = new Function('m', 'return import(m)') as
+  (m: string) => Promise<NepaliLib | { default: NepaliLib }>;
 let cached: NepaliLib | null = null;
 
 async function lib(): Promise<NepaliLib> {
   if (!cached) {
-    cached = await dynamicImport('nepali-date-library');
+    const imported = await dynamicImport('nepali-date-library');
+    cached = 'NepaliDate' in imported ? imported : imported.default;
   }
   return cached;
 }

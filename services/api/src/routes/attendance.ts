@@ -190,7 +190,10 @@ router.post(
         const { studentId, status } = entry;
 
         // 1. Dues Block Check
-        const enrollment = await prisma.enrollment.findFirst({ where: { studentId, classId } });
+        const enrollment = await prisma.enrollment.findFirst({
+          where: { studentId, classId, student: { user: { tenantId: req.tenantId! } } },
+          include: { student: { select: { userId: true } } },
+        });
         if (!enrollment) return res.status(404).json({ error: `Student ${studentId} is not enrolled in this class.` });
 
         if (enrollment && enrollment.status === 'BLOCKED' && status === 'PRESENT') {
@@ -202,7 +205,8 @@ router.post(
         // 2. Approved Leave Check
         const approvedLeave = await prisma.leave.findFirst({
             where: {
-              userId: studentId,
+              userId: enrollment.student.userId,
+              tenantId: req.tenantId!,
               status: 'APPROVED_LEVEL2',
               startDate: { lte: queryDate },
               endDate: { gte: queryDate },
@@ -241,7 +245,6 @@ router.post(
 router.post(
   '/session/update',
   authMiddleware,
-  hasPermission('mark_geo_attendance'),
   async (req: TenantRequest, res: Response) => {
     const { classId, date, updateContent } = req.body;
     const teacherId = req.user!.id;
@@ -256,6 +259,7 @@ router.post(
             teacherId,
             classId,
             date: new Date(date),
+            class: { course: { tenantId: req.tenantId! } },
           },
           data: {
             status: 'PRESENT_CONFIRMED',

@@ -66,13 +66,5 @@ export interface TenantOnboardingRequest {
 
 export type EventType = 'HOLIDAY' | 'EXAM' | 'EVENT' | 'FEE_DUE';
 
-export type SocialPostStatus =
-  | 'DRAFT'
-  | 'PENDING_APPROVAL'
-  | 'APPROVED'
-  | 'REJECTED'
-  | 'PUBLISHED'
-  | 'FAILED';
-
 export type CertificateType = 'COMPLETION' | 'ACHIEVEMENT' | 'ATTENDANCE' | 'CUSTOM';
 

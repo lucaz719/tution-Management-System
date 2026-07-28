@@ -139,7 +139,7 @@ interface DemoUserSpec {
 
 const DEMO_USERS: DemoUserSpec[] = [
   { email: 'tenantadmin@demo.tms.local', firstName: 'Tara', lastName: 'Shrestha', roleName: 'Tenant Admin', branchScoped: false,
-    permissions: ['manage_branches', 'manage_staff', 'manage_courses', 'manage_billing', 'view_reports', 'approve_petty_cash_l2', 'approve_social_media'] },
+    permissions: ['manage_branches', 'manage_staff', 'manage_courses', 'manage_billing', 'view_reports', 'approve_petty_cash_l2'] },
   { email: 'branchadmin@demo.tms.local', firstName: 'Bikash', lastName: 'Karki', roleName: 'Branch Admin', branchScoped: true,
     permissions: ['manage_staff', 'manage_courses', 'view_reports', 'approve_petty_cash_l1', 'approve_leave_l1'] },
   { email: 'teacher@demo.tms.local', firstName: 'Shyam', lastName: 'Adhikari', roleName: 'Teacher', branchScoped: true,

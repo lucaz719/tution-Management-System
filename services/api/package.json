@@ -14,7 +14,8 @@
     "db:seed": "prisma db seed",
     "test:access": "ts-node src/utils/access-control.test.ts",
     "test:billing": "ts-node src/utils/billing-rules.test.ts",
-    "test:connectips": "ts-node src/utils/connectips.test.ts"
+    "test:connectips": "ts-node src/utils/connectips.test.ts",
+    "test:tenant-admin:integration": "ts-node src/integration/tenant-admin.integration.test.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"

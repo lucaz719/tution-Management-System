@@ -28,8 +28,11 @@ router.post(
     }
 
     try {
-      const tenantPolicy = await prisma.tenant.findUnique({ where: { id: tenantId } });
-      if (!tenantPolicy) return res.status(404).json({ error: 'Tenant not found.' });
+      const [tenantPolicy, branch] = await Promise.all([
+        prisma.tenant.findUnique({ where: { id: tenantId } }),
+        prisma.branch.findFirst({ where: { id: branchId, tenantId } }),
+      ]);
+      if (!tenantPolicy || !branch) return res.status(404).json({ error: 'Tenant or branch not found.' });
       const leave = await prisma.leave.create({
         data: {
           tenantId,
@@ -87,8 +90,8 @@ router.post(
 
       let newStatus: LeaveStatus = 'PENDING';
 
-      const isBranchAdmin = hasBranchPermission(req.user!, 'approve_leave_l1', leave.branchId);
       const tenantAdmin = isTenantAdmin(req.user!);
+      const isBranchAdmin = !tenantAdmin && hasBranchPermission(req.user!, 'approve_leave_l1', leave.branchId);
       if (leave.leaveType === 'LONG_SICK') {
         // Long Sick: Branch Admin performs L1; Tenant Admin performs the final L2 decision.
         const validL1 = isBranchAdmin && leave.status === 'PENDING';
@@ -105,14 +108,17 @@ router.post(
         newStatus = action === 'REJECT' ? 'REJECTED' : 'APPROVED_LEVEL2';
       }
 
-      await prisma.leave.update({
-          where: { id: leaveId },
+      const transition = await prisma.leave.updateMany({
+          where: { id: leaveId, tenantId: req.tenantId!, status: leave.status },
           data: {
             status: newStatus,
             approvedBy: approverId,
             remarks,
           },
         });
+      if (transition.count !== 1) {
+        return res.status(409).json({ error: 'Leave request was already processed.' });
+      }
 
       await MockPushNotificationService.sendPush(
         leave.userId,

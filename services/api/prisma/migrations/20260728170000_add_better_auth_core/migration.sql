@@ -2,7 +2,6 @@
 ALTER TABLE "User"
   ADD COLUMN "name" TEXT,
   ADD COLUMN "emailVerified" BOOLEAN NOT NULL DEFAULT false,
-  ADD COLUMN "twoFactorEnabled" BOOLEAN NOT NULL DEFAULT false,
   ADD COLUMN "image" TEXT;
 
 UPDATE "User" SET "name" = NULLIF(trim(concat("firstName", ' ', "lastName")), '') WHERE "name" IS NULL;

@@ -25,8 +25,10 @@ router.post(
     }
 
     try {
+      const branch = await prisma.branch.findFirst({ where: { id: branchId, tenantId: req.tenantId! } });
+      if (!branch) return res.status(404).json({ error: 'Branch not found in your institution.' });
       const defaultAssignee = await prisma.userRole.findFirst({
-        where: { branchId, role: { name: 'Janitor' } },
+        where: { branchId, user: { tenantId: req.tenantId! }, role: { name: 'Janitor' } },
         select: { userId: true },
       });
       if (!defaultAssignee) {
@@ -86,6 +88,8 @@ router.get(
       return res.status(403).json({ error: 'You cannot view tasks for this branch.' });
     }
     try {
+      const branch = await prisma.branch.findFirst({ where: { id: branchId, tenantId: req.tenantId! } });
+      if (!branch) return res.status(404).json({ error: 'Branch not found in your institution.' });
       const tasks = await prisma.maintenanceTask.findMany({
           where: { branchId },
         });
@@ -112,13 +116,19 @@ router.post(
       if (!ownsTask && !hasBranchPermission(req.user!, 'manage_resource_tasks', task.branchId)) {
         return res.status(403).json({ error: 'You cannot complete this maintenance task.' });
       }
-      await prisma.maintenanceTask.update({
-          where: { id: taskId },
+      if (task.status === 'COMPLETED') {
+        return res.status(409).json({ error: 'Maintenance task is already completed.' });
+      }
+      const transition = await prisma.maintenanceTask.updateMany({
+          where: { id: taskId, status: { not: 'COMPLETED' }, branch: { tenantId: req.tenantId! } },
           data: {
             status: 'COMPLETED',
             completionTimestamp: new Date(),
           },
         });
+      if (transition.count !== 1) {
+        return res.status(409).json({ error: 'Maintenance task was completed by another request.' });
+      }
 
       return res.status(200).json({
         message: 'Maintenance task successfully resolved.',

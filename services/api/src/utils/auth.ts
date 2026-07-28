@@ -12,6 +12,7 @@ if (!authSecret) {
 export const auth = betterAuth({
   secret: authSecret,
   baseURL: process.env.BETTER_AUTH_URL || 'http://localhost:3001',
+  trustedOrigins: [process.env.WEB_ORIGIN || 'http://localhost:5173'],
   database: prismaAdapter(prisma, {
     provider: 'postgresql',
   }),

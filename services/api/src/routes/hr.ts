@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
-import { canAccessBranch, isTenantAdmin } from '../utils/access-control';
+import { isTenantAdmin, managedBranchIds } from '../utils/access-control';
 
 const router = Router();
 
@@ -145,7 +145,7 @@ router.post(
       const branchIds = exit.staffRecord.user.userRoles
         .map((assignment) => assignment.branchId)
         .filter((branchId): branchId is string => Boolean(branchId));
-      if (!branchIds.some((branchId) => canAccessBranch(req.user!, branchId))) {
+      if (!branchIds.some((branchId) => managedBranchIds(req.user!).includes(branchId))) {
         return res.status(403).json({ error: 'Only the assigned Branch Admin may clear this checklist.' });
       }
       const checklist = Array.isArray(exit.clearanceChecklist) ? [...exit.clearanceChecklist as any[]] : [];
@@ -303,14 +303,18 @@ router.post(
       if (!payroll) return res.status(404).json({ error: 'Payroll record not found.' });
       if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may approve payroll.' });
       if (payroll.status !== 'PENDING') return res.status(409).json({ error: 'Payroll is not pending.' });
-      const approved = await prisma.payroll.update({
-          where: { id: payroll.id },
+      const transition = await prisma.payroll.updateMany({
+          where: { id: payroll.id, tenantId: req.tenantId!, status: 'PENDING' },
           data: {
             status: 'APPROVED_FOR_MANUAL_PAYMENT',
             approvedBy: req.user!.id,
             approvedAt: new Date(),
           },
         });
+      if (transition.count !== 1) {
+        return res.status(409).json({ error: 'Payroll was already processed by another request.' });
+      }
+      const approved = await prisma.payroll.findUniqueOrThrow({ where: { id: payroll.id } });
 
       return res.status(200).json({
         message: 'Payroll approved for manual payment. No salary funds were transferred by TMS.',
@@ -331,8 +335,8 @@ router.post('/payroll/reconcile/:id', authMiddleware, async (req: TenantRequest,
   if (payroll.status !== 'APPROVED_FOR_MANUAL_PAYMENT') {
     return res.status(409).json({ error: 'Payroll must be approved before reconciliation.' });
   }
-  const reconciled = await prisma.payroll.update({
-    where: { id: payroll.id },
+  const transition = await prisma.payroll.updateMany({
+    where: { id: payroll.id, tenantId: req.tenantId!, status: 'APPROVED_FOR_MANUAL_PAYMENT' },
     data: {
       status: 'MANUALLY_PAID',
       settlementReference: reference,
@@ -340,6 +344,10 @@ router.post('/payroll/reconcile/:id', authMiddleware, async (req: TenantRequest,
       paymentDate: new Date(),
     },
   });
+  if (transition.count !== 1) {
+    return res.status(409).json({ error: 'Payroll was reconciled by another request.' });
+  }
+  const reconciled = await prisma.payroll.findUniqueOrThrow({ where: { id: payroll.id } });
   return res.json({ message: 'Manual salary payment reconciled. TMS did not transfer funds.', payroll: reconciled });
 });
 

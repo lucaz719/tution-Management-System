@@ -114,7 +114,6 @@ router.post(
             'manage_billing',
             'view_reports',
             'approve_petty_cash_l2',
-            'approve_social_media',
           ],
         },
       });

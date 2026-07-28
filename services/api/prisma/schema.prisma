@@ -159,8 +159,6 @@ model Tenant {
   grades                    Grade[]
   // Phase 2 relations
   academicEvents            AcademicEvent[]
-  socialConfigs             TenantSocialConfig[]
-  socialPosts               SocialMediaPost[]
   certificateTemplates      CertificateTemplate[]
   vehicleRoutes             VehicleRoute[]
   expenses                  Expense[]
@@ -193,7 +191,6 @@ model Branch {
   teacherAttendance  TeacherAttendance[]
   // Phase 2 relations
   academicEvents     AcademicEvent[]
-  socialPosts        SocialMediaPost[]
   certificates       Certificate[]
   expenses           Expense[]
 }
@@ -620,48 +617,6 @@ model AcademicEvent {
   endDate     DateTime
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
-}
-
-// 23. Social Media Management
-enum SocialPostStatus {
-  DRAFT
-  PENDING_APPROVAL
-  APPROVED
-  REJECTED
-  PUBLISHED
-  FAILED
-}
-
-model TenantSocialConfig {
-  id           String    @id @default(uuid())
-  tenantId     String
-  tenant       Tenant    @relation(fields: [tenantId], references: [id])
-  platform     String // FACEBOOK, INSTAGRAM, TIKTOK, LINKEDIN
-  accessToken  String // Encrypted OAuth access token
-  refreshToken String? // Encrypted OAuth refresh token
-  expiresAt    DateTime?
-  updatedAt    DateTime  @updatedAt
-
-  @@unique([tenantId, platform])
-}
-
-model SocialMediaPost {
-  id                   String           @id @default(uuid())
-  tenantId             String
-  tenant               Tenant           @relation(fields: [tenantId], references: [id])
-  branchId             String
-  branch               Branch           @relation(fields: [branchId], references: [id])
-  title                String
-  contentText          String
-  mediaUrls            Json? // Array of images/videos URLs
-  platforms            Json // Array of targeted platforms
-  scheduledPublishTime DateTime
-  status               SocialPostStatus @default(DRAFT)
-  rejectRemarks        String?
-  publishedAt          DateTime?
-  createdBy            String // Branch Admin User ID
-  createdAt            DateTime         @default(now())
-  updatedAt            DateTime         @updatedAt
 }
 
 // 24. Certificate Generation System

@@ -35,7 +35,6 @@ export const DASHBOARD_NAVIGATION: Record<DashboardRole, DashboardNavItem[]> = {
     { section: 'Operations', label: 'HR Management', icon: 'group', path: '/tenant/hr-management', phase: 2 },
     { section: 'Communication', label: 'Messages', icon: 'forum', path: '/tenant/messages', phase: 2 },
     { section: 'Communication', label: 'Appointments', icon: 'event', path: '/tenant/appointments', phase: 2 },
-    { section: 'Communication', label: 'Social Media', icon: 'share', path: '/tenant/social-media', phase: 2 },
     { section: 'Settings', label: 'Tenant Settings', icon: 'settings', path: '/tenant/settings' },
     { section: 'Settings', label: 'RBAC & Roles', icon: 'admin_panel_settings', path: '/tenant/rbac-roles' },
     { section: 'Settings', label: 'Integrations', icon: 'hub', path: '/tenant/integrations' },
@@ -58,7 +57,6 @@ export const DASHBOARD_NAVIGATION: Record<DashboardRole, DashboardNavItem[]> = {
     { section: 'Operations', label: 'Certificates', icon: 'workspace_premium', path: '/branch/certificates', phase: 2 },
     { section: 'Communication', label: 'Messages', icon: 'forum', path: '/branch/messages', phase: 2 },
     { section: 'Communication', label: 'Announcements', icon: 'campaign', path: '/branch/announcements', phase: 2 },
-    { section: 'Communication', label: 'Social Media', icon: 'share', path: '/branch/social-media', phase: 2 },
     { section: 'Calendar', label: 'Academic Calendar', icon: 'date_range', path: '/branch/academic-calendar', phase: 2 },
   ],
   teacher: [

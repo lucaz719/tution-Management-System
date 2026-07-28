@@ -109,8 +109,10 @@ router.post('/session/:sessionId/update', authMiddleware, async (req: TenantRequ
 
   try {
     // Ownership: only the assigned teacher can log their own session.
-    const session = await prisma.teacherSession.findUnique({ where: { id: sessionId } });
-    if (!session || session.teacherId !== user.id) {
+    const session = await prisma.teacherSession.findFirst({
+      where: { id: sessionId, teacherId: user.id, class: { course: { tenantId: req.tenantId! } } },
+    });
+    if (!session) {
       return res.status(404).json({ error: 'Session not found.' });
     }
 
