@@ -23,6 +23,9 @@ Last committed revision: `038a72f complete tenant security and manual finance wo
 - The development demo tenant `Pinnacle Demo Academy` and its student fixture
   are seeded in the Compose database. The local student credential was reset
   and verified through Better Auth, but is intentionally not recorded here.
+- The demo Parent account is active in the Compose database and its login was
+  verified through Better Auth and the authenticated Chrome parent smoke test.
+  The local password remains intentionally excluded from tracked memory.
 - Port `5173` is currently served by the local webpack development server.
   Starting another web dev process will fail with `EADDRINUSE`; use the existing
   server or stop its process before restarting.
@@ -183,6 +186,56 @@ Docker database volume.
   certificate PDF downloads, and push delivery still require student API and
   event integration.
 
+## Completed Parent web work
+
+- Replaced the previous mixed student/parent prototype with a dedicated,
+  authenticated, role-restricted `/parent/*` portal.
+- Added parent routes for home, timetable, attendance, performance, messages,
+  appointments, leave, fees, certificates, academic calendar, and notifications.
+- Added a persistent linked-child switcher. The selected child is stored in the
+  `child` query parameter, survives refresh/navigation, and scopes every portal
+  view independently so sibling records are never merged.
+- Added a selected-child context bar showing name, grade, branch, roll number,
+  and Active/Blocked status on every parent page.
+- The dashboard shows child-specific timetable, attendance, outstanding balance,
+  appointments, leave history, approved parent-visible remarks, and events.
+- Performance views explicitly filter out internal-only remarks and explain the
+  institution visibility boundary.
+- Messaging only lists teachers assigned to the selected child's fixture
+  classes; threads are keyed by both child and teacher, so the same teacher has
+  separate sibling conversations.
+- Appointment UI covers individual/group requests, lifecycle states, linked
+  alternative times, and client-side rejection inside the default 24-hour
+  booking window.
+- Leave UI covers planned requests, Approved/Pending states, automatic
+  Absent (Excused) explanation, and urgent branch-recorded emergency departures.
+- Fees provide a child-specific payment calendar, itemized invoices, explicit
+  Blocked status, and a Nepal Pay dialog with backdrop/Escape closing, focus
+  trapping, body-scroll locking, and focus restoration.
+- Certificates and calendars are scoped per child. Notifications show Push/SMS
+  channel badges and reserve urgent visual treatment for fee and emergency events.
+- Unsupported writes are not simulated as successes:
+  persistent messaging, appointment negotiation, performance persistence,
+  authenticated certificate downloads, and safe child-scoped parent leave
+  submission are labeled unavailable because their current API contracts are
+  missing, return 501, or are not safely child-scoped.
+- Added responsive/dark-mode/reduced-motion styling using the locked StyleSeed
+  tokens and accessible semantic controls, focus indicators, dialog behavior,
+  form labels, validation messages, tables, and empty/unavailable states.
+- Added `apps/web/tests/parent-smoke.js`, which authenticates a demo Parent and
+  verifies child switching, non-merged timetable data, assigned-teacher privacy,
+  24-hour appointment validation, and Nepal Pay dialog Escape behavior.
+- The newly implemented Parent portal is available after login at
+  `/parent/home`; all parent workspace routes preserve the selected child using
+  the `child` query parameter.
+- Primary implementation files:
+  `apps/web/src/pages/ParentStudentPortal.tsx`,
+  `apps/web/src/features/parent/parentPortal.css`,
+  `apps/web/src/features/parent/parentPortalData.ts`,
+  `apps/web/src/features/parent/parentPortalTypes.ts`,
+  `apps/web/src/router/index.tsx`, and
+  `apps/web/src/components/patterns/dashboardNavigation.ts`.
+
 ## Integration coverage completed
 
 Test:
@@ -272,6 +325,7 @@ npm run test:connectips --workspace @tms/api
 npm run build
 npm run lint --workspace web
 npx testcafe "chrome:headless" apps/web/tests/smoke.js
+npx testcafe "chrome:headless" apps/web/tests/parent-smoke.js
 npx prisma validate --schema services/api/prisma/schema.prisma
 git diff --check
 ```
@@ -340,4 +394,8 @@ Known non-blocking warnings:
   polish, homework filtering, score trend lines, attendance/fees/identity/
   certificate/calendar/notification views, and verified local demo-student
   authentication.
+- Parent web portal, linked-child URL scoping, oversight, privacy-filtered
+  remarks/teachers, appointment/leave UX, child-specific fees/certificates/
+  calendar/notifications, unavailable-contract states, and authenticated parent
+  Chrome smoke coverage.
 - All validation commands listed above pass; changes are not yet committed.

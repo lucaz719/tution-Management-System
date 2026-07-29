@@ -80,12 +80,16 @@ export const DASHBOARD_NAVIGATION: Record<DashboardRole, DashboardNavItem[]> = {
     { section: 'Calendar', label: 'Academic Calendar', icon: 'date_range', path: '/student/calendar' },
   ],
   parent: [
-    { section: 'Parent', label: 'Home', icon: 'home', path: '/parent/home' },
-    { section: 'Parent', label: 'Attendance', icon: 'fact_check', path: '/parent/attendance' },
-    { section: 'Parent', label: 'Fees', icon: 'payments', path: '/parent/fees' },
-    { section: 'Parent', label: 'Homework', icon: 'assignment', path: '/parent/homework', phase: 2 },
-    { section: 'Parent', label: 'Messages', icon: 'forum', path: '/parent/messages', phase: 2 },
-    { section: 'Parent', label: 'Appointments', icon: 'event', path: '/parent/appointments', phase: 2 },
+    { section: 'Family', label: 'Home', icon: 'home', path: '/parent/home' },
+    { section: 'Family', label: 'Timetable', icon: 'calendar_view_week', path: '/parent/timetable' },
+    { section: 'Family', label: 'Attendance', icon: 'fact_check', path: '/parent/attendance' },
+    { section: 'Family', label: 'Performance', icon: 'insights', path: '/parent/performance' },
+    { section: 'Connect', label: 'Messages', icon: 'forum', path: '/parent/messages' },
+    { section: 'Connect', label: 'Appointments', icon: 'event', path: '/parent/appointments' },
+    { section: 'Connect', label: 'Leave', icon: 'event_available', path: '/parent/leave' },
+    { section: 'Records', label: 'Fees & Payment', icon: 'payments', path: '/parent/fees' },
+    { section: 'Records', label: 'Certificates', icon: 'workspace_premium', path: '/parent/certificates' },
+    { section: 'Calendar', label: 'Academic Calendar', icon: 'date_range', path: '/parent/calendar' },
   ],
 };
 
