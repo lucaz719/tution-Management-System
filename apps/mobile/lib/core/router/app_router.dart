@@ -18,6 +18,11 @@ import 'package:tms_mobile/features/student/screens/student_home_screen.dart';
 import 'package:tms_mobile/features/student/screens/student_timetable_screen.dart';
 import 'package:tms_mobile/features/student/screens/student_fees_screen.dart';
 import 'package:tms_mobile/features/student/screens/student_id_screen.dart';
+import 'package:tms_mobile/features/student/screens/student_academics_screen.dart';
+import 'package:tms_mobile/features/student/screens/student_attendance_screen.dart';
+import 'package:tms_mobile/features/student/screens/student_calendar_screen.dart';
+import 'package:tms_mobile/features/student/screens/student_certificates_screen.dart';
+import 'package:tms_mobile/features/student/screens/student_notifications_screen.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authProvider);
@@ -155,6 +160,31 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/student/id',
         builder: (BuildContext context, GoRouterState state) =>
             const StudentIdScreen(),
+      ),
+      GoRoute(
+        path: '/student/academics',
+        builder: (BuildContext context, GoRouterState state) =>
+            const StudentAcademicsScreen(),
+      ),
+      GoRoute(
+        path: '/student/attendance',
+        builder: (BuildContext context, GoRouterState state) =>
+            const StudentAttendanceScreen(),
+      ),
+      GoRoute(
+        path: '/student/calendar',
+        builder: (BuildContext context, GoRouterState state) =>
+            const StudentCalendarScreen(),
+      ),
+      GoRoute(
+        path: '/student/certificates',
+        builder: (BuildContext context, GoRouterState state) =>
+            const StudentCertificatesScreen(),
+      ),
+      GoRoute(
+        path: '/student/notifications',
+        builder: (BuildContext context, GoRouterState state) =>
+            const StudentNotificationsScreen(),
       ),
     ],
   );

@@ -1,22 +1,22 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Roboto:wght@400;500;600;700&display=swap');
 
 :root {
   /* Brand palette aligned to sanskardipshikshalaya.com.np (#1560BD primary). */
   --color-primary: #1560BD;
   --color-primary-light: #2F6FED;
-  --color-primary-dark: #0F172A;
+  --color-primary-dark: #002D72;
   --color-accent: #FFBC3B;
   --color-accent-hover: #FFCB63;
   --color-bg: #FFFFFF;
-  --color-surface: #F8FAFC;
-  --color-text: #0F172A;
+  --color-surface: #F5F7FA;
+  --color-text: #1B1F3B;
   --color-success: #00AB66;
   --color-warning: #E08E00;
   --color-error: #E63946;
   --color-info: #1560BD;
 
-  --font-display: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-ui: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-ui: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 
   --sp-1: 4px;
   --sp-2: 8px;
@@ -39,7 +39,7 @@
 
   --ease-silk: cubic-bezier(0.16, 1, 0.3, 1);
 
-  --primary-gradient: linear-gradient(145deg, #0F172A 0%, var(--color-primary) 58%, var(--color-primary-light) 100%);
+  --primary-gradient: linear-gradient(145deg, var(--color-primary-dark) 0%, var(--color-primary) 58%, var(--color-primary-light) 100%);
   --accent-gradient: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%);
   --danger-gradient: linear-gradient(135deg, #EF6B6B 0%, var(--color-error) 100%);
   --success-gradient: linear-gradient(135deg, #22C784 0%, var(--color-success) 100%);

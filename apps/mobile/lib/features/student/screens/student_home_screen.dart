@@ -1,121 +1,332 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:tms_mobile/core/theme/app_colors.dart';
-import 'package:tms_mobile/shared/data/mock_portal_data.dart';
-import 'package:tms_mobile/shared/widgets/kpi_card.dart';
+
+import '../data/student_demo_data.dart';
+import '../models/student_portal_models.dart';
+import '../student_design.dart';
+import '../widgets/student_scaffold.dart';
 
 class StudentHomeScreen extends StatelessWidget {
   const StudentHomeScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final data = MockPortalData.student;
-    final profile = data.profile;
+    final nextEvent = StudentDemoData.events.first;
+    final overdue = StudentDemoData.invoices
+        .where((invoice) => invoice.state == FeeDeadlineState.overdue)
+        .fold<double>(0, (sum, invoice) => sum + invoice.netPayable);
+    final unread =
+        StudentDemoData.notices.where((notice) => !notice.isRead).length;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Student Dashboard'),
-        actions: [
-          IconButton(
-            tooltip: 'Logout',
-            onPressed: () => context.go('/login'),
-            icon: const Icon(Icons.logout_rounded),
+    return StudentScaffold(
+      title: 'Student dashboard',
+      selectedIndex: 0,
+      actions: [
+        Semantics(
+          label: '$unread unread notifications',
+          button: true,
+          child: Badge(
+            isLabelVisible: unread > 0,
+            label: Text('$unread'),
+            child: IconButton(
+              tooltip: 'Notifications',
+              onPressed: () => context.push('/student/notifications'),
+              icon: const Icon(Icons.notifications_outlined),
+            ),
           ),
-        ],
-      ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Hello, ${profile.firstName}',
-                style: Theme.of(context).textTheme.displaySmall,
+        ),
+        const SizedBox(width: StudentSpace.xs),
+      ],
+      body: RefreshIndicator(
+        onRefresh: () async =>
+            Future<void>.delayed(const Duration(milliseconds: 350)),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(StudentSpace.lg),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [StudentColors.primaryDark, StudentColors.primary],
+                ),
+                borderRadius: BorderRadius.circular(StudentRadius.card),
               ),
-              const SizedBox(height: 4),
-              Text(
-                '${profile.grade} • ${profile.branch} Branch',
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: kColorText.withOpacity(0.74),
-                    ),
-              ),
-              const SizedBox(height: 24),
-              Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Expanded(
-                    child: KpiCard(
-                      title: 'Attendance',
-                      value: '91%',
-                      deltaText: 'This billing cycle',
-                    ),
+                  Text(
+                    'Namaste, Aarav',
+                    style: Theme.of(context)
+                        .textTheme
+                        .displaySmall
+                        ?.copyWith(color: Colors.white),
                   ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: KpiCard(
-                      title: 'Outstanding',
-                      value: 'NPR ${data.totalOutstanding.toStringAsFixed(0)}',
-                      deltaText: '1 invoice open',
-                    ),
+                  const SizedBox(height: StudentSpace.xs),
+                  Text(
+                    'Grade 8 · Baneshwor Branch',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodyMedium
+                        ?.copyWith(color: Colors.white70),
+                  ),
+                  const SizedBox(height: StudentSpace.lg),
+                  Row(
+                    children: [
+                      const Icon(Icons.schedule_rounded,
+                          color: StudentColors.accent),
+                      const SizedBox(width: StudentSpace.xs),
+                      Text(
+                        '${StudentDemoData.sessions.length} sessions today',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(color: Colors.white),
+                      ),
+                    ],
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
-              Text(
-                'Academic Actions',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 12),
-              _StudentActionTile(
-                title: 'My Timetable',
-                subtitle: 'Check class schedules, rooms, and teachers',
-                icon: Icons.schedule_rounded,
-                onTap: () => context.go('/student/timetable'),
-              ),
-              const SizedBox(height: 12),
-              _StudentActionTile(
-                title: 'Fees & Invoices',
-                subtitle: 'View billing history and make cashless payments',
-                icon: Icons.receipt_long_rounded,
-                onTap: () => context.go('/student/fees'),
-              ),
-              const SizedBox(height: 12),
-              _StudentActionTile(
-                title: 'Digital Student ID',
-                subtitle: 'Display your official student card and barcode',
-                icon: Icons.badge_outlined,
-                onTap: () => context.go('/student/id'),
-              ),
-              const SizedBox(height: 28),
-              Text(
-                'Announcements',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 12),
-              for (final ann in data.announcements) ...[
-                Card(
+            ),
+            if (overdue > 0) ...[
+              const SizedBox(height: StudentSpace.md),
+              Card(
+                color: StudentColors.error.withOpacity(.06),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(StudentRadius.card),
+                  onTap: () => context.go('/student/fees'),
                   child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    padding: const EdgeInsets.all(StudentSpace.md),
+                    child: Row(
                       children: [
-                        Text(
-                          ann.title,
-                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                fontWeight: FontWeight.w600,
+                        const Icon(Icons.lock_rounded,
+                            color: StudentColors.error),
+                        const SizedBox(width: StudentSpace.sm),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Blocked — fee dues',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleMedium
+                                    ?.copyWith(color: StudentColors.error),
                               ),
+                              const SizedBox(height: StudentSpace.xxs),
+                              Text(
+                                'NPR ${overdue.toStringAsFixed(0)} is overdue. View what is owed and the payment QR.',
+                              ),
+                            ],
+                          ),
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '${ann.branch} Branch • 2026-07-08',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
+                        const Icon(Icons.chevron_right_rounded),
                       ],
                     ),
                   ),
                 ),
-                const SizedBox(height: 12),
+              ),
+            ],
+            const SizedBox(height: StudentSpace.lg),
+            _SectionHeader(
+              title: "Today's timetable",
+              action: 'Full timetable',
+              onTap: () => context.push('/student/timetable'),
+            ),
+            const SizedBox(height: StudentSpace.sm),
+            for (final session in StudentDemoData.sessions) ...[
+              _SessionTile(session: session),
+              const SizedBox(height: StudentSpace.sm),
+            ],
+            const SizedBox(height: StudentSpace.sm),
+            _SectionHeader(
+              title: 'Homework due soon',
+              action: 'View all',
+              onTap: () => context.go('/student/academics'),
+            ),
+            const SizedBox(height: StudentSpace.sm),
+            for (final item in StudentDemoData.homework.take(2)) ...[
+              Card(
+                child: ListTile(
+                  minTileHeight: 72,
+                  leading: const Icon(Icons.assignment_outlined,
+                      color: StudentColors.primary),
+                  title: Text(item.title),
+                  subtitle: Text('${item.subject} · Due ${_shortDate(item.dueAt)}'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => context.go('/student/academics'),
+                ),
+              ),
+              const SizedBox(height: StudentSpace.sm),
+            ],
+            const SizedBox(height: StudentSpace.sm),
+            Text('Your record', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: StudentSpace.sm),
+            Row(
+              children: [
+                Expanded(
+                  child: _QuickAction(
+                    icon: Icons.fact_check_outlined,
+                    label: 'Attendance',
+                    value: '75%',
+                    onTap: () => context.push('/student/attendance'),
+                  ),
+                ),
+                const SizedBox(width: StudentSpace.sm),
+                Expanded(
+                  child: _QuickAction(
+                    icon: Icons.show_chart_rounded,
+                    label: 'Latest score',
+                    value: '88%',
+                    onTap: () => context.go('/student/academics'),
+                  ),
+                ),
               ],
+            ),
+            const SizedBox(height: StudentSpace.sm),
+            Row(
+              children: [
+                Expanded(
+                  child: _QuickAction(
+                    icon: Icons.workspace_premium_outlined,
+                    label: 'Certificates',
+                    value: '${StudentDemoData.certificates.length}',
+                    onTap: () => context.push('/student/certificates'),
+                  ),
+                ),
+                const SizedBox(width: StudentSpace.sm),
+                Expanded(
+                  child: _QuickAction(
+                    icon: Icons.event_outlined,
+                    label: 'Next event',
+                    value: '${nextEvent.date.day}/${nextEvent.date.month}',
+                    onTap: () => context.go('/student/calendar'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({
+    required this.title,
+    required this.action,
+    required this.onTap,
+  });
+  final String title;
+  final String action;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(title, style: Theme.of(context).textTheme.titleLarge),
+        ),
+        TextButton(onPressed: onTap, child: Text(action)),
+      ],
+    );
+  }
+}
+
+class _SessionTile extends StatelessWidget {
+  const _SessionTile({required this.session});
+  final StudentSession session;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(StudentSpace.md),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 54,
+              child: Column(
+                children: [
+                  Text(
+                    _time(session.startsAt),
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(color: StudentColors.primaryDark),
+                  ),
+                  Text(_meridiem(session.startsAt),
+                      style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ),
+            ),
+            Container(
+              width: 3,
+              height: 48,
+              margin: const EdgeInsets.symmetric(horizontal: StudentSpace.sm),
+              decoration: BoxDecoration(
+                color: StudentColors.primary,
+                borderRadius: BorderRadius.circular(StudentRadius.pill),
+              ),
+            ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(session.subject,
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: StudentSpace.xxs),
+                  Text(
+                    '${session.teacher} · ${session.room}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+            StudentStatusPill(
+              label: session.type.label,
+              icon: Icons.school_outlined,
+              color: StudentColors.info,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _QuickAction extends StatelessWidget {
+  const _QuickAction({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(StudentRadius.card),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(StudentSpace.md),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, color: StudentColors.primary),
+              const SizedBox(height: StudentSpace.md),
+              Text(value, style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: StudentSpace.xxs),
+              Text(label, style: Theme.of(context).textTheme.bodySmall),
             ],
           ),
         ),
@@ -124,46 +335,10 @@ class StudentHomeScreen extends StatelessWidget {
   }
 }
 
-class _StudentActionTile extends StatelessWidget {
-  const _StudentActionTile({
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-    required this.onTap,
-  });
-
-  final String title;
-  final String subtitle;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-        leading: Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: kColorPrimary.withOpacity(0.08),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, color: kColorPrimary),
-        ),
-        title: Text(
-          title,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-        ),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: Text(subtitle),
-        ),
-        trailing: const Icon(Icons.chevron_right_rounded),
-        onTap: onTap,
-      ),
-    );
-  }
+String _shortDate(DateTime value) => '${value.day}/${value.month}';
+String _time(DateTime value) {
+  final hour = value.hour % 12 == 0 ? 12 : value.hour % 12;
+  return '$hour:${value.minute.toString().padLeft(2, '0')}';
 }
+
+String _meridiem(DateTime value) => value.hour < 12 ? 'AM' : 'PM';

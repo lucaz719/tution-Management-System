@@ -1,8 +1,14 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
-import 'package:tms_mobile/core/theme/app_colors.dart';
 import 'package:tms_mobile/shared/data/mock_portal_data.dart';
+import 'package:tms_mobile/features/student/student_design.dart';
+import 'package:tms_mobile/features/student/widgets/student_scaffold.dart';
+
+const kColorPrimary = StudentColors.primary;
+const kColorAccent = StudentColors.accent;
+const kColorSuccess = StudentColors.success;
+const kColorSurface = StudentColors.surface;
+const kColorText = StudentColors.text;
 
 class StudentIdScreen extends StatefulWidget {
   const StudentIdScreen({super.key});
@@ -49,14 +55,9 @@ class _StudentIdScreenState extends State<StudentIdScreen> with SingleTickerProv
   Widget build(BuildContext context) {
     final profile = MockPortalData.student.profile;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Digital Student ID'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.go('/student/home'),
-        ),
-      ),
+    return StudentScaffold(
+      title: 'Digital student ID',
+      selectedIndex: 4,
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(20),

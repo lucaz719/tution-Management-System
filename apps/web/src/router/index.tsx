@@ -40,6 +40,7 @@ const AcademicGrades = lazy(() => import('../pages/AcademicGrades').then((module
 const BranchAdminDashboard = lazy(() => import('../pages/BranchAdminDashboard').then((module) => ({ default: module.BranchAdminDashboard })));
 const TeacherPortal = lazy(() => import('../pages/TeacherPortal').then((module) => ({ default: module.TeacherPortal })));
 const ParentStudentPortal = lazy(() => import('../pages/ParentStudentPortal').then((module) => ({ default: module.ParentStudentPortal })));
+const StudentPortal = lazy(() => import('../pages/StudentPortal').then((module) => ({ default: module.StudentPortal })));
 const StaffFinancePage = lazy(() => import('../pages/StaffFinancePage').then((module) => ({ default: module.StaffFinancePage })));
 const StaffReceptionPage = lazy(() => import('../pages/StaffReceptionPage').then((module) => ({ default: module.StaffReceptionPage })));
 const StaffTasksPage = lazy(() => import('../pages/StaffTasksPage').then((module) => ({ default: module.StaffTasksPage })));
@@ -266,8 +267,7 @@ const router = createBrowserRouter([
           {
             element: <RequireRole allowedRoles={['STUDENT']} />,
             children: [
-              { path: '/student/home', element: <Suspense fallback={<FullPageSpinner />}><ParentStudentPortal /></Suspense> },
-              { path: '/student/*', element: <RoleWorkspacePlaceholder role="student" /> },
+              { path: '/student/*', element: <Suspense fallback={<FullPageSpinner />}><StudentPortal /></Suspense> },
             ],
           },
           {
