@@ -515,25 +515,42 @@ router.get(
   hasPermission('view_reports'),
   async (req: TenantRequest, res: Response) => {
     try {
-      // Calculate monthly fee income forecast: current enrollments * course base rates
-      // Dropout adjustment applies an estimated attrition factor (e.g., 5%)
-      const baseForecastNpr = 750000;
-      const seasonalTrendsAdjustmentNpr = 50000;
-      const dropoutRate = 0.05; // 5% attrition
+      const now = new Date();
+      const cycleStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const cycleEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const [enrollments, paid, historical] = await Promise.all([
+        prisma.enrollment.findMany({
+          where: { status: 'ACTIVE', course: { tenantId: req.tenantId! } },
+          include: { course: { select: { feeStructure: true } } },
+        }),
+        prisma.invoice.aggregate({
+          where: { tenantId: req.tenantId!, status: 'PAID', paymentDate: { gte: cycleStart, lt: cycleEnd } },
+          _sum: { netPayable: true },
+        }),
+        prisma.enrollment.count({
+          where: { course: { tenantId: req.tenantId! }, status: { in: ['ACTIVE', 'DROPPED'] } },
+        }),
+      ]);
+      const baseForecastNpr = enrollments.reduce((sum, enrollment) => {
+        const fee = enrollment.course.feeStructure as { monthlyBase?: number };
+        return sum + Number(fee?.monthlyBase || 0);
+      }, 0);
+      const dropped = Math.max(0, historical - enrollments.length);
+      const dropoutRate = historical > 0 ? dropped / historical : 0;
       const attritionNpr = baseForecastNpr * dropoutRate;
-      
-      const netForecastNpr = baseForecastNpr + seasonalTrendsAdjustmentNpr - attritionNpr;
+      const netForecastNpr = Math.max(0, baseForecastNpr - attritionNpr);
+      const actualCollectedNpr = Number(paid._sum.netPayable ?? 0);
 
       return res.status(200).json({
-        billingCycle: 'May 2026',
+        billingCycle: cycleStart.toLocaleString('en-US', { month: 'long', year: 'numeric' }),
         metrics: {
           baseForecastNpr,
-          seasonalTrendsAdjustmentNpr,
           estimatedAttritionNpr: attritionNpr,
-          attritionPercentage: '5.0%',
+          attritionPercentage: `${(dropoutRate * 100).toFixed(1)}%`,
           netForecastNpr,
-          actualCollectedNpr: 680000,
-          varianceNpr: 680000 - netForecastNpr,
+          actualCollectedNpr,
+          varianceNpr: actualCollectedNpr - netForecastNpr,
+          activeEnrollments: enrollments.length,
         },
       });
     } catch (error: any) {
@@ -884,6 +901,34 @@ router.post(
       return res.status(500).json({ error: 'L2 approval failed.', details: error.message });
     }
   }
+);
+
+// Tenant Admin rejects a Level-1 request or returns it to the Accountant for revision.
+router.post(
+  '/petty-cash/decide/:id',
+  authMiddleware,
+  async (req: TenantRequest, res: Response) => {
+    const action = req.body?.action;
+    const remarks = typeof req.body?.remarks === 'string' ? req.body.remarks.trim() : '';
+    if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may make the final decision.' });
+    if (!['REJECT', 'REVISION'].includes(action)) return res.status(400).json({ error: 'Action must be REJECT or REVISION.' });
+    if (!remarks) return res.status(400).json({ error: 'Decision remarks are required.' });
+    const pc = await prisma.pettyCash.findFirst({ where: { id: req.params.id, tenantId: req.tenantId! } });
+    if (!pc) return res.status(404).json({ error: 'Petty cash request not found.' });
+    if (pc.status !== 'APPROVED_LEVEL1') return res.status(409).json({ error: 'Only Level-1-approved requests can receive a final decision.' });
+    const approvalChain = [...((pc.approvalChain as any[]) || []), {
+      role: 'Tenant Admin', action, timestamp: new Date().toISOString(), comment: remarks,
+    }];
+    const transition = await prisma.pettyCash.updateMany({
+      where: { id: pc.id, tenantId: req.tenantId!, status: 'APPROVED_LEVEL1' },
+      data: { status: action === 'REJECT' ? 'REJECTED' : 'PENDING', approvalChain },
+    });
+    if (transition.count !== 1) return res.status(409).json({ error: 'The request was already processed.' });
+    return res.json({
+      message: action === 'REJECT' ? 'Petty cash request rejected.' : 'Petty cash request returned for revision.',
+      pettyCash: { ...pc, status: action === 'REJECT' ? 'REJECTED' : 'PENDING', approvalChain },
+    });
+  },
 );
 
 // Upload Receipt

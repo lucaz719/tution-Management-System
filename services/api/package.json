@@ -18,7 +18,7 @@
     "test:tenant-admin:integration": "ts-node src/integration/tenant-admin.integration.test.ts"
   },
   "prisma": {
-    "seed": "ts-node prisma/seed.ts"
+    "seed": "node prisma/seed-runner.cjs"
   },
   "nodemonConfig": {
     "watch": [

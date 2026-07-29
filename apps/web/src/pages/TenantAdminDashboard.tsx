@@ -18,6 +18,15 @@ interface FinanceConfig {
   vatRate: number;
   gracePeriod: number;
   pettyCashCap: number;
+  refundPolicy: string;
+  lateFeeEnabled: boolean;
+  lateFeeMode: string | null;
+  lateFeeValue: number | null;
+  lateFeeGraceDays: number;
+  appointmentWindowHours: number;
+  maintenanceEscalationDays: number;
+  leavePolicy: Record<string, unknown> | null;
+  performanceWeights: Record<string, number> | null;
 }
 
 interface BranchSummaryItem {
@@ -89,6 +98,7 @@ export function TenantAdminDashboard() {
   const [errorMsg, setErrorMsg] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [billingPeriod, setBillingPeriod] = useState('');
+  const [policyConfig, setPolicyConfig] = useState<FinanceConfig | null>(null);
 
   const alerts = buildAlerts(dashboard);
 
@@ -108,6 +118,7 @@ export function TenantAdminDashboard() {
       setVatRate(config.vatRate);
       setGracePeriod(config.gracePeriod);
       setPettyCashCap(config.pettyCashCap);
+      setPolicyConfig(config);
       setDashboard(summary);
       if (period) setBillingPeriod(period.label);
     } catch (error: unknown) {
@@ -126,7 +137,19 @@ export function TenantAdminDashboard() {
     setErrorMsg('');
 
     try {
-      await api.finances.updateConfig(vatRate, gracePeriod, pettyCashCap);
+      await api.finances.updateConfig(vatRate, gracePeriod, pettyCashCap, {
+        refundPolicy: policyConfig?.refundPolicy ?? 'NO_REFUND',
+        lateFeeEnabled: policyConfig?.lateFeeEnabled ?? false,
+        lateFeeMode: policyConfig?.lateFeeMode ?? 'FLAT',
+        lateFeeValue: policyConfig?.lateFeeValue ?? 0,
+        lateFeeGraceDays: policyConfig?.lateFeeGraceDays ?? 0,
+        appointmentWindowHours: policyConfig?.appointmentWindowHours ?? 24,
+        maintenanceEscalationDays: policyConfig?.maintenanceEscalationDays ?? 3,
+        leavePolicy: policyConfig?.leavePolicy ?? {},
+        performanceWeights: policyConfig?.performanceWeights ?? {
+          attendance: 20, updateCompliance: 20, feedback: 20, leaveCompliance: 20, taskCompletion: 20,
+        },
+      });
       setSaveSuccess(true);
       window.setTimeout(() => setSaveSuccess(false), 3000);
     } catch (error: unknown) {

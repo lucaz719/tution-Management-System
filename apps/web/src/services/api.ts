@@ -1,7 +1,6 @@
 // API Client Service for Tuition Management System (TMS)
 // Tenant scope is authoritative from the signed session on the API.
-
-const API_BASE_URL = 'http://localhost:3001/api';
+import { request } from './api/client';
 
 // Helper to remove token
 export function removeAuthToken() {
@@ -19,36 +18,6 @@ export function getTenantId(): string | null {
 
 export function setTenantId(tenantId: string) {
   localStorage.setItem('tms_tenant_id', tenantId);
-}
-
-// Generic Request wrapper
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const headers = new Headers(options.headers || {});
-  headers.set('Content-Type', 'application/json');
-
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers,
-    credentials: 'include',
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    let parsedErr;
-    try {
-      parsedErr = JSON.parse(errText);
-    } catch {
-      parsedErr = { error: errText || 'Network request failed' };
-    }
-    throw new Error(parsedErr.error || parsedErr.message || 'Request failed');
-  }
-
-  // Handle empty responses
-  if (response.status === 204) {
-    return {} as T;
-  }
-
-  return response.json() as Promise<T>;
 }
 
 // API Service exports
@@ -107,15 +76,49 @@ export const api = {
         body: JSON.stringify({ remarks }),
       });
     },
-    updateConfig: async (vatRate: number, gracePeriod: number, pettyCashCap: number) => {
+    updateConfig: async (
+      vatRate: number,
+      gracePeriod: number,
+      pettyCashCap: number,
+      policies: {
+        refundPolicy: string;
+        lateFeeEnabled: boolean;
+        lateFeeMode: string;
+        lateFeeValue: number;
+        lateFeeGraceDays: number;
+        appointmentWindowHours: number;
+        maintenanceEscalationDays: number;
+        leavePolicy: Record<string, unknown>;
+        performanceWeights: Record<string, number>;
+      },
+    ) => {
       return request<{ success: boolean; tenant: any }>('/finances/config', {
         method: 'PUT',
-        body: JSON.stringify({ vatRate, gracePeriod, pettyCashCap }),
+        body: JSON.stringify({
+          vatRate,
+          gracePeriod,
+          pettyCashCap,
+          ...policies,
+        }),
+      });
+    },
+    decidePettyCash: async (id: string, action: 'REJECT' | 'REVISION', remarks?: string) => {
+      return request<{ message: string; pettyCash: any }>(`/finances/petty-cash/decide/${id}`, {
+        method: 'POST',
+        body: JSON.stringify({ action, remarks }),
       });
     },
     getConfig: async () => {
-      return request<{ vatRate: number; gracePeriod: number; pettyCashCap: number }>('/finances/config');
+      return request<{
+        vatRate: number; gracePeriod: number; pettyCashCap: number; refundPolicy: string;
+        lateFeeEnabled: boolean; lateFeeMode: string | null; lateFeeValue: number | null;
+        lateFeeGraceDays: number; appointmentWindowHours: number; maintenanceEscalationDays: number;
+        leavePolicy: Record<string, unknown> | null; performanceWeights: Record<string, number> | null;
+      }>('/finances/config');
     },
+    getForecast: async () => request<any>('/finances/forecast'),
+    getSuggestions: async () => request<any>('/finances/suggestions'),
+    exportLedger: async () => request<{ format: string; entries: any[] }>('/finances/ledger/export'),
     getBillingPeriod: async () => {
       return request<{ label: string; bsYear: number; bsMonthName: string; bsMonthNameNp: string; daysInMonth: number; cycleStart: string; cycleEnd: string; dueDate: string }>('/finances/billing-period');
     },
@@ -229,6 +232,14 @@ export const api = {
         branchSummary: Array<{ branchId: string; branchName: string; activeStudents: number; staffRoles: number }>;
       }>('/onboarding/dashboard');
     },
+    getDocumentAlerts: async () => request<{ expiringDocs: any[] }>('/hr/documents/alerts'),
+    listCalendarEvents: async () => request<{ events: any[] }>('/academic-events'),
+    publishCalendarEvent: async (payload: {
+      title: string; description?: string; eventType: string; startDate: string; endDate: string;
+    }) => request<{ message: string; event: any }>('/academic-events', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   },
 
   // People / user provisioning (Tenant Admin + Branch Admin)
