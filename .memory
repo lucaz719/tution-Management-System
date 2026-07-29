@@ -20,6 +20,15 @@ Last committed revision: `038a72f complete tenant security and manual finance wo
 - A real local tenant named `Frontend Dev Academy` and its `Main Center` branch
   are provisioned for frontend testing. Credentials remain local-only and are
   not recorded in this file or tracked source.
+- The development demo tenant `Pinnacle Demo Academy` and its student fixture
+  are seeded in the Compose database. The local student credential was reset
+  and verified through Better Auth, but is intentionally not recorded here.
+- Port `5173` is currently served by the local webpack development server.
+  Starting another web dev process will fail with `EADDRINUSE`; use the existing
+  server or stop its process before restarting.
+- Direct `npm run dev` from `services/api` does not load the repository-root
+  `.env`. Prefer the healthy Compose API, which receives its required auth and
+  database environment through Compose.
 - `PLATFORM_ADMIN_ENABLED=false` after provisioning. Re-enable it only when a
   new local tenant must be provisioned, then disable it again.
 
@@ -128,6 +137,51 @@ Docker database volume.
   and calendar update/delete lifecycle.
 - Updated `apps/web/tests/smoke.js` to support Tenant Admin accounts with or
   without 2FA and verify the critical new routes after real authentication.
+
+## Completed Student web work
+
+- Added the authenticated, role-restricted `/student/*` portal and student
+  dashboard navigation.
+- Added focused student routes for home, timetable, homework, results,
+  attendance, fees, digital ID, certificates, academic calendar, and
+  notifications.
+- The home dashboard merges all enrolled course categories into today's
+  timetable and shows homework due soon, attendance/latest-score/certificate
+  summaries, blocked-fee status, and upcoming academic or fee events.
+- Homework is read-only and includes functional Pending, Due soon, Overdue,
+  and Completed filters with accessible pressed states and honest empty states.
+- Results show published scores, class-average comparisons, strongest/weakest
+  subject insights, and accessible SVG score-history trend lines.
+- Attendance shows Present, Absent, and Absent (Excused) session states and
+  explains how approved leave is represented.
+- Digital ID shows enrollment, grade, roll number, academic year, validity,
+  branch identification guidance, and explicit Active/Blocked status.
+- Fees show the current outstanding balance, explicit blocked state,
+  color-plus-text payment-cycle states, itemized dues/discounts/fines/net
+  payable, and a Nepal Pay QR dialog.
+- The Nepal Pay dialog supports close button, backdrop click, Escape, focus
+  trapping, body-scroll locking, and focus return to its trigger.
+- Certificates remain visible in a permanent history and provide download
+  interaction feedback. Calendar views distinguish holidays, exams,
+  ceremonies, and fee due dates.
+- Notifications cover fee due/overdue, homework, approved parent-applied leave,
+  and certificate issuance. Student appointment notifications are deliberately
+  excluded because appointments are a parent-teacher flow.
+- Student UI supports responsive layouts, keyboard focus visibility, minimum
+  touch targets, dark mode, and reduced-motion preferences.
+- Canonical web StyleSeed tokens now use the locked `#1560BD` blue,
+  `#2F6FED` bright blue, `#002D72` navy, `#FFBC3B` gold, `#F5F7FA` surface,
+  `#1B1F3B` text, Fraunces display typography, and Roboto UI typography.
+- Primary implementation files:
+  `apps/web/src/pages/StudentPortal.tsx`,
+  `apps/web/src/features/student/studentPortal.css`,
+  `apps/web/src/features/student/studentPortalData.ts`,
+  `apps/web/src/router/index.tsx`, and
+  `apps/web/src/components/patterns/dashboardNavigation.ts`.
+- Student screens currently use frontend fixture data. Real-time teacher score
+  updates, live attendance/invoice data, genuine Nepal Pay QR payloads,
+  certificate PDF downloads, and push delivery still require student API and
+  event integration.
 
 ## Integration coverage completed
 
@@ -282,4 +336,8 @@ Known non-blocking warnings:
   cash, payroll, reports, HR alerts, resources, calendar, navigation cleanup,
   API-gap documentation, and authenticated smoke coverage.
 - Docker-safe Prisma seed runner and corrected local provisioning workflow.
+- Student web portal, navigation, StyleSeed alignment, responsive/accessibility
+  polish, homework filtering, score trend lines, attendance/fees/identity/
+  certificate/calendar/notification views, and verified local demo-student
+  authentication.
 - All validation commands listed above pass; changes are not yet committed.
