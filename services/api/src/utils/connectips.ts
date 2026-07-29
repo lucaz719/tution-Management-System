@@ -155,8 +155,8 @@ export async function validateAndConfirmConnectIps(txnId: string) {
 
   if (status !== 'SUCCESS') {
     const incomplete = status === 'ERROR' && /INCOMPLETE|NOT FOUND/i.test(message);
-    return prisma.paymentAttempt.update({
-      where: { id: attempt.id },
+    const transition = await prisma.paymentAttempt.updateMany({
+      where: { id: attempt.id, status: { not: 'SUCCESS' } },
       data: {
         status: incomplete ? 'INCOMPLETE' : 'FAILED',
         gatewayStatus: status || 'ERROR',
@@ -166,26 +166,15 @@ export async function validateAndConfirmConnectIps(txnId: string) {
         failedAt: incomplete ? null : now,
       },
     });
+    if (transition.count !== 1) {
+      return prisma.paymentAttempt.findUnique({ where: { id: attempt.id } });
+    }
+    return prisma.paymentAttempt.findUniqueOrThrow({ where: { id: attempt.id } });
   }
 
   return prisma.$transaction(async (tx) => {
-    const current = await tx.paymentAttempt.findUnique({ where: { id: attempt.id }, include: { invoice: true } });
-    if (!current || current.status === 'SUCCESS') return current;
-    if (current.amountPaisa !== BigInt(Math.round(Number(current.invoice.netPayable) * 100))) {
-      throw new Error('Stored connectIPS amount does not match the invoice.');
-    }
-    await tx.invoice.update({
-      where: { id: current.invoiceId },
-      data: { status: 'PAID', transactionId: current.txnId, paymentDate: now },
-    });
-    if (current.invoice.invoiceType === 'ADMISSION') {
-      await tx.student.update({
-        where: { id: current.invoice.studentId },
-        data: { admissionStatus: 'READY_FOR_LOGIN' },
-      });
-    }
-    return tx.paymentAttempt.update({
-      where: { id: current.id },
+    const claim = await tx.paymentAttempt.updateMany({
+      where: { id: attempt.id, status: { not: 'SUCCESS' } },
       data: {
         status: 'SUCCESS',
         gatewayStatus: 'SUCCESS',
@@ -195,6 +184,32 @@ export async function validateAndConfirmConnectIps(txnId: string) {
         confirmedAt: now,
       },
     });
+    if (claim.count !== 1) {
+      return tx.paymentAttempt.findUnique({ where: { id: attempt.id } });
+    }
+    if (attempt.amountPaisa !== BigInt(Math.round(Number(attempt.invoice.netPayable) * 100))) {
+      throw new Error('Stored connectIPS amount does not match the invoice.');
+    }
+    const invoiceTransition = await tx.invoice.updateMany({
+      where: {
+        id: attempt.invoiceId,
+        status: { in: ['UNPAID', 'OVERDUE', 'BLOCKED_OVERRIDE'] },
+      },
+      data: { status: 'PAID', transactionId: attempt.txnId, paymentDate: now },
+    });
+    if (invoiceTransition.count !== 1) {
+      const paidInvoice = await tx.invoice.findUniqueOrThrow({ where: { id: attempt.invoiceId } });
+      if (paidInvoice.status !== 'PAID' || paidInvoice.transactionId !== attempt.txnId) {
+        throw new Error('Invoice was already paid through another transaction.');
+      }
+    }
+    if (attempt.invoice.invoiceType === 'ADMISSION') {
+      await tx.student.updateMany({
+        where: { id: attempt.invoice.studentId, admissionStatus: 'PENDING_PAYMENT' },
+        data: { admissionStatus: 'READY_FOR_LOGIN' },
+      });
+    }
+    return tx.paymentAttempt.findUniqueOrThrow({ where: { id: attempt.id } });
   });
 }
 

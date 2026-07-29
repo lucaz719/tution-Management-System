@@ -127,12 +127,13 @@ router.get('/connectips/return/failure', async (req: TenantRequest, res: Respons
   const attempt = await prisma.paymentAttempt.findUnique({ where: { txnId } });
   if (!attempt || attempt.provider !== 'CONNECTIPS') return res.status(404).json({ error: 'Payment attempt not found.' });
   if (attempt.status !== 'SUCCESS') {
-    await prisma.paymentAttempt.update({
-      where: { id: attempt.id },
+    await prisma.paymentAttempt.updateMany({
+      where: { id: attempt.id, status: { not: 'SUCCESS' } },
       data: { gatewayStatus: 'USER_RETURNED_FAILURE', gatewayMessage: 'User returned through the failure URL.' },
     });
   }
-  return res.json({ txnId, status: attempt.status });
+  const current = await prisma.paymentAttempt.findUniqueOrThrow({ where: { id: attempt.id } });
+  return res.json({ txnId, status: current.status });
 });
 
 router.get('/connectips/status/:txnId', authMiddleware, async (req: TenantRequest, res: Response) => {
@@ -631,15 +632,19 @@ router.post(
           return res.status(422).json({ error: 'Payment amount does not match the invoice.' });
         }
 
-        await prisma.$transaction(async (tx) => {
-          await tx.invoice.update({
-            where: { id: invoiceId },
+        const confirmed = await prisma.$transaction(async (tx) => {
+          const transition = await tx.invoice.updateMany({
+            where: {
+              id: invoiceId,
+              status: { in: ['UNPAID', 'OVERDUE', 'BLOCKED_OVERRIDE'] },
+            },
             data: {
               status: 'PAID',
               transactionId,
               paymentDate: new Date(),
             },
           });
+          if (transition.count !== 1) return false;
 
           await tx.enrollment.updateMany({
             where: { studentId: invoice.studentId, status: 'BLOCKED' },
@@ -651,7 +656,11 @@ router.post(
               data: { admissionStatus: 'READY_FOR_LOGIN' },
             });
           }
+          return true;
         });
+        if (!confirmed) {
+          return res.status(200).json({ message: 'Payment was already recorded.', invoiceId });
+        }
 
         const smsSender = new MockSmsSender();
         await smsSender.sendSms(
@@ -672,6 +681,9 @@ router.post(
         return res.status(400).json({ error: 'Payment status failed or not recognized.' });
       }
     } catch (error: any) {
+      if (error.code === 'P2002') {
+        return res.status(409).json({ error: 'Transaction has already been used.' });
+      }
       return res.status(500).json({ error: 'Failed to process Nepal Pay webhook.', details: error.message });
     }
   }

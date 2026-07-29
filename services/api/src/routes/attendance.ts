@@ -254,12 +254,22 @@ router.post(
     }
 
     try {
+      const assignedSession = await prisma.teacherSession.findFirst({
+        where: {
+          teacherId,
+          classId,
+          date: new Date(date),
+          class: { course: { tenantId: req.tenantId! } },
+        },
+      });
+      if (!assignedSession) {
+        return res.status(404).json({ error: 'Assigned teacher session not found.' });
+      }
       const result = await prisma.teacherSession.updateMany({
           where: {
+            id: assignedSession.id,
             teacherId,
-            classId,
-            date: new Date(date),
-            class: { course: { tenantId: req.tenantId! } },
+            dailyUpdateSubmitted: false,
           },
           data: {
             status: 'PRESENT_CONFIRMED',
@@ -268,7 +278,7 @@ router.post(
           },
         });
       if (result.count === 0) {
-        return res.status(404).json({ error: 'Assigned teacher session not found.' });
+        return res.status(409).json({ error: 'The daily update was already submitted by another request.' });
       }
 
       return res.status(200).json({

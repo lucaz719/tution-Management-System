@@ -151,12 +151,19 @@ router.post(
       const checklist = Array.isArray(exit.clearanceChecklist) ? [...exit.clearanceChecklist as any[]] : [];
       const index = checklist.findIndex((item) => item.item === checklistItem);
       if (index < 0) return res.status(404).json({ error: 'Checklist item not found.' });
+      if (checklist[index]?.cleared === true) {
+        return res.status(409).json({ error: 'This checklist item was already cleared.' });
+      }
       checklist[index] = { ...checklist[index], cleared: true, signature: req.user!.id, clearedAt: new Date().toISOString() };
       const completed = checklist.length > 0 && checklist.every((item) => item.cleared === true);
-      const updated = await prisma.exitClearance.update({
-        where: { id: exit.id },
+      const transition = await prisma.exitClearance.updateMany({
+        where: { id: exit.id, status: 'PENDING', updatedAt: exit.updatedAt },
         data: { clearanceChecklist: checklist, status: completed ? 'CLEARANCE_COMPLETED' : 'PENDING' },
       });
+      if (transition.count !== 1) {
+        return res.status(409).json({ error: 'Exit clearance changed in another request. Refresh and try again.' });
+      }
+      const updated = await prisma.exitClearance.findUniqueOrThrow({ where: { id: exit.id } });
       return res.status(200).json({ message: 'Checklist item cleared.', exit: updated });
     } catch (error: any) {
       return res.status(500).json({ error: 'Clearance sign-off failed.' });
@@ -181,11 +188,19 @@ router.post(
       if (exit.status !== 'CLEARANCE_COMPLETED') {
         return res.status(409).json({ error: 'Branch clearance must be completed before final settlement.' });
       }
-      await prisma.$transaction(async (tx) => {
-        await tx.exitClearance.update({ where: { id: exit.id }, data: { status: 'SETTLED' } });
+      const settled = await prisma.$transaction(async (tx) => {
+        const transition = await tx.exitClearance.updateMany({
+          where: { id: exit.id, status: 'CLEARANCE_COMPLETED' },
+          data: { status: 'SETTLED' },
+        });
+        if (transition.count !== 1) return false;
         await tx.user.update({ where: { id: exit.staffRecord.userId }, data: { status: 'INACTIVE' } });
         await tx.session.deleteMany({ where: { userId: exit.staffRecord.userId } });
+        return true;
       });
+      if (!settled) {
+        return res.status(409).json({ error: 'Exit was already settled or changed by another request.' });
+      }
       return res.status(200).json({ message: 'Exit settled and staff account deactivated.', exitId, status: 'SETTLED' });
     } catch (error: any) {
       return res.status(500).json({ error: 'Final settlement failed.' });

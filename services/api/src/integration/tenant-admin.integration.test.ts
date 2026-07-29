@@ -353,15 +353,18 @@ async function main(): Promise<void> {
       { transactionId: 'DUPLICATE' },
     );
     assert.equal(response.status, 400, 'an invoice cannot be paid twice');
-    response = await request(
-      'POST',
-      `/api/users/admissions/${admissionStudentId}/issue-logins`,
-      adminACookie,
-      {},
+    const concurrentCredentialIssues = await Promise.all([
+      request('POST', `/api/users/admissions/${admissionStudentId}/issue-logins`, adminACookie, {}),
+      request('POST', `/api/users/admissions/${admissionStudentId}/issue-logins`, adminACookie, {}),
+    ]);
+    assert.deepEqual(
+      concurrentCredentialIssues.map((result) => result.status).sort(),
+      [200, 409],
+      'admission credentials must be issued exactly once',
     );
-    assert.equal(response.status, 200);
-    const studentCredentials = response.body.student;
-    const parentCredentials = response.body.parent;
+    const credentialIssue = concurrentCredentialIssues.find((result) => result.status === 200)!;
+    const studentCredentials = credentialIssue.body.student;
+    const parentCredentials = credentialIssue.body.parent;
     const [studentCookie, parentCookie] = await Promise.all([
       signIn(studentCredentials.email, studentCredentials.temporaryPassword),
       signIn(parentCredentials.email, parentCredentials.temporaryPassword),
@@ -732,11 +735,21 @@ async function main(): Promise<void> {
       deadline: new Date(Date.now() + 86_400_000).toISOString(),
     });
     assert.equal(response.status, 404);
-    response = await request('POST', '/api/homework/submit', studentCookie, {
-      homeworkId, studentId: admissionStudentId, submissionUrl: 'https://example.invalid/submission.pdf',
-    });
-    assert.equal(response.status, 201);
-    const submissionId = response.body.submission.id;
+    const concurrentHomeworkSubmissions = await Promise.all([
+      request('POST', '/api/homework/submit', studentCookie, {
+        homeworkId, studentId: admissionStudentId, submissionUrl: 'https://example.invalid/submission.pdf',
+      }),
+      request('POST', '/api/homework/submit', studentCookie, {
+        homeworkId, studentId: admissionStudentId, submissionUrl: 'https://example.invalid/submission.pdf',
+      }),
+    ]);
+    assert.deepEqual(
+      concurrentHomeworkSubmissions.map((result) => result.status).sort(),
+      [201, 409],
+      'a student may submit each homework exactly once',
+    );
+    const homeworkSubmission = concurrentHomeworkSubmissions.find((result) => result.status === 201)!;
+    const submissionId = homeworkSubmission.body.submission.id;
     response = await request('POST', '/api/homework/submit', studentCookie, {
       homeworkId, studentId: studentA2.id,
     });
@@ -745,10 +758,19 @@ async function main(): Promise<void> {
       grade: 'A',
     });
     assert.equal(response.status, 404, 'only the assigned teacher may grade a submission');
-    response = await request('POST', `/api/homework/grade/${submissionId}`, teacherCookie, {
-      grade: 'A', remarks: 'Verified',
-    });
-    assert.equal(response.status, 200);
+    const concurrentHomeworkGrades = await Promise.all([
+      request('POST', `/api/homework/grade/${submissionId}`, teacherCookie, {
+        grade: 'A', remarks: 'Verified',
+      }),
+      request('POST', `/api/homework/grade/${submissionId}`, teacherCookie, {
+        grade: 'B', remarks: 'Concurrent stale grade',
+      }),
+    ]);
+    assert.deepEqual(
+      concurrentHomeworkGrades.map((result) => result.status).sort(),
+      [200, 409],
+      'homework grading must be an atomic one-time transition',
+    );
     response = await request('GET', `/api/homework/${classAId}`, parentCookie);
     assert.equal(response.status, 200);
     assert.equal(response.body.homework[0].submissions[0].studentId, admissionStudentId);
@@ -830,6 +852,12 @@ async function main(): Promise<void> {
       updateContent: 'Completed algebra lesson.',
     });
     assert.equal(response.status, 200);
+    response = await request('POST', '/api/attendance/session/update', teacherCookie, {
+      classId: classAId,
+      date: teacherSession.date.toISOString(),
+      updateContent: 'Duplicate lesson update.',
+    });
+    assert.equal(response.status, 409, 'daily session confirmation must be one-time');
     const geoPayload = {
       branchId: branchA.id,
       latitude: branchA.latitude,
@@ -1033,10 +1061,16 @@ async function main(): Promise<void> {
       response = await request('POST', `/api/hr/exit/clear/${exitId}`, branchAdminCookie, { checklistItem });
       assert.equal(response.status, 200);
     }
+    response = await request('POST', `/api/hr/exit/clear/${exitId}`, branchAdminCookie, {
+      checklistItem: checklistItems[0],
+    });
+    assert.equal(response.status, 409, 'a completed clearance item cannot be signed twice');
     response = await request('POST', `/api/hr/exit/settle/${exitId}`, adminBCookie, {});
     assert.equal(response.status, 404);
     response = await request('POST', `/api/hr/exit/settle/${exitId}`, adminACookie, {});
     assert.equal(response.status, 200);
+    response = await request('POST', `/api/hr/exit/settle/${exitId}`, adminACookie, {});
+    assert.equal(response.status, 409, 'staff exit settlement must be one-time');
     assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: staffUser.id } })).status, 'INACTIVE');
 
     // User directory, profiles, analytics, provisioning, bulk import, update, and soft delete.
@@ -1107,6 +1141,8 @@ async function main(): Promise<void> {
     assert.equal(response.status, 404);
     response = await request('DELETE', `/api/users/${createdUserId}`, adminACookie, {});
     assert.equal(response.status, 200);
+    response = await request('DELETE', `/api/users/${createdUserId}`, adminACookie, {});
+    assert.equal(response.status, 409, 'user deactivation must be a one-time transition');
     response = await request('DELETE', `/api/users/${adminA.id}`, adminACookie, {});
     assert.equal(response.status, 400);
 
