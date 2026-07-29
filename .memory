@@ -1,6 +1,6 @@
 # TMS Working Memory
 
-Last updated: 2026-07-28
+Last updated: 2026-07-29
 Repository: `https://github.com/lucazsoft/tution-Management-System/`
 Branch: `main`
 Last committed revision: `038a72f complete tenant security and manual finance workflows`
@@ -12,7 +12,7 @@ Last committed revision: `038a72f complete tenant security and manual finance wo
 - API is healthy at `http://localhost:3001/api/health`.
 - Web is healthy at `http://localhost:5173`.
 - The `migrate` container exits with code 0 after applying migrations; this is expected.
-- All 13 Prisma migrations apply successfully from an empty database.
+- All 14 Prisma migrations apply successfully from an empty database.
 - `.env.docker` is local-only and explicitly ignored by Git.
 - `.env.docker.example` is the safe tracked template.
 
@@ -49,6 +49,13 @@ Docker database volume.
 - Invoice PAN/VAT, refund, leave, petty-cash, and other applicable policy snapshots.
 - Conditional atomic transitions for invoice payment, refund approval/settlement,
   petty-cash approval/receipt/closure, and payroll approval/reconciliation.
+- Remaining workflow transitions hardened with conditional writes and atomic
+  transactions: admission credential issuance, onboarding approval/rejection,
+  HR clearance/settlement, teacher daily updates, homework submission/grading,
+  OTP/reset-token consumption, user deactivation, NepalPay confirmation, and
+  connectIPS success/failure reconciliation.
+- Database uniqueness now enforces one homework submission per student/assignment
+  and globally unique non-null external invoice transaction references.
 - Refund request IDOR fixed: student/course tenant ownership and caller authorization
   are verified before creating the request.
 - Invoice payment authorization fixed so assigned accountants pass explicit
@@ -121,6 +128,9 @@ Covered:
 - Homework covers assigned-teacher creation/grading, student self-submission,
   linked-parent visibility, cross-student denial, wrong-branch denial, and
   foreign-tenant hiding.
+- Concurrency/duplicate probes now cover admission credential issuance, homework
+  submission/grading, teacher daily-update confirmation, HR checklist/settlement,
+  and user deactivation in addition to the existing finance transition probes.
 
 Additional defects fixed during the full route pass:
 
@@ -165,19 +175,17 @@ Known non-blocking warnings:
 
 ## Remaining work, in priority order
 
-1. Convert any remaining read-then-write workflow transitions to conditional,
-   atomic database transitions.
-2. Add strict shared input schemas, request body limits, Helmet/security headers,
+1. Add strict shared input schemas, request body limits, Helmet/security headers,
    standardized errors, and endpoint-specific rate limiting.
-3. Implement the modules that intentionally return 501:
+2. Implement the modules that intentionally return 501:
    appointments, parent-teacher communication persistence, broadcast persistence,
    student performance, and staff performance reports.
-4. Enforce calendar immutability/update/delete policy from the Tenant Admin PRD.
-5. Complete petty-cash reject/send-back and monthly-cap behavior if required by PRD.
-6. Build connectIPS UI flows for web/mobile and validate with real NCHL UAT credentials.
-7. Build receipt, manual-refund, payroll-reconciliation, and audit-history screens.
-8. Resolve production dependency advisories and Node engine compatibility.
-9. Run final role-by-role, cross-tenant, cross-branch, backup/restore, HTTPS,
+3. Enforce calendar immutability/update/delete policy from the Tenant Admin PRD.
+4. Complete petty-cash reject/send-back and monthly-cap behavior if required by PRD.
+5. Build connectIPS UI flows for web/mobile and validate with real NCHL UAT credentials.
+6. Build receipt, manual-refund, payroll-reconciliation, and audit-history screens.
+7. Resolve production dependency advisories and Node engine compatibility.
+8. Run final role-by-role, cross-tenant, cross-branch, backup/restore, HTTPS,
     cookie, CORS, and rollback testing before production.
 
 ## connectIPS and finance constraints
@@ -190,5 +198,8 @@ Known non-blocking warnings:
 
 ## Current uncommitted work
 
-
-These changes have been tested and have  been committed  and pushed.
+- Atomic workflow hardening across auth, onboarding, admissions, sessions,
+  homework, HR, users, NepalPay, and connectIPS.
+- Migration `20260729090000_atomic_workflow_constraints`.
+- Expanded Tenant Admin integration concurrency/duplicate coverage.
+- All validation commands listed above pass; changes are not yet committed.

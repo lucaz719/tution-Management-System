@@ -75,18 +75,22 @@ router.post(
         where: { studentId: student.id, classId: homework.classId, status: 'ACTIVE' },
       });
       if (!enrollment) return res.status(403).json({ error: 'Student is not actively enrolled in this class.' });
-      const existing = await prisma.homeworkSubmission.findFirst({
-        where: { homeworkId: homework.id, studentId: student.id },
-      });
-      if (existing) return res.status(409).json({ error: 'Homework was already submitted.' });
-      const submission = await prisma.homeworkSubmission.create({
-        data: {
-          homeworkId,
-          studentId,
-          submissionUrl,
-          remarks,
-        },
-      });
+      let submission;
+      try {
+        submission = await prisma.homeworkSubmission.create({
+          data: {
+            homeworkId,
+            studentId,
+            submissionUrl,
+            remarks,
+          },
+        });
+      } catch (error: any) {
+        if (error.code === 'P2002') {
+          return res.status(409).json({ error: 'Homework was already submitted.' });
+        }
+        throw error;
+      }
 
       return res.status(201).json({ message: 'Homework submitted successfully.', submission });
     } catch (error: any) {
@@ -120,14 +124,18 @@ router.post(
         },
       });
       if (!existing) return res.status(404).json({ error: 'Homework submission not found.' });
-      const submission = await prisma.homeworkSubmission.update({
-        where: { id: existing.id },
+      const transition = await prisma.homeworkSubmission.updateMany({
+        where: { id: existing.id, grade: null, gradedBy: null },
         data: {
           grade,
           remarks,
           gradedBy: req.user!.id,
         },
       });
+      if (transition.count !== 1) {
+        return res.status(409).json({ error: 'The submission was already graded by another request.' });
+      }
+      const submission = await prisma.homeworkSubmission.findUniqueOrThrow({ where: { id: existing.id } });
 
       return res.status(200).json({ message: 'Submission graded successfully.', submission });
     } catch (error: any) {

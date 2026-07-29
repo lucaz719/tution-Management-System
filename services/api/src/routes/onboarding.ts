@@ -78,107 +78,99 @@ router.post(
     const { id } = req.params;
     const { defaultBranchName, branchAddress, latitude, longitude } = req.body;
 
-    let onboardingRequest: any = null;
     try {
-      // Find the onboarding request
-      onboardingRequest = await prisma.tenantRequest.findUnique({
+      const onboardingRequest = await prisma.tenantRequest.findUnique({
         where: { id },
       });
 
       if (!onboardingRequest) {
-        return res.status(444).json({ error: 'Onboarding request not found.' });
+        return res.status(404).json({ error: 'Onboarding request not found.' });
       }
 
       if (onboardingRequest.status !== 'PENDING') {
-        return res.status(400).json({ error: 'Request is already processed.' });
+        return res.status(409).json({ error: 'Request is already processed.' });
       }
 
-      // Start transaction or sequential queries to provision
-      const tenant = await prisma.tenant.create({
-        data: {
-          name: onboardingRequest.name,
-          panNumber: onboardingRequest.panNumber,
-          status: 'ACTIVE',
-        },
-      });
-
-      // Scaffold default roles for the tenant
-      const tenantAdminRole = await prisma.role.create({
-        data: {
-          tenantId: tenant.id,
-          name: 'Tenant Admin',
-          permissions: [
-            'manage_branches',
-            'manage_staff',
-            'manage_courses',
-            'manage_billing',
-            'view_reports',
-            'approve_petty_cash_l2',
-          ],
-        },
-      });
-
-      // Create primary Branch context
-      const branch = await prisma.branch.create({
-        data: {
-          tenantId: tenant.id,
-          name: defaultBranchName || 'Main Center',
-          address: branchAddress || 'Address pending — update in Branch settings',
-          latitude: Number.isFinite(Number(latitude)) ? Number(latitude) : 27.6915,
-          longitude: Number.isFinite(Number(longitude)) ? Number(longitude) : 85.3422,
-          radiusMeters: 100,
-        },
-      });
-
-      // Generate random temporary password
       const tempPassword = `Tms!${crypto.randomBytes(12).toString('base64url')}A9`;
       const passwordHash = await bcrypt.hash(tempPassword, 10);
+      const provisioned = await prisma.$transaction(async (tx) => {
+        const claim = await tx.tenantRequest.updateMany({
+          where: { id, status: 'PENDING' },
+          data: { status: 'APPROVED' },
+        });
+        if (claim.count !== 1) return null;
 
-      // Create primary Tenant Admin User
-      const user = await prisma.user.create({
-        data: {
-          tenantId: tenant.id,
-          email: onboardingRequest.email,
-          name: onboardingRequest.name,
-          phone: onboardingRequest.phone,
-          firstName: onboardingRequest.name.split(' ')[0],
-          lastName: onboardingRequest.name.split(' ')[1] || 'Administrator',
-          passwordHash,
-          status: 'ACTIVE',
-        },
+        const tenant = await tx.tenant.create({
+          data: {
+            name: onboardingRequest.name,
+            panNumber: onboardingRequest.panNumber,
+            status: 'ACTIVE',
+          },
+        });
+        const tenantAdminRole = await tx.role.create({
+          data: {
+            tenantId: tenant.id,
+            name: 'Tenant Admin',
+            permissions: [
+              'manage_branches',
+              'manage_staff',
+              'manage_courses',
+              'manage_billing',
+              'view_reports',
+              'approve_petty_cash_l2',
+            ],
+          },
+        });
+        const branch = await tx.branch.create({
+          data: {
+            tenantId: tenant.id,
+            name: defaultBranchName || 'Main Center',
+            address: branchAddress || 'Address pending — update in Branch settings',
+            latitude: Number.isFinite(Number(latitude)) ? Number(latitude) : 27.6915,
+            longitude: Number.isFinite(Number(longitude)) ? Number(longitude) : 85.3422,
+            radiusMeters: 100,
+          },
+        });
+        const user = await tx.user.create({
+          data: {
+            tenantId: tenant.id,
+            email: onboardingRequest.email,
+            name: onboardingRequest.name,
+            phone: onboardingRequest.phone,
+            firstName: onboardingRequest.name.split(' ')[0],
+            lastName: onboardingRequest.name.split(' ')[1] || 'Administrator',
+            passwordHash,
+            status: 'ACTIVE',
+          },
+        });
+        await tx.account.create({
+          data: {
+            accountId: user.id,
+            providerId: 'credential',
+            userId: user.id,
+            password: passwordHash,
+          },
+        });
+        await tx.userRole.create({
+          data: {
+            userId: user.id,
+            roleId: tenantAdminRole.id,
+            branchId: null,
+          },
+        });
+        return { tenant, branch, user };
       });
-
-      await prisma.account.create({
-        data: {
-          accountId: user.id,
-          providerId: 'credential',
-          userId: user.id,
-          password: passwordHash,
-        },
-      });
-
-      // Assign Tenant Admin role globally to user
-      await prisma.userRole.create({
-        data: {
-          userId: user.id,
-          roleId: tenantAdminRole.id,
-          branchId: null, // Null indicates global tenant scope
-        },
-      });
-
-      // Update request status
-      await prisma.tenantRequest.update({
-        where: { id },
-        data: { status: 'APPROVED' },
-      });
+      if (!provisioned) {
+        return res.status(409).json({ error: 'Request was already processed by another request.' });
+      }
 
       return res.status(200).json({
         message: 'Onboarding request approved and successfully provisioned.',
         provisioned: {
-          tenantId: tenant.id,
-          tenantName: tenant.name,
-          primaryAdminUser: user.email,
-          defaultBranch: branch.name,
+          tenantId: provisioned.tenant.id,
+          tenantName: provisioned.tenant.name,
+          primaryAdminUser: provisioned.user.email,
+          defaultBranch: provisioned.branch.name,
           temporaryPassword: tempPassword,
         },
       });
@@ -210,13 +202,17 @@ router.post(
       }
 
       if (onboardingRequest.status !== 'PENDING') {
-        return res.status(400).json({ error: 'Request is already processed.' });
+        return res.status(409).json({ error: 'Request is already processed.' });
       }
 
-      const updated = await prisma.tenantRequest.update({
-        where: { id },
+      const transition = await prisma.tenantRequest.updateMany({
+        where: { id, status: 'PENDING' },
         data: { status: 'REJECTED' },
       });
+      if (transition.count !== 1) {
+        return res.status(409).json({ error: 'Request was already processed by another request.' });
+      }
+      const updated = await prisma.tenantRequest.findUniqueOrThrow({ where: { id } });
 
       return res.status(200).json({ message: 'Onboarding request rejected.', request: updated });
     } catch (error: any) {

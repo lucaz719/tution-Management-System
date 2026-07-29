@@ -330,13 +330,21 @@ router.post('/admissions/:studentId/issue-logins', authMiddleware, async (req: T
     bcrypt.hash(studentPassword, 10),
     bcrypt.hash(parentPassword, 10),
   ]);
-  await prisma.$transaction(async (tx) => {
+  const activated = await prisma.$transaction(async (tx) => {
+    const transition = await tx.student.updateMany({
+      where: { id: student.id, admissionStatus: 'READY_FOR_LOGIN' },
+      data: { admissionStatus: 'ACTIVE' },
+    });
+    if (transition.count !== 1) return false;
     await tx.user.update({ where: { id: student.userId }, data: { status: 'ACTIVE', passwordHash: studentHash } });
     await tx.account.updateMany({ where: { userId: student.userId, providerId: 'credential' }, data: { password: studentHash } });
     await tx.user.update({ where: { id: parentUser.id }, data: { status: 'ACTIVE', passwordHash: parentHash } });
     await tx.account.updateMany({ where: { userId: parentUser.id, providerId: 'credential' }, data: { password: parentHash } });
-    await tx.student.update({ where: { id: student.id }, data: { admissionStatus: 'ACTIVE' } });
+    return true;
   });
+  if (!activated) {
+    return res.status(409).json({ error: 'Admission logins were already issued by another request.' });
+  }
 
   return res.json({
     message: 'Admission activated. Deliver these one-time credentials through a secure channel.',
@@ -1163,9 +1171,23 @@ router.delete('/:id', authMiddleware, async (req: TenantRequest, res: Response) 
   }
 
   try {
-    await prisma.user.update({ where: { id: user.id }, data: { status: 'INACTIVE' } });
-    if (user.student) {
-      await prisma.enrollment.updateMany({ where: { studentId: user.student.id, status: 'ACTIVE' }, data: { status: 'DROPPED' } });
+    const deactivated = await prisma.$transaction(async (tx) => {
+      const transition = await tx.user.updateMany({
+        where: { id: user.id, tenantId: req.tenantId!, status: { not: 'INACTIVE' } },
+        data: { status: 'INACTIVE' },
+      });
+      if (transition.count !== 1) return false;
+      if (user.student) {
+        await tx.enrollment.updateMany({
+          where: { studentId: user.student.id, status: 'ACTIVE' },
+          data: { status: 'DROPPED' },
+        });
+      }
+      await tx.session.deleteMany({ where: { userId: user.id } });
+      return true;
+    });
+    if (!deactivated) {
+      return res.status(409).json({ error: 'User was already deactivated by another request.' });
     }
     return res.json({ message: 'User deactivated.' });
   } catch (error: any) {

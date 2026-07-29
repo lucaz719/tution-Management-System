@@ -116,14 +116,22 @@ router.post('/session/:sessionId/update', authMiddleware, async (req: TenantRequ
       return res.status(404).json({ error: 'Session not found.' });
     }
 
-    const updated = await prisma.teacherSession.update({
-      where: { id: sessionId },
+    const transition = await prisma.teacherSession.updateMany({
+      where: {
+        id: session.id,
+        teacherId: user.id,
+        dailyUpdateSubmitted: false,
+      },
       data: {
         updateContent,
         dailyUpdateSubmitted: true,
         status: 'PRESENT_CONFIRMED',
       },
     });
+    if (transition.count !== 1) {
+      return res.status(409).json({ error: 'The daily update was already submitted by another request.' });
+    }
+    const updated = await prisma.teacherSession.findUniqueOrThrow({ where: { id: session.id } });
 
     return res.json({
       message: 'Daily update submitted.',

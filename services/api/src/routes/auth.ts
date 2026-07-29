@@ -43,19 +43,20 @@ async function issueCode(
   ttlMs: number
 ): Promise<void> {
   // A new code invalidates any outstanding one for the same identifier+purpose.
-  await prisma.verificationCode.updateMany({
-    where: { identifier, purpose, consumedAt: null },
-    data: { consumedAt: new Date() },
-  });
-
-  await prisma.verificationCode.create({
-    data: {
-      identifier,
-      purpose,
-      codeHash: hashCode(code),
-      expiresAt: new Date(Date.now() + ttlMs),
-    },
-  });
+  await prisma.$transaction([
+    prisma.verificationCode.updateMany({
+      where: { identifier, purpose, consumedAt: null },
+      data: { consumedAt: new Date() },
+    }),
+    prisma.verificationCode.create({
+      data: {
+        identifier,
+        purpose,
+        codeHash: hashCode(code),
+        expiresAt: new Date(Date.now() + ttlMs),
+      },
+    }),
+  ]);
 }
 
 type ConsumeResult = 'ok' | 'invalid' | 'expired' | 'locked';
@@ -83,18 +84,32 @@ async function consumeCode(
   }
 
   if (record.codeHash !== hashCode(code)) {
-    await prisma.verificationCode.update({
-      where: { id: record.id },
+    const attempt = await prisma.verificationCode.updateMany({
+      where: {
+        id: record.id,
+        consumedAt: null,
+        attempts: record.attempts,
+        expiresAt: { gt: new Date() },
+      },
       data: { attempts: { increment: 1 } },
     });
-    return 'invalid';
+    if (attempt.count === 1) return 'invalid';
+    const current = await prisma.verificationCode.findUnique({ where: { id: record.id } });
+    return current && current.consumedAt === null && current.attempts >= MAX_CODE_ATTEMPTS
+      ? 'locked'
+      : 'invalid';
   }
 
-  await prisma.verificationCode.update({
-    where: { id: record.id },
+  const consumed = await prisma.verificationCode.updateMany({
+    where: {
+      id: record.id,
+      consumedAt: null,
+      attempts: record.attempts,
+      expiresAt: { gt: new Date() },
+    },
     data: { consumedAt: new Date() },
   });
-  return 'ok';
+  return consumed.count === 1 ? 'ok' : 'invalid';
 }
 
 router.post('/forgot-password', async (req: TenantRequest, res: Response) => {
@@ -192,26 +207,36 @@ router.post('/reset-password', async (req: TenantRequest, res: Response) => {
     }
 
     const nextPasswordHash = await bcrypt.hash(newPassword, 10);
-    await prisma.$transaction([
-      prisma.user.update({
+    const changed = await prisma.$transaction(async (tx) => {
+      const consumed = await tx.verificationCode.updateMany({
+        where: {
+          id: record.id,
+          consumedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        data: { consumedAt: new Date() },
+      });
+      if (consumed.count !== 1) return false;
+      await tx.user.update({
         where: { id: user.id },
         data: { passwordHash: nextPasswordHash },
-      }),
-      prisma.account.upsert({
+      });
+      await tx.account.upsert({
         where: { providerId_accountId: { providerId: 'credential', accountId: user.id } },
         update: { password: nextPasswordHash },
         create: { accountId: user.id, providerId: 'credential', userId: user.id, password: nextPasswordHash },
-      }),
-      prisma.verificationCode.update({
-        where: { id: record.id },
-        data: { consumedAt: new Date() },
-      }),
+      });
       // Invalidate anything else outstanding for this account.
-      prisma.verificationCode.updateMany({
-        where: { identifier: record.identifier, consumedAt: null },
+      await tx.verificationCode.updateMany({
+        where: { identifier: record.identifier, id: { not: record.id }, consumedAt: null },
         data: { consumedAt: new Date() },
-      }),
-    ]);
+      });
+      await tx.session.deleteMany({ where: { userId: user.id } });
+      return true;
+    });
+    if (!changed) {
+      return res.status(410).json({ error: 'This reset link is invalid or has expired.' });
+    }
 
     return res.json({ success: true });
   } catch (error: any) {
