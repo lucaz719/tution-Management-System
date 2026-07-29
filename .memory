@@ -8,13 +8,20 @@ Last committed revision: `038a72f complete tenant security and manual finance wo
 ## Current runtime
 
 - Docker Desktop is running with the WSL 2 Linux engine.
-- PostgreSQL 16 is healthy at `localhost:5432`.
+- PostgreSQL 16 is healthy for this Compose project at `localhost:5433`.
+  Host port `5432` was already occupied by another `tms-postgres` container;
+  Compose-internal traffic still uses `db:5432`.
 - API is healthy at `http://localhost:3001/api/health`.
 - Web is healthy at `http://localhost:5173`.
 - The `migrate` container exits with code 0 after applying migrations; this is expected.
-- All 14 Prisma migrations apply successfully from an empty database.
+- All 15 Prisma migrations apply successfully from an empty database.
 - `.env.docker` is local-only and explicitly ignored by Git.
 - `.env.docker.example` is the safe tracked template.
+- A real local tenant named `Frontend Dev Academy` and its `Main Center` branch
+  are provisioned for frontend testing. Credentials remain local-only and are
+  not recorded in this file or tracked source.
+- `PLATFORM_ADMIN_ENABLED=false` after provisioning. Re-enable it only when a
+  new local tenant must be provisioned, then disable it again.
 
 Start/check the stack:
 
@@ -41,6 +48,12 @@ Docker database volume.
 - Cron restricted to tenant-wide Tenant Admin and tenant-scoped mutations.
 - Simulation/fail-open route behavior removed; unfinished modules return 501.
 - Tenant policy versions and historical policy snapshots added.
+- Petty-cash final decisions now support Tenant Admin release, rejection, and
+  send-back-for-revision with remarks and atomic status transitions. Migration
+  `20260729150000_tenant_admin_petty_cash_decisions` adds `REJECTED`.
+- Financial forecast uses current tenant enrollments, course monthly fees,
+  current-month paid invoices, and observed dropout rate rather than hard-coded
+  demonstration values.
 - Manual-only refunds and payroll reconciliation; TMS does not send refund or salary funds.
 - connectIPS is inbound-only and validates payments with NCHL before confirmation.
 - Admission accounts remain inactive until the admission invoice is paid.
@@ -69,6 +82,52 @@ Docker database volume.
   mount, Prisma models, permissions, navigation entries, configuration secret,
   encryption helper, or integration cases remain. Migration
   `20260728230000_remove_social_media` removes existing social tables and enum.
+- Prisma seeding now uses `prisma/seed-runner.cjs`, which compiles the TypeScript
+  seed to temporary CommonJS, executes it, and removes the temporary output.
+  The documented Docker `npm run db:seed` command works on Node 20 without the
+  previous `.ts` ESM loader failure.
+
+## Completed Tenant Admin web work
+
+- Added `/tenant/control-center` for versioned institution policies, operational
+  thresholds, live performance-weight validation, finance signals, calendar,
+  and institution-wide HR document alerts.
+- Added a typed HTTP foundation in `apps/web/src/services/api/client.ts`:
+  - build-time API base URL via `TMS_API_BASE_URL`, defaulting locally to
+    `http://localhost:3001/api`;
+  - Better Auth cookies on every request;
+  - `ApiError` with HTTP status, safe message, and field errors;
+  - intentional handling for 401/403/404/409/429/501;
+  - safe redirect to login after a 401.
+- Added typed domain clients for finance, HR, resources, and academic events.
+- Added shared page-level loading, empty, error, retry, denied, and unavailable
+  states in `components/patterns/RemoteState.tsx`.
+- Added real focused Tenant Admin routes:
+  - `/tenant/admissions`: admission creation, inactive-account state, admission
+    payment recording, payment-gated credential issuance, and one-time secure
+    credential acknowledgement;
+  - `/tenant/petty-cash`: filters, Level 2 release, reject/send-back remarks,
+    approval history, receipt-state visibility, and closure;
+  - `/tenant/payroll`: period calculation, approval for external payment, and
+    mandatory-reference manual reconciliation;
+  - `/tenant/pl-reports`: P&L, expenses, forecast, rule-based signals, and
+    authenticated CSV ledger download;
+  - `/tenant/hr-management`: 30-day document-expiry alerts and an explicit
+    unavailable state for exit queues lacking list/detail contracts;
+  - `/tenant/resource-logs`: branch filtering and policy-snapshot escalation;
+  - `/tenant/academic-calendar`: tenant-wide event create/list with an
+    institution-wide read-only badge.
+- `/tenant/settings` uses the real versioned finance-policy contract; advanced
+  policy values are preserved when the dashboard updates basic values.
+- Removed misleading Tenant Admin navigation for messages, appointments,
+  leave-management queues, arbitrary RBAC editing, and integrations while their
+  contracts are unavailable or intentionally return 501.
+- Unsupported workflows are documented in
+  `documents/frontend-handoffs/TENANT_ADMIN_API_GAPS.md`: refund queues,
+  long-sick leave queues, staff-exit queues, certificate template management,
+  and calendar update/delete lifecycle.
+- Updated `apps/web/tests/smoke.js` to support Tenant Admin accounts with or
+  without 2FA and verify the critical new routes after real authentication.
 
 ## Integration coverage completed
 
@@ -157,9 +216,16 @@ npm run test:access --workspace @tms/api
 npm run test:billing --workspace @tms/api
 npm run test:connectips --workspace @tms/api
 npm run build
+npm run lint --workspace web
+npx testcafe "chrome:headless" apps/web/tests/smoke.js
 npx prisma validate --schema services/api/prisma/schema.prisma
 git diff --check
 ```
+
+The authenticated Chrome smoke test passes for Admissions, Petty Cash, Payroll,
+P&L Reports, Resource Logs, and Academic Calendar. The full Tenant Admin
+integration suite passes against the isolated `tenant_admin_integration` schema
+on the Compose PostgreSQL instance at host port 5433.
 
 Known non-blocking warnings:
 
@@ -180,12 +246,20 @@ Known non-blocking warnings:
 2. Implement the modules that intentionally return 501:
    appointments, parent-teacher communication persistence, broadcast persistence,
    student performance, and staff performance reports.
-3. Enforce calendar immutability/update/delete policy from the Tenant Admin PRD.
-4. Complete petty-cash reject/send-back and monthly-cap behavior if required by PRD.
-5. Build connectIPS UI flows for web/mobile and validate with real NCHL UAT credentials.
-6. Build receipt, manual-refund, payroll-reconciliation, and audit-history screens.
-7. Resolve production dependency advisories and Node engine compatibility.
-8. Run final role-by-role, cross-tenant, cross-branch, backup/restore, HTTPS,
+3. Add the accepted tenant-scoped list/detail contracts documented in
+   `TENANT_ADMIN_API_GAPS.md` for refunds, long-sick leaves, staff exits,
+   certificate templates, and calendar lifecycle.
+4. Enforce calendar immutability/update/delete policy from the Tenant Admin PRD.
+5. Complete monthly petty-cash cap reservation/balance behavior and expose
+   receipt upload details needed by the Tenant Admin history screen.
+6. Complete connectIPS browser return/status polling UX and validate with real
+   NCHL UAT credentials.
+7. Add invoice/refund detail queues, NepalPay QR UI, and audit-history screens
+   once their discovery/detail contracts are available.
+8. Replace remaining Tenant Admin-facing `any` contracts in legacy pages and
+   split the remaining monolithic `services/api.ts` domains.
+9. Resolve production dependency advisories and Node engine compatibility.
+10. Run final role-by-role, cross-tenant, cross-branch, backup/restore, HTTPS,
     cookie, CORS, and rollback testing before production.
 
 ## connectIPS and finance constraints
@@ -202,4 +276,10 @@ Known non-blocking warnings:
   homework, HR, users, NepalPay, and connectIPS.
 - Migration `20260729090000_atomic_workflow_constraints`.
 - Expanded Tenant Admin integration concurrency/duplicate coverage.
+- Tenant Admin policy, petty-cash decision, and real financial-forecast backend
+  work, including migration `20260729150000_tenant_admin_petty_cash_decisions`.
+- Tenant Admin API/error foundation, admissions, settings/control center, petty
+  cash, payroll, reports, HR alerts, resources, calendar, navigation cleanup,
+  API-gap documentation, and authenticated smoke coverage.
+- Docker-safe Prisma seed runner and corrected local provisioning workflow.
 - All validation commands listed above pass; changes are not yet committed.
