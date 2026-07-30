@@ -4,8 +4,73 @@ import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { CertificateType } from '@tms/types';
 import { canAccessBranch, isTenantAdmin } from '../utils/access-control';
+import PDFDocument from 'pdfkit';
 
 const router = Router();
+
+router.get(
+  '/:certificateId/download',
+  authMiddleware,
+  async (req: TenantRequest, res: Response) => {
+    try {
+      const certificate = await prisma.certificate.findFirst({
+        where: {
+          certificateId: req.params.certificateId,
+          template: { tenantId: req.tenantId! },
+        },
+        include: {
+          template: true,
+          branch: true,
+          student: {
+            include: {
+              grade: true,
+              user: true,
+              studentParents: { include: { parent: true } },
+            },
+          },
+        },
+      });
+      if (!certificate) return res.status(404).json({ error: 'Certificate not found.' });
+
+      const ownsCertificate = certificate.student.userId === req.user!.id;
+      const linkedParent = certificate.student.studentParents.some((link) => link.parent.userId === req.user!.id);
+      const staffAccess = isTenantAdmin(req.user!) || canAccessBranch(req.user!, certificate.branchId);
+      if (!ownsCertificate && !linkedParent && !staffAccess) {
+        return res.status(404).json({ error: 'Certificate not found.' });
+      }
+
+      const studentName = `${certificate.student.user.firstName} ${certificate.student.user.lastName}`;
+      const safeFileName = `${certificate.certificateId}.pdf`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${safeFileName}"`);
+      res.setHeader('Cache-Control', 'private, no-store');
+
+      const document = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 56 });
+      document.pipe(res);
+      document.rect(28, 28, document.page.width - 56, document.page.height - 56).lineWidth(3).stroke('#1560BD');
+      document.rect(38, 38, document.page.width - 76, document.page.height - 76).lineWidth(1).stroke('#FFBC3B');
+      document.moveDown(2);
+      document.fillColor('#002D72').font('Helvetica-Bold').fontSize(32).text(certificate.branch.name, { align: 'center' });
+      document.moveDown(1.4);
+      document.fillColor('#1B1F3B').font('Helvetica').fontSize(18).text(certificate.template.name, { align: 'center' });
+      document.moveDown(1.5);
+      document.fontSize(14).text('This certificate is issued to', { align: 'center' });
+      document.moveDown(0.5);
+      document.fillColor('#1560BD').font('Helvetica-Bold').fontSize(28).text(studentName, { align: 'center' });
+      document.moveDown(0.6);
+      document.fillColor('#1B1F3B').font('Helvetica').fontSize(14).text(
+        certificate.student.grade ? `Student of ${certificate.student.grade.name}` : 'Enrolled student',
+        { align: 'center' },
+      );
+      document.moveDown(1.5);
+      document.fontSize(12).text(`Issued: ${certificate.issuedDate.toLocaleDateString('en-GB')}   •   Verification ID: ${certificate.certificateId}`, { align: 'center' });
+      document.end();
+    } catch (error: any) {
+      if (!res.headersSent) return res.status(500).json({ error: 'Failed to generate certificate PDF.' });
+      res.end();
+    }
+  },
+);
 
 // 1. Create a Master Certificate Template (Tenant Admin only)
 router.post(

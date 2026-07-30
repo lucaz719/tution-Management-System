@@ -22,6 +22,31 @@
   min-height: 40px;
 }
 
+.student-loading { display: grid; gap: 16px; }
+.student-loading > div {
+  height: 112px;
+  border-radius: 12px;
+  background: linear-gradient(90deg, var(--color-surface), rgba(21, 96, 189, .08), var(--color-surface));
+  background-size: 200% 100%;
+  animation: student-loading 1.2s ease-in-out infinite;
+}
+.student-loading > div:first-child { height: 58px; }
+@keyframes student-loading { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+.student-load-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 24px;
+  border: 1px solid rgba(230, 57, 70, .24);
+  border-radius: 12px;
+  background: rgba(230, 57, 70, .055);
+}
+.student-load-error > .material-symbols-outlined { color: var(--student-error); font-size: 30px; }
+.student-load-error h2 { color: var(--student-text); font-size: 18px; }
+.student-load-error p { margin-top: 4px; color: var(--student-muted); font-size: 13px; }
+.student-load-error button { margin-top: 12px; padding: 8px 14px; border: 0; border-radius: 7px; background: var(--student-blue); color: #fff; font-weight: 700; cursor: pointer; }
+
 .student-portal button:focus-visible,
 .student-portal a:focus-visible {
   outline: 3px solid rgba(47, 111, 237, 0.46);
@@ -64,6 +89,19 @@
   color: var(--student-muted);
   font-size: 14px;
 }
+
+.student-sync {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-top: var(--sp-2);
+  color: var(--student-success);
+  font-size: 11px;
+  font-weight: 700;
+}
+.student-sync.is-warning { color: var(--student-warning); }
+.student-sync .material-symbols-outlined { font-size: 15px; }
 
 .student-eyebrow {
   color: var(--student-blue);
@@ -405,6 +443,7 @@
 .student-fee-hero p { color: rgba(255,255,255,.72); font-size: 12px; }
 .student-fee-hero > button, .student-primary-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 11px 16px; border: 0; border-radius: 7px; background: var(--student-gold); color: var(--student-navy); font-weight: 800; cursor: pointer; }
 .student-fee-hero > button:hover, .student-primary-button:hover { background: #ffcb63; }
+.student-fee-hero > button:disabled { cursor: not-allowed; opacity: .62; }
 .student-payment-calendar { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .student-payment-calendar article { padding: 15px; border: 1px solid var(--student-border); border-left-width: 4px; border-radius: 7px; }
 .student-payment-calendar article.is-success { border-left-color: var(--student-success); }
@@ -436,8 +475,15 @@
 .student-modal h2 { margin-top: 6px; color: var(--student-navy); font-family: Fraunces, var(--font-display); }
 .student-modal p, .student-modal small { display: block; margin-top: 6px; color: var(--student-muted); }
 .student-modal__close { position: absolute; top: 12px; right: 12px; width: 40px; border: 0; background: transparent; color: var(--student-muted); cursor: pointer; }
-.student-qr { width: 210px; height: 210px; display: grid; place-items: center; margin: 22px auto 12px; border: 1px solid var(--student-border); border-radius: 12px; background: #fff; color: #111; }
-.student-qr .material-symbols-outlined { font-size: 180px; }
+.student-qr { width: 210px; height: 210px; display: grid; place-items: center; margin: 22px auto 12px; overflow: hidden; border: 1px solid var(--student-border); border-radius: 12px; background: #fff; color: #111; }
+.student-qr img { width: 100%; height: 100%; object-fit: contain; filter: none !important; }
+.student-qr--loading {
+  background: linear-gradient(90deg, #fff, #e8eef7, #fff);
+  background-size: 200% 100%;
+  animation: student-loading 1.2s ease-in-out infinite;
+}
+.student-qr-error { display: grid; justify-items: center; gap: var(--sp-2); margin: var(--sp-5) 0 var(--sp-3); color: var(--student-error); }
+.student-qr-error button { padding: var(--sp-2) var(--sp-3); border: 1px solid var(--student-border); border-radius: var(--radius-sm); background: transparent; color: var(--student-bright); font-weight: 700; cursor: pointer; }
 .student-modal .student-primary-button { width: 100%; margin-top: 20px; }
 
 .student-digital-id { overflow: hidden; border: 1px solid var(--student-border); border-radius: 18px; background: var(--color-surface); box-shadow: 0 18px 40px -28px rgba(0,45,114,.45); }
@@ -460,7 +506,9 @@
 
 .student-certificate-list article > div { flex: 1; }
 .student-certificate-list small { display: block; margin-top: 6px; color: var(--student-blue); font-weight: 700; }
-.student-certificate-list button { display: inline-flex; align-items: center; gap: 7px; padding: 8px 12px; border: 1px solid var(--student-border); border-radius: 7px; background: transparent; color: var(--student-blue); font-weight: 700; cursor: pointer; }
+.student-certificate-list button,
+.student-download-link { display: inline-flex; align-items: center; gap: 7px; padding: 8px 12px; border: 1px solid var(--student-border); border-radius: 7px; background: transparent; color: var(--student-blue); font-weight: 700; text-decoration: none; cursor: pointer; }
+.student-certificate-list button:disabled { color: var(--student-muted); cursor: not-allowed; opacity: .65; }
 
 .student-calendar-list { display: flex; flex-direction: column; }
 .student-calendar-list article { gap: 16px; padding: 17px 4px; border-bottom: 1px solid var(--student-border); }
@@ -497,11 +545,27 @@
 .student-empty p { max-width: 420px; font-size: 13px; }
 
 [data-theme="dark"] .student-portal {
-  --student-surface: #162235;
+  --student-navy: #dbeaff;
+  --student-blue: #8ab8e8;
+  --student-bright: #9bc7f3;
+  --student-gold: #ffcb63;
+  --student-surface: #101b2c;
   --student-text: #eef4fb;
   --student-muted: #b3bfd0;
   --student-border: rgba(255,255,255,.13);
 }
+[data-theme="dark"] .student-card,
+[data-theme="dark"] .student-notification-button,
+[data-theme="dark"] .student-digital-id { background: var(--student-surface); }
+[data-theme="dark"] .student-session,
+[data-theme="dark"] .student-assignment-list article,
+[data-theme="dark"] .student-certificate-list article,
+[data-theme="dark"] .student-payment-calendar article { background: rgba(255,255,255,.018); }
+[data-theme="dark"] .student-notification-list > button.is-unread { background: rgba(138,184,232,.09); }
+[data-theme="dark"] .student-date-block.is-success { color: #55d89f; }
+[data-theme="dark"] .student-date-block.is-error { color: #ff8c96; }
+[data-theme="dark"] .student-date-block.is-warning { color: #ffd071; }
+[data-theme="dark"] .student-invoice-lines .is-discount { color: #55d89f; }
 [data-theme="dark"] .student-page-header h1,
 [data-theme="dark"] .student-section-head h2,
 [data-theme="dark"] .student-result__head > strong,
@@ -553,4 +617,5 @@
 @media (prefers-reduced-motion: reduce) {
   .student-view { animation: none; }
   .student-metrics button { transition: none; }
+  .student-loading > div { animation: none; }
 }

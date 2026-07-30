@@ -1,6 +1,6 @@
 # TMS Working Memory
 
-Last updated: 2026-07-29
+Last updated: 2026-07-30
 Repository: `https://github.com/lucazsoft/tution-Management-System/`
 Branch: `main`
 Last committed revision: `038a72f complete tenant security and manual finance workflows`
@@ -440,6 +440,46 @@ Known non-blocking warnings:
   polish, homework filtering, score trend lines, attendance/fees/identity/
   certificate/calendar/notification views, and verified local demo-student
   authentication.
+- Student portal data is now loaded through authenticated
+  `GET /api/users/me/student-portal`; the API resolves the student exclusively
+  from the active session and returns that student's enrollments, timetable,
+  homework/submissions/results, attendance, invoices/Nepal Pay data,
+  certificates, calendar events, notifications, profile, and derived insights.
+  `StudentPortal.tsx` no longer imports shared fixture records for its normal
+  render path. Loading, failure/retry, and true empty states replace fake
+  fallback records. Dashboard date, attendance rate, latest score, branch, and
+  identity values are also response-driven. Local runtime verification returned
+  the authenticated database student Anisha Poudel and empty collections where
+  that student currently has no institutional records, rather than Aarav/shared
+  dummy records.
+- The student fixture exports have now been removed entirely from
+  `studentPortalData.ts`; that file contains contracts and calculations only.
+  The portal refreshes its authenticated aggregate only when the student opens
+  the portal or navigates to another student section; it does not poll on a
+  timer or refresh on focus/network events. The last good response remains
+  visible if a section refresh fails. The aggregate now includes institution
+  and branch identity, all active course types, real homework/submission detail,
+  numeric graded results with real class averages and subject histories,
+  attendance, leave outcomes, invoice totals/statuses, calendar records,
+  certificates, and record-derived notifications.
+- Student Nepal Pay payment dialogs now fetch the authorized per-invoice EMV
+  payload from `/api/finances/nepalpay-qr/:invoiceId` and render a real QR image;
+  placeholder QR artwork is gone. Certificate downloads use authenticated
+  `/api/certificates/:certificateId/download` and generate a PDF from the
+  persisted certificate/student/branch/template record, rather than exposing
+  the placeholder storage URL.
+- `/api/leaves/request` now supports a parent-supplied `studentId` only after
+  validating the authenticated parent-child link and the child's active/blocked
+  enrollment in the requested branch. The leave is stored against the child's
+  user record, allowing the existing approval and attendance flows to produce
+  Absent (Excused) and the student portal's live leave confirmation.
+- Student dark mode now initializes before first paint, follows OS preference on
+  first use, persists the manual dashboard toggle, sets the correct browser
+  color scheme, and uses dark semantic tokens for cards, headings, states, and
+  student-specific surfaces. Authenticated Chrome QA passes at desktop and
+  375px mobile widths for account isolation, live status, empty states, dark
+  mode, and digital ID. The test is
+  `apps/web/tests/student-live-smoke.js`.
 - Parent web portal, linked-child URL scoping, oversight, privacy-filtered
   remarks/teachers, appointment/leave UX, child-specific fees/certificates/
   calendar/notifications, unavailable-contract states, and authenticated parent

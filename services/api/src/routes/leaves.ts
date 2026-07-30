@@ -13,8 +13,8 @@ router.post(
   '/request',
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
-    const { leaveType, startDate, endDate, reason, branchId } = req.body;
-    const userId = req.user!.id;
+    const { leaveType, startDate, endDate, reason, branchId, studentId } = req.body;
+    const requesterUserId = req.user!.id;
     const tenantId = req.tenantId!;
 
     if (!leaveType || !startDate || !endDate || !reason || !branchId) {
@@ -22,22 +22,36 @@ router.post(
         error: 'Missing required parameters: leaveType, startDate, endDate, reason, branchId.',
       });
     }
-    const branchAssignment = req.user!.roles.some((role: any) => role.branchId === branchId);
-    if (!isTenantAdmin(req.user!) && !branchAssignment) {
-      return res.status(403).json({ error: 'You cannot submit leave for this branch.' });
-    }
-
     try {
-      const [tenantPolicy, branch] = await Promise.all([
+      const [tenantPolicy, branch, targetStudent] = await Promise.all([
         prisma.tenant.findUnique({ where: { id: tenantId } }),
         prisma.branch.findFirst({ where: { id: branchId, tenantId } }),
+        studentId
+          ? prisma.student.findFirst({
+              where: {
+                id: studentId,
+                user: { tenantId },
+                enrollments: { some: { class: { branchId }, status: { in: ['ACTIVE', 'BLOCKED'] } } },
+                studentParents: { some: { parent: { userId: requesterUserId } } },
+              },
+              select: { userId: true },
+            })
+          : Promise.resolve(null),
       ]);
       if (!tenantPolicy || !branch) return res.status(404).json({ error: 'Tenant or branch not found.' });
+      const branchAssignment = req.user!.roles.some((role: any) => role.branchId === branchId);
+      if (studentId && !targetStudent) {
+        return res.status(404).json({ error: 'Linked student was not found in this branch.' });
+      }
+      if (!studentId && !isTenantAdmin(req.user!) && !branchAssignment) {
+        return res.status(403).json({ error: 'You cannot submit leave for this branch.' });
+      }
+      const leaveSubjectUserId = targetStudent?.userId ?? requesterUserId;
       const leave = await prisma.leave.create({
         data: {
           tenantId,
           branchId,
-          userId,
+          userId: leaveSubjectUserId,
           leaveType: leaveType as LeaveType,
           startDate: new Date(startDate),
           endDate: new Date(endDate),
@@ -52,7 +66,7 @@ router.post(
 
       // Mocks parent/admin notification on request submission
       await MockPushNotificationService.sendPush(
-        userId,
+        leaveSubjectUserId,
         'Leave Request Submitted',
         `Your request for ${leaveType} leave starting ${startDate} is pending approval.`
       );

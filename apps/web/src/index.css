@@ -97,6 +97,8 @@ html {
   color-scheme: light;
 }
 
+html[data-theme="dark"] { color-scheme: dark; }
+
 *,
 *::before,
 *::after {

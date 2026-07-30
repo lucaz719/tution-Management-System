@@ -1,23 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import QRCode from 'qrcode';
 import {
-  attendance,
-  certificates,
-  events,
-  homework,
-  insights,
   invoiceTotal,
-  invoices,
-  notifications,
   resultPercentage,
-  results,
-  studentProfile,
-  todaySessions,
   type AttendanceState,
   type EventKind,
   type FeeState,
+  type StudentPortalDataset,
   type SubjectInsight,
 } from '../features/student/studentPortalData';
+import { loadNepalPayPayload, loadStudentPortal, studentFileUrl } from '../features/student/studentPortalService';
+import { errorMessage } from '../services/api/client';
 import '../features/student/studentPortal.css';
 
 type StudentView =
@@ -33,7 +27,7 @@ type StudentView =
   | 'notifications';
 
 const VIEW_TITLES: Record<StudentView, [string, string]> = {
-  home: ['Good afternoon, Aarav', 'Here is what needs your attention today.'],
+  home: ['Student dashboard', 'Here is what needs your attention today.'],
   timetable: ['My timetable', 'Every enrolled course, merged into one schedule.'],
   homework: ['Homework', 'Your pending assignments and due dates.'],
   results: ['Results & insights', 'Published scores, class comparisons, and subject trends.'],
@@ -44,6 +38,14 @@ const VIEW_TITLES: Record<StudentView, [string, string]> = {
   calendar: ['Academic calendar', 'Holidays, exams, ceremonies, and fee deadlines.'],
   notifications: ['Notifications', 'Academic, attendance, fee, and certificate updates.'],
 };
+
+const StudentDataContext = createContext<StudentPortalDataset | null>(null);
+
+function useStudentData() {
+  const data = useContext(StudentDataContext);
+  if (!data) throw new Error('Student portal data is unavailable.');
+  return data;
+}
 
 function icon(name: string) {
   return <span className="material-symbols-outlined" aria-hidden="true">{name}</span>;
@@ -71,6 +73,7 @@ function EmptyState({ title, message, iconName }: { title: string; message: stri
 }
 
 function BlockedBanner({ onOpenFees }: { onOpenFees: () => void }) {
+  const { studentProfile } = useStudentData();
   if (!studentProfile.blocked) return null;
   return (
     <section className="student-blocked" aria-label="Account blocked due to fee dues">
@@ -82,6 +85,7 @@ function BlockedBanner({ onOpenFees }: { onOpenFees: () => void }) {
 }
 
 function TimetableRows({ compact = false }: { compact?: boolean }) {
+  const { todaySessions } = useStudentData();
   if (todaySessions.length === 0) return <EmptyState title="No classes today" message="Enjoy the free time. Your next scheduled class will appear here." iconName="event_available" />;
   return (
     <div className="student-session-list">
@@ -98,17 +102,26 @@ function TimetableRows({ compact = false }: { compact?: boolean }) {
 }
 
 function DashboardView({ go }: { go: (view: StudentView) => void }) {
+  const { certificates, events, homework, results, studentProfile, todaySessions } = useStudentData();
   const nextEvent = events[0];
+  const latestResult = results[0];
+  const pendingHomework = homework.filter((item) => !item.completed);
+  const todayLabel = new Intl.DateTimeFormat('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(new Date()).toUpperCase();
   return (
     <div className="student-view">
       <BlockedBanner onOpenFees={() => go('fees')} />
       <section className="student-hero">
         <div>
-          <span className="student-eyebrow">WEDNESDAY · 29 JULY 2026</span>
+          <span className="student-eyebrow">{todayLabel}</span>
           <h2>Your learning day at a glance</h2>
-          <p>{todaySessions.length} sessions across regular, music, short-term, and personalized courses.</p>
+          <p>{todaySessions.length} session{todaySessions.length === 1 ? '' : 's'} across all your active enrolled courses.</p>
         </div>
-        <div className="student-hero__stat"><span>Next class</span><strong>Mathematics</strong><small>07:00 · Room 2A</small></div>
+        <div className="student-hero__stat"><span>Next class</span><strong>{todaySessions[0]?.subject ?? 'No class scheduled'}</strong><small>{todaySessions[0] ? `${todaySessions[0].time} · ${todaySessions[0].room}` : studentProfile.branch}</small></div>
       </section>
 
       <div className="student-dashboard-grid">
@@ -119,22 +132,23 @@ function DashboardView({ go }: { go: (view: StudentView) => void }) {
         <aside className="student-card">
           <SectionHeader title="Homework due soon" action="View all" onAction={() => go('homework')} />
           <div className="student-homework-compact">
-            {homework.slice(0, 2).map((item) => (
+            {pendingHomework.slice(0, 2).map((item) => (
               <button type="button" key={item.id} onClick={() => go('homework')}>
                 <span className={`student-icon-box student-icon-box--${item.urgency === 'overdue' ? 'error' : 'info'}`}>{icon('assignment')}</span>
                 <span><strong>{item.title}</strong><small>{item.subject} · {item.dueLabel}</small></span>
                 {icon('chevron_right')}
               </button>
             ))}
+            {!pendingHomework.length ? <EmptyState title="All caught up" message="No pending homework is assigned." iconName="task_alt" /> : null}
           </div>
         </aside>
       </div>
 
       <section className="student-metrics" aria-label="Student record summary">
-        <button type="button" onClick={() => go('attendance')}>{icon('fact_check')}<span><small>Attendance</small><strong>83%</strong></span>{icon('arrow_forward')}</button>
-        <button type="button" onClick={() => go('results')}>{icon('trending_up')}<span><small>Latest score</small><strong>88%</strong></span>{icon('arrow_forward')}</button>
+        <button type="button" onClick={() => go('attendance')}>{icon('fact_check')}<span><small>Attendance</small><strong>{studentProfile.attendanceRate ?? 0}%</strong></span>{icon('arrow_forward')}</button>
+        <button type="button" onClick={() => go('results')}>{icon('trending_up')}<span><small>Latest score</small><strong>{latestResult ? `${resultPercentage(latestResult)}%` : 'No score'}</strong></span>{icon('arrow_forward')}</button>
         <button type="button" onClick={() => go('certificates')}>{icon('workspace_premium')}<span><small>Certificates</small><strong>{certificates.length}</strong></span>{icon('arrow_forward')}</button>
-        <button type="button" onClick={() => go('calendar')}>{icon('event')}<span><small>Next event</small><strong>{nextEvent.day} {nextEvent.month}</strong></span>{icon('arrow_forward')}</button>
+        <button type="button" onClick={() => go('calendar')}>{icon('event')}<span><small>Next event</small><strong>{nextEvent ? `${nextEvent.day} ${nextEvent.month}` : 'None'}</strong></span>{icon('arrow_forward')}</button>
       </section>
 
       <section className="student-card">
@@ -152,6 +166,7 @@ function TimetableView({ go }: { go: (view: StudentView) => void }) {
 }
 
 function HomeworkView() {
+  const { homework } = useStudentData();
   const [filter, setFilter] = useState<'pending' | 'soon' | 'overdue' | 'completed'>('pending');
   const filteredHomework = homework.filter((item) => {
     if (filter === 'completed') return item.completed;
@@ -202,7 +217,11 @@ function TrendSparkline({ insight }: { insight: SubjectInsight }) {
 }
 
 function ResultsView() {
+  const { insights, results } = useStudentData();
   const sorted = [...insights].sort((a, b) => b.average - a.average);
+  if (!results.length || !sorted.length) {
+    return <div className="student-view"><div className="student-live-note" role="status">{icon('bolt')}<span>New teacher-published numeric grades will appear here automatically.</span></div><section className="student-card"><EmptyState title="No published numeric results" message="Your graded assignments and subject insights will appear here when available." iconName="insights" /></section></div>;
+  }
   return (
     <div className="student-view">
       <div className="student-live-note" role="status">{icon('bolt')}<span><strong>Results update automatically.</strong> A teacher-published score appears here with refreshed trend and class comparison.</span></div>
@@ -243,12 +262,15 @@ function attendanceTone(state: AttendanceState) {
 }
 
 function AttendanceView() {
+  const { attendance, studentProfile } = useStudentData();
+  const rate = studentProfile.attendanceRate ?? 0;
+  const counts = studentProfile.attendanceCounts ?? { present: 0, absent: 0, excused: 0 };
   return (
     <div className="student-view">
-      <section className="student-attendance-summary"><div className="student-ring" style={{ '--progress': '83%' } as React.CSSProperties}><span>83%</span></div><div><span className="student-eyebrow">JULY 2026</span><h2>Your attendance is on track</h2><p>5 present · 1 absent · 1 excused absence</p></div><div className="student-attendance-legend"><span><i className="success" />Present</span><span><i className="error" />Absent</span><span><i className="warning" />Excused</span></div></section>
+      <section className="student-attendance-summary"><div className="student-ring" style={{ '--progress': `${rate}%` } as React.CSSProperties}><span>{rate}%</span></div><div><span className="student-eyebrow">LIVE RECORD</span><h2>{attendance.length ? 'Your attendance record' : 'No attendance marked yet'}</h2><p>{counts.present} present · {counts.absent} absent · {counts.excused} excused absence</p></div><div className="student-attendance-legend"><span><i className="success" />Present</span><span><i className="error" />Absent</span><span><i className="warning" />Excused</span></div></section>
       <section className="student-card">
         <SectionHeader title="Session record" description="Marked by your teacher for each class session." />
-        <div className="student-table-wrap"><table className="student-table"><thead><tr><th>Date</th><th>Subject</th><th>Session</th><th>Status</th></tr></thead><tbody>{attendance.map((record) => <tr key={record.id}><td>{record.date}</td><td><strong>{record.subject}</strong></td><td>{record.session}</td><td><StatusPill label={record.state} iconName={record.state === 'Present' ? 'check_circle' : record.state === 'Absent' ? 'cancel' : 'event_available'} tone={attendanceTone(record.state)} /></td></tr>)}</tbody></table></div>
+        {attendance.length ? <div className="student-table-wrap"><table className="student-table"><thead><tr><th>Date</th><th>Subject</th><th>Session</th><th>Status</th></tr></thead><tbody>{attendance.map((record) => <tr key={record.id}><td>{record.date}</td><td><strong>{record.subject}</strong></td><td>{record.session}</td><td><StatusPill label={record.state} iconName={record.state === 'Present' ? 'check_circle' : record.state === 'Absent' ? 'cancel' : 'event_available'} tone={attendanceTone(record.state)} /></td></tr>)}</tbody></table></div> : <EmptyState title="No attendance records" message="Teacher-marked sessions will appear here." iconName="fact_check" />}
         <p className="student-readonly-note">{icon('info')} Approved leave is shown as “Absent (Excused)” and does not appear as an unexplained absence.</p>
       </section>
     </div>
@@ -260,11 +282,16 @@ function feeTone(state: FeeState) {
 }
 
 function FeesView() {
+  const { invoices, studentProfile } = useStudentData();
   const [showQr, setShowQr] = useState(false);
+  const [qrImage, setQrImage] = useState('');
+  const [qrError, setQrError] = useState('');
+  const [qrLoading, setQrLoading] = useState(false);
+  const [paymentReference, setPaymentReference] = useState('');
   const dialogRef = useRef<HTMLElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const current = invoices[0];
-  const total = invoiceTotal(current);
+  const current = invoices.find((invoice) => invoice.state !== 'Paid') ?? invoices[0];
+  const total = current ? invoiceTotal(current) : 0;
 
   useEffect(() => {
     if (!showQr) return;
@@ -298,27 +325,51 @@ function FeesView() {
     }
   };
 
+  const openQr = async () => {
+    if (!current?.qrAvailable) return;
+    setShowQr(true);
+    setQrLoading(true);
+    setQrError('');
+    setQrImage('');
+    try {
+      const payload = await loadNepalPayPayload(current.id);
+      setPaymentReference(payload.invoiceId);
+      setQrImage(await QRCode.toDataURL(payload.qrString, {
+        width: 360,
+        margin: 2,
+        errorCorrectionLevel: 'M',
+        color: { dark: '#002D72', light: '#FFFFFF' },
+      }));
+    } catch (error) {
+      setQrError(errorMessage(error));
+    } finally {
+      setQrLoading(false);
+    }
+  };
+
+  if (!current) return <div className="student-view"><section className="student-card"><EmptyState title="No invoices issued" message="Your billing cycles will appear here when the institution issues them." iconName="payments" /></section></div>;
   return (
     <div className="student-view">
-      <section className="student-fee-hero"><div><StatusPill label="Blocked" iconName="lock" tone="gold" /><span>Current outstanding</span><strong>{money(total)}</strong><p>{current.cycle} · Due {current.dueDate}</p></div><button ref={triggerRef} type="button" onClick={() => setShowQr(true)}>{icon('qr_code_2')}Show Nepal Pay QR</button></section>
+      <section className="student-fee-hero"><div><StatusPill label={studentProfile.blocked ? 'Blocked' : current.state} iconName={studentProfile.blocked ? 'lock' : 'payments'} tone={studentProfile.blocked ? 'gold' : feeTone(current.state)} /><span>Current outstanding</span><strong>{money(total)}</strong><p>{current.cycle} · Due {current.dueDate}</p></div><button ref={triggerRef} type="button" disabled={!current.qrAvailable || qrLoading} aria-busy={qrLoading} onClick={() => void openQr()}>{icon('qr_code_2')}{qrLoading ? 'Generating QR…' : current.qrAvailable ? 'Show Nepal Pay QR' : 'Already paid'}</button></section>
       <section className="student-card">
         <SectionHeader title="Payment calendar" description="Status uses text and icons as well as colour." />
         <div className="student-payment-calendar">{invoices.map((invoice) => <article key={invoice.id} className={`is-${feeTone(invoice.state)}`}><div><strong>{invoice.cycle}</strong><span>Due {invoice.dueDate}</span></div><StatusPill label={invoice.state} iconName={invoice.state === 'Paid' ? 'check_circle' : invoice.state === 'Overdue' ? 'error' : 'schedule'} tone={feeTone(invoice.state)} /><b>{money(invoiceTotal(invoice))}</b></article>)}</div>
       </section>
       <div className="student-fees-layout">
         <section className="student-card"><SectionHeader title={`${current.cycle} invoice`} description="Current billing-cycle breakdown." /><div className="student-invoice-lines">{current.lines.map((line) => <div key={line.label}><span>{line.label}</span><strong className={line.amount < 0 ? 'is-discount' : ''}>{line.amount < 0 ? '−' : ''}{money(line.amount)}</strong></div>)}<div className="student-invoice-total"><span>Net payable</span><strong>{money(total)}</strong></div></div></section>
-        <aside className="student-card student-payment-help">{icon('verified_user')}<h3>Before you pay</h3><p>Confirm the merchant name, invoice reference, and exact amount in your payment app.</p><dl><div><dt>Reference</dt><dd>{current.qrReference}</dd></div><div><dt>Amount</dt><dd>{money(total)}</dd></div></dl></aside>
+        <aside className="student-card student-payment-help">{icon('verified_user')}<h3>Before you pay</h3><p>Confirm the merchant name, invoice reference, and exact amount in your payment app.</p><dl><div><dt>Invoice reference</dt><dd>{current.paymentReference ?? current.id}</dd></div><div><dt>Amount</dt><dd>{money(total)}</dd></div></dl></aside>
       </div>
-      {showQr ? <div className="student-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowQr(false); }}><section ref={dialogRef} tabIndex={-1} onKeyDown={handleDialogKeyDown} role="dialog" aria-modal="true" aria-labelledby="qr-title" aria-describedby="qr-description" className="student-modal"><button type="button" className="student-modal__close" aria-label="Close Nepal Pay QR" onClick={() => setShowQr(false)}>{icon('close')}</button><span className="student-eyebrow">NEPAL PAY</span><h2 id="qr-title">Scan to pay {money(total)}</h2><p>{current.cycle} · {current.qrReference}</p><div className="student-qr" aria-label="Nepal Pay QR placeholder">{icon('qr_code_2')}</div><small id="qr-description">QR codes are generated per billing cycle. Verify the amount before confirming.</small><button type="button" className="student-primary-button" onClick={() => setShowQr(false)}>Done</button></section></div> : null}
+      {showQr ? <div className="student-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowQr(false); }}><section ref={dialogRef} tabIndex={-1} onKeyDown={handleDialogKeyDown} role="dialog" aria-modal="true" aria-labelledby="qr-title" aria-describedby="qr-description" className="student-modal"><button type="button" className="student-modal__close" aria-label="Close Nepal Pay QR" onClick={() => setShowQr(false)}>{icon('close')}</button><span className="student-eyebrow">NEPAL PAY</span><h2 id="qr-title">Scan to pay {money(total)}</h2><p>{current.cycle} · {paymentReference || current.id}</p>{qrLoading ? <div className="student-qr student-qr--loading" aria-label="Generating Nepal Pay QR" aria-busy="true" /> : qrError ? <div className="student-qr-error" role="alert">{icon('error')}<span>{qrError}</span><button type="button" onClick={() => void openQr()}>Try again</button></div> : qrImage ? <div className="student-qr"><img src={qrImage} width="360" height="360" alt={`Nepal Pay QR for invoice ${current.id}, amount ${money(total)}`} /></div> : null}<small id="qr-description">This QR is generated from the invoice’s live Nepal Pay payload. Verify the amount before confirming.</small><button type="button" className="student-primary-button" onClick={() => setShowQr(false)}>Done</button></section></div> : null}
     </div>
   );
 }
 
 function DigitalIdView() {
+  const { studentProfile } = useStudentData();
   return (
     <div className="student-view student-id-layout">
       <section className="student-digital-id" aria-label="Digital student identification card">
-        <header>{icon('school')}<div><strong>Sanskardip Shikshalaya</strong><span>Baneshwor, Kathmandu</span></div><StatusPill label={studentProfile.blocked ? 'Blocked' : 'Active'} iconName={studentProfile.blocked ? 'lock' : 'verified'} tone={studentProfile.blocked ? 'error' : 'success'} /></header>
+        <header>{icon('school')}<div><strong>{studentProfile.institution}</strong><span>{studentProfile.branch}{studentProfile.branchAddress ? ` · ${studentProfile.branchAddress}` : ''}</span></div><StatusPill label={studentProfile.blocked ? 'Blocked' : 'Active'} iconName={studentProfile.blocked ? 'lock' : 'verified'} tone={studentProfile.blocked ? 'error' : 'success'} /></header>
         <div className="student-id-body"><div className="student-id-avatar">{studentProfile.initials}</div><div><span className="student-eyebrow">STUDENT</span><h2>{studentProfile.name}</h2><p>{studentProfile.grade} · Roll no. {studentProfile.rollNumber}</p><dl><div><dt>Enrollment ID</dt><dd>{studentProfile.enrollmentId}</dd></div><div><dt>Academic year</dt><dd>{studentProfile.academicYear}</dd></div><div><dt>Valid until</dt><dd>{studentProfile.validUntil}</dd></div></dl></div></div>
         <footer><div className="student-barcode" aria-hidden="true" /><span>Present this ID for identification at your branch.</span></footer>
       </section>
@@ -328,12 +379,13 @@ function DigitalIdView() {
 }
 
 function CertificatesView() {
+  const { certificates } = useStudentData();
   const [message, setMessage] = useState('');
   return (
     <div className="student-view">
       {message ? <div className="student-success-note" role="status">{icon('download_done')}<span>{message}</span><button type="button" aria-label="Dismiss download message" onClick={() => setMessage('')}>{icon('close')}</button></div> : null}
       <div className="student-live-note">{icon('verified')}<span><strong>Certificates remain available.</strong> Issued documents do not expire from your history.</span></div>
-      <section className="student-card"><SectionHeader title="Certificate history" description={`${certificates.length} issued documents`} /><div className="student-certificate-list">{certificates.map((certificate) => <article key={certificate.id}><span className="student-icon-box student-icon-box--info">{icon('workspace_premium')}</span><div><h3>{certificate.title}</h3><p>{certificate.course} · Issued {certificate.issuedDate}</p><small>{certificate.id}</small></div><button type="button" onClick={() => setMessage(`${certificate.fileName} download started.`)}>{icon('download')}Download PDF</button></article>)}</div></section>
+      <section className="student-card"><SectionHeader title="Certificate history" description={`${certificates.length} issued documents`} />{certificates.length ? <div className="student-certificate-list">{certificates.map((certificate) => <article key={certificate.id}><span className="student-icon-box student-icon-box--info">{icon('workspace_premium')}</span><div><h3>{certificate.title}</h3><p>{certificate.course} · Issued {certificate.issuedDate}</p><small>{certificate.id}</small></div>{certificate.pdfUrl ? <a className="student-download-link" href={studentFileUrl(certificate.pdfUrl)} onClick={() => setMessage(`${certificate.fileName} download started.`)}>{icon('download')}Download PDF</a> : <button type="button" disabled>{icon('download')}PDF unavailable</button>}</article>)}</div> : <EmptyState title="No certificates issued" message="Certificates will remain here after they are issued." iconName="workspace_premium" />}</section>
     </div>
   );
 }
@@ -343,34 +395,96 @@ function eventTone(kind: EventKind) {
 }
 
 function CalendarView() {
+  const { events } = useStudentData();
   return (
     <div className="student-view">
       <div className="student-calendar-legend">{(['Holiday', 'Exam', 'Ceremony', 'Fee due'] as EventKind[]).map((kind) => <StatusPill key={kind} label={kind} iconName={kind === 'Holiday' ? 'celebration' : kind === 'Exam' ? 'edit_note' : kind === 'Ceremony' ? 'emoji_events' : 'payments'} tone={eventTone(kind)} />)}</div>
-      <section className="student-card"><SectionHeader title="Upcoming events" description="All dates relevant to your academic year." /><div className="student-calendar-list">{events.map((event) => <article key={event.id}><div className={`student-date-block is-${eventTone(event.kind)}`}><strong>{event.day}</strong><span>{event.month}</span></div><div><StatusPill label={event.kind} iconName="event" tone={eventTone(event.kind)} /><h3>{event.title}</h3><p>{event.details}</p></div><time>{event.date}</time></article>)}</div></section>
+      <section className="student-card"><SectionHeader title="Upcoming events" description="All dates relevant to your academic year." />{events.length ? <div className="student-calendar-list">{events.map((event) => <article key={event.id}><div className={`student-date-block is-${eventTone(event.kind)}`}><strong>{event.day}</strong><span>{event.month}</span></div><div><StatusPill label={event.kind} iconName="event" tone={eventTone(event.kind)} /><h3>{event.title}</h3><p>{event.details}</p></div><time>{event.date}</time></article>)}</div> : <EmptyState title="No upcoming events" message="Published academic and fee dates will appear here." iconName="date_range" />}</section>
     </div>
   );
 }
 
-function NotificationsView({ go }: { go: (view: StudentView) => void }) {
-  const [readIds, setReadIds] = useState(() => new Set(notifications.filter((item) => !item.unread).map((item) => item.id)));
+function NotificationsView({ go, readIds, markAllRead, markRead }: { go: (view: StudentView) => void; readIds: Set<string>; markAllRead: () => void; markRead: (id: string) => void }) {
+  const { notifications } = useStudentData();
   return (
     <div className="student-view">
-      <div className="student-notification-actions"><p>Appointment notifications are excluded because appointments are a parent–teacher flow.</p><button type="button" onClick={() => setReadIds(new Set(notifications.map((item) => item.id)))}>Mark all as read</button></div>
-      <section className="student-card student-notification-list">{notifications.map((notice) => <button type="button" key={notice.id} className={readIds.has(notice.id) ? '' : 'is-unread'} onClick={() => { setReadIds((current) => new Set(current).add(notice.id)); go(notice.destination.split('/').at(-1) as StudentView); }}><i aria-hidden="true" /><span className="student-icon-box student-icon-box--info">{icon(notice.icon)}</span><span><strong>{notice.title}</strong><small>{notice.message}</small><time>{notice.time}</time></span>{icon('chevron_right')}</button>)}</section>
+      <div className="student-notification-actions"><p>Appointment notifications are excluded because appointments are a parent–teacher flow.</p><button type="button" disabled={!notifications.length} onClick={markAllRead}>Mark all as read</button></div>
+      {notifications.length ? <section className="student-card student-notification-list">{notifications.map((notice) => <button type="button" key={notice.id} className={readIds.has(notice.id) ? '' : 'is-unread'} onClick={() => { markRead(notice.id); go(notice.destination.split('/').at(-1) as StudentView); }}><i aria-hidden="true" /><span className="student-icon-box student-icon-box--info">{icon(notice.icon)}</span><span><strong>{notice.title}</strong><small>{notice.message}</small><time dateTime={notice.occurredAt}>{notice.time}</time></span>{icon('chevron_right')}</button>)}</section> : <EmptyState title="All caught up" message="New fee, homework, result, attendance, leave, and certificate updates will appear here." iconName="notifications" />}
     </div>
   );
 }
 
 export function StudentPortal() {
+  const [data, setData] = useState<StudentPortalDataset | null>(null);
+  const [loadError, setLoadError] = useState('');
+  const [refreshWarning, setRefreshWarning] = useState('');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [readIds, setReadIds] = useState<Set<string>>(new Set());
+  const [reloadKey, setReloadKey] = useState(0);
   const location = useLocation();
   const navigate = useNavigate();
+  const enrollmentId = data?.studentProfile.enrollmentId;
   const view = useMemo<StudentView>(() => {
     const segment = location.pathname.split('/').filter(Boolean).at(-1);
     return segment && segment in VIEW_TITLES ? segment as StudentView : 'home';
   }, [location.pathname]);
-  const [title, subtitle] = VIEW_TITLES[view];
-  const unread = notifications.filter((item) => item.unread).length;
+  useEffect(() => {
+    let cancelled = false;
+    setLoadError('');
+    const refresh = async () => {
+      setIsRefreshing(true);
+      try {
+        const result = await loadStudentPortal();
+        if (!cancelled) {
+          setData(result);
+          setLoadError('');
+          setRefreshWarning('');
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const message = errorMessage(error);
+          setLoadError(message);
+        }
+      } finally {
+        if (!cancelled) setIsRefreshing(false);
+      }
+    };
+    void refresh();
+    return () => {
+      cancelled = true;
+    };
+  }, [location.pathname, reloadKey]);
+
+  useEffect(() => {
+    if (!enrollmentId) return;
+    const key = `tms_student_read_notifications:${enrollmentId}`;
+    try {
+      const stored = JSON.parse(localStorage.getItem(key) || '[]');
+      setReadIds(new Set(Array.isArray(stored) ? stored.filter((item): item is string => typeof item === 'string') : []));
+    } catch {
+      setReadIds(new Set());
+    }
+  }, [enrollmentId]);
+
+  if (loadError) {
+    return <div className="student-portal"><div className="student-load-error" role="alert">{icon('cloud_off')}<div><h2>Couldn’t load your student record</h2><p>{loadError}</p><button type="button" onClick={() => setReloadKey((value) => value + 1)}>Try again</button></div></div></div>;
+  }
+  if (!data) {
+    return <div className="student-portal student-loading" aria-busy="true" aria-label="Loading student portal">{Array.from({ length: 4 }, (_, index) => <div key={index} />)}</div>;
+  }
+
+  const [defaultTitle, subtitle] = VIEW_TITLES[view];
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  const title = view === 'home' ? `${greeting}, ${data.studentProfile.name.split(' ')[0]}` : defaultTitle;
+  const unread = data.notifications.filter((item) => item.unread && !readIds.has(item.id)).length;
   const go = (next: StudentView) => navigate(`/student/${next}`);
+  const storeReadIds = (next: Set<string>) => {
+    setReadIds(next);
+    localStorage.setItem(`tms_student_read_notifications:${data.studentProfile.enrollmentId}`, JSON.stringify([...next]));
+  };
+  const markRead = (id: string) => storeReadIds(new Set(readIds).add(id));
+  const markAllRead = () => storeReadIds(new Set(data.notifications.map((item) => item.id)));
 
   const content = view === 'home' ? <DashboardView go={go} />
     : view === 'timetable' ? <TimetableView go={go} />
@@ -381,15 +495,15 @@ export function StudentPortal() {
               : view === 'digital-id' ? <DigitalIdView />
                 : view === 'certificates' ? <CertificatesView />
                   : view === 'calendar' ? <CalendarView />
-                    : <NotificationsView go={go} />;
+                    : <NotificationsView go={go} readIds={readIds} markRead={markRead} markAllRead={markAllRead} />;
 
   return (
-    <div className="student-portal">
+    <StudentDataContext.Provider value={data}><div className="student-portal">
       <header className="student-page-header">
-        <div><span className="student-eyebrow">STUDENT PORTAL · READ ONLY</span><h1>{title}</h1><p>{subtitle}</p></div>
+        <div><span className="student-eyebrow">STUDENT PORTAL · READ ONLY</span><h1>{title}</h1><p>{subtitle}</p><span className={`student-sync ${refreshWarning ? 'is-warning' : ''}`} role="status">{icon(refreshWarning ? 'cloud_off' : isRefreshing ? 'sync' : 'cloud_done')}{refreshWarning || `${isRefreshing ? 'Loading this section' : 'Loaded'} · ${new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}</span></div>
         <button type="button" className="student-notification-button" aria-label={`${unread} unread notifications`} onClick={() => go('notifications')}>{icon('notifications')}<span>{unread}</span></button>
       </header>
       {content}
-    </div>
+    </div></StudentDataContext.Provider>
   );
 }

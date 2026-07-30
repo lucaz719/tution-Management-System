@@ -60,7 +60,8 @@ export function DashboardShell({ role, children }: DashboardShellProps) {
   const [isCompactViewport, setIsCompactViewport] = useState(() => window.innerWidth < 1280);
   const [lastUpdated, setLastUpdated] = useState(Date.now());
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    return (localStorage.getItem('tms_theme') as 'light' | 'dark') || 'light';
+    const active = document.documentElement.getAttribute('data-theme');
+    return active === 'dark' ? 'dark' : 'light';
   });
 
   useEffect(() => {
@@ -363,7 +364,7 @@ export function DashboardShell({ role, children }: DashboardShellProps) {
             <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginLeft: 'auto' }}>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ color: 'var(--color-primary-light)', fontSize: '12px', fontWeight: 700 }}>{updatedLabel}</div>
-                <div style={{ color: 'rgba(44, 62, 80, 0.62)', fontSize: '11px', fontWeight: 600 }}>Auto-refresh every 5 min</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: '11px', fontWeight: 600 }}>{role === 'student' ? 'Refreshes when a section opens' : 'Auto-refresh every 5 min'}</div>
               </div>
               <button
                 type="button"

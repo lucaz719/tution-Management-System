@@ -428,6 +428,340 @@ async function studentFeeSummary(studentId: string) {
   };
 }
 
+// Authenticated student self-service aggregate. This deliberately resolves the
+// student from the verified session user rather than accepting a student ID.
+router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res: Response) => {
+  try {
+    const student = await prisma.student.findFirst({
+      where: { userId: req.user!.id, user: { tenantId: req.tenantId! } },
+      include: {
+        user: {
+          include: {
+            tenant: { select: { name: true, leavePolicy: true } },
+            userRoles: { include: { branch: true } },
+          },
+        },
+        grade: true,
+        enrollments: {
+          where: { status: { in: ['ACTIVE', 'BLOCKED'] } },
+          include: {
+            course: true,
+            class: {
+              include: {
+                assignedTeacher: { select: { firstName: true, lastName: true } },
+                branch: { select: { name: true, address: true } },
+              },
+            },
+          },
+        },
+        studentAttendance: {
+          include: { class: { include: { course: true } } },
+          orderBy: { date: 'desc' },
+          take: 60,
+        },
+        invoices: { orderBy: { dueDate: 'desc' }, take: 12 },
+        certificates: { include: { template: true }, orderBy: { issuedDate: 'desc' } },
+      },
+    });
+    if (!student) {
+      return res.status(404).json({ error: 'No student record is linked to this account.' });
+    }
+
+    const classIds = student.enrollments.map((enrollment) => enrollment.classId);
+    const homeworkRows = classIds.length
+      ? await prisma.homework.findMany({
+          where: { classId: { in: classIds } },
+          include: {
+            class: { include: { assignedTeacher: { select: { firstName: true, lastName: true } } } },
+            submissions: true,
+          },
+          orderBy: { deadline: 'asc' },
+        })
+      : [];
+
+    const branchIds = Array.from(new Set(student.enrollments.map((enrollment) => enrollment.class.branchId)));
+    const [calendarRows, leaveRows] = await Promise.all([
+      prisma.academicEvent.findMany({
+        where: {
+          tenantId: req.tenantId!,
+          OR: [{ branchId: null }, ...(branchIds.length ? [{ branchId: { in: branchIds } }] : [])],
+        },
+        orderBy: { startDate: 'asc' },
+        take: 100,
+      }),
+      prisma.leave.findMany({
+        where: { tenantId: req.tenantId!, userId: student.userId },
+        orderBy: { updatedAt: 'desc' },
+        take: 30,
+      }),
+    ]);
+
+    const parseNumericGrade = (value: string | null | undefined) => {
+      if (!value) return null;
+      const match = value.match(/(-?\d+(?:\.\d+)?)\s*(?:\/\s*(\d+(?:\.\d+)?))?/);
+      if (!match) return null;
+      const score = Number(match[1]);
+      const maximum = match[2] ? Number(match[2]) : 100;
+      return Number.isFinite(score) && Number.isFinite(maximum) && maximum > 0 ? { score, maximum } : null;
+    };
+    const formatDate = (date: Date) => date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kathmandu' });
+    const courseTypeLabel = (value: string) => value.split('_').map((part) => part.charAt(0) + part.slice(1).toLowerCase()).join('-');
+    const attendanceLabel = (value: string) => {
+      if (value === 'EXCUSED') return 'Absent (Excused)';
+      if (value === 'BLOCKED') return 'Absent';
+      return value.charAt(0) + value.slice(1).toLowerCase();
+    };
+    const invoiceState = (status: string, dueDate: Date) => {
+      if (status === 'PAID') return 'Paid';
+      if (status === 'OVERDUE' || dueDate.getTime() < Date.now()) return 'Overdue';
+      return dueDate.getTime() - Date.now() <= 3 * 86400000 ? 'Due soon' : 'Upcoming';
+    };
+    const eventKind = (value: string) => value === 'FEE_DUE' ? 'Fee due' : value === 'EVENT' ? 'Ceremony' : value.charAt(0) + value.slice(1).toLowerCase();
+
+    const weekday = new Intl.DateTimeFormat('en', { weekday: 'long', timeZone: 'Asia/Kathmandu' }).format(new Date());
+    const normalizedWeekday = weekday.toLowerCase();
+    const todaySessions = student.enrollments.flatMap((enrollment) => {
+      const schedule = Array.isArray(enrollment.class.schedule) ? enrollment.class.schedule as Array<Record<string, unknown>> : [];
+      return schedule
+        .filter((slot) => {
+          const day = typeof slot.day === 'string' ? slot.day.toLowerCase() : '';
+          return day === normalizedWeekday || day === normalizedWeekday.slice(0, 3);
+        })
+        .map((slot, index) => ({
+          id: `${enrollment.classId}-${index}`,
+          time: typeof slot.start === 'string' ? slot.start : '—',
+          endTime: typeof slot.end === 'string' ? slot.end : '—',
+          subject: enrollment.course.name,
+          teacher: enrollment.class.assignedTeacher
+            ? `${enrollment.class.assignedTeacher.firstName} ${enrollment.class.assignedTeacher.lastName}`
+            : 'Teacher not assigned',
+          room: enrollment.class.name,
+          type: courseTypeLabel(enrollment.course.type),
+        }));
+    }).sort((a, b) => a.time.localeCompare(b.time));
+
+    const homework = homeworkRows.map((row) => {
+      const ownSubmission = row.submissions.find((submission) => submission.studentId === student.id);
+      const overdue = !ownSubmission && row.deadline.getTime() < Date.now();
+      const soon = !ownSubmission && row.deadline.getTime() - Date.now() <= 2 * 86400000;
+      return {
+        id: row.id,
+        subject: row.subject,
+        title: row.title,
+        teacher: row.class.assignedTeacher
+          ? `${row.class.assignedTeacher.firstName} ${row.class.assignedTeacher.lastName}`
+          : 'Teacher',
+        dueLabel: ownSubmission ? `Completed ${formatDate(ownSubmission.createdAt)}` : formatDate(row.deadline),
+        urgency: overdue ? 'overdue' : soon ? 'soon' : 'normal',
+        completed: Boolean(ownSubmission),
+        description: row.description ?? undefined,
+        contentUrl: row.contentUrl ?? undefined,
+        submissionUrl: ownSubmission?.submissionUrl ?? undefined,
+        teacherRemarks: ownSubmission?.remarks ?? undefined,
+      };
+    });
+
+    const results = homeworkRows.flatMap((row) => {
+      const ownSubmission = row.submissions.find((submission) => submission.studentId === student.id);
+      const ownGrade = parseNumericGrade(ownSubmission?.grade);
+      if (!ownSubmission || !ownGrade) return [];
+      const percentages = row.submissions
+        .map((submission) => parseNumericGrade(submission.grade))
+        .filter((grade): grade is { score: number; maximum: number } => Boolean(grade))
+        .map((grade) => (grade.score / grade.maximum) * 100);
+      const classPercentage = percentages.length ? percentages.reduce((sum, value) => sum + value, 0) / percentages.length : (ownGrade.score / ownGrade.maximum) * 100;
+      return [{
+        id: ownSubmission.id,
+        subject: row.subject,
+        assessment: row.title,
+        score: ownGrade.score,
+        maximum: ownGrade.maximum,
+        classAverage: Math.round((classPercentage / 100) * ownGrade.maximum * 10) / 10,
+        publishedLabel: `Graded ${formatDate(ownSubmission.updatedAt)}`,
+        teacherRemarks: ownSubmission.remarks ?? undefined,
+      }];
+    });
+
+    const insightMap = new Map<string, number[]>();
+    results.slice().reverse().forEach((result) => {
+      const values = insightMap.get(result.subject) ?? [];
+      values.push(Math.round((result.score / result.maximum) * 100));
+      insightMap.set(result.subject, values);
+    });
+    const insights = Array.from(insightMap.entries()).map(([subject, history]) => ({
+      subject,
+      average: Math.round(history.reduce((sum, value) => sum + value, 0) / history.length),
+      previousAverage: history.length > 1
+        ? Math.round(history.slice(0, -1).reduce((sum, value) => sum + value, 0) / (history.length - 1))
+        : history[0],
+      history,
+    }));
+
+    const attendance = student.studentAttendance.map((record) => ({
+      id: record.id,
+      date: formatDate(record.date),
+      subject: record.class.course.name,
+      session: record.class.name,
+      state: attendanceLabel(record.status),
+    }));
+    const attendanceCounts = student.studentAttendance.reduce<Record<string, number>>((counts, record) => {
+      counts[record.status] = (counts[record.status] ?? 0) + 1;
+      return counts;
+    }, {});
+    const markedAttendance = student.studentAttendance.length;
+    const attendanceRate = markedAttendance ? Math.round(((attendanceCounts.PRESENT ?? 0) / markedAttendance) * 100) : null;
+
+    const invoices = student.invoices.map((invoice) => ({
+      id: invoice.id,
+      cycle: invoice.billingCycleStart.toLocaleDateString('en', { month: 'long', year: 'numeric', timeZone: 'Asia/Kathmandu' }),
+      dueDate: formatDate(invoice.dueDate),
+      state: invoiceState(invoice.status, invoice.dueDate),
+      qrAvailable: invoice.status !== 'PAID',
+      paymentReference: invoice.transactionId ?? invoice.id,
+      netPayable: Number(invoice.netPayable),
+      lines: [
+        { label: `${invoice.invoiceType.charAt(0)}${invoice.invoiceType.slice(1).toLowerCase()} dues`, amount: Number(invoice.amount) },
+        ...(Number(invoice.discount) ? [{ label: 'Discount', amount: -Number(invoice.discount) }] : []),
+        ...(Number(invoice.fine) ? [{ label: 'Fine', amount: Number(invoice.fine) }] : []),
+      ],
+    }));
+    const outstanding = student.invoices
+      .filter((invoice) => invoice.status === 'UNPAID' || invoice.status === 'OVERDUE')
+      .reduce((sum, invoice) => sum + Number(invoice.netPayable), 0);
+
+    const events = calendarRows.map((event) => ({
+      id: event.id,
+      date: formatDate(event.startDate),
+      day: event.startDate.toLocaleDateString('en', { day: '2-digit', timeZone: 'Asia/Kathmandu' }),
+      month: event.startDate.toLocaleDateString('en', { month: 'short', timeZone: 'Asia/Kathmandu' }).toUpperCase(),
+      title: event.title,
+      kind: eventKind(event.eventType),
+      details: event.description ?? '',
+    }));
+    const certificates = student.certificates.map((certificate) => ({
+      id: certificate.certificateId,
+      title: certificate.template.name,
+      course: student.grade?.name ?? 'Student record',
+      issuedDate: formatDate(certificate.issuedDate),
+      fileName: certificate.pdfUrl.split('/').pop() || `${certificate.certificateId}.pdf`,
+      pdfUrl: `/certificates/${encodeURIComponent(certificate.certificateId)}/download`,
+    }));
+
+    const notifications = [
+      ...student.invoices
+        .filter((invoice) => invoice.status === 'OVERDUE' || (invoice.status === 'UNPAID' && invoice.dueDate.getTime() - Date.now() <= 3 * 86400000))
+        .map((invoice) => ({
+          id: `invoice-${invoice.id}`,
+          title: invoice.status === 'OVERDUE' ? 'Fee overdue' : 'Fee due soon',
+          message: `${moneyForNotification(Number(invoice.netPayable))} is due on ${formatDate(invoice.dueDate)}.`,
+          time: formatDate(invoice.updatedAt),
+          occurredAt: invoice.updatedAt.toISOString(),
+          icon: 'payments',
+          destination: '/student/fees',
+          unread: true,
+        })),
+      ...homeworkRows
+        .filter((row) => !row.submissions.some((submission) => submission.studentId === student.id))
+        .slice(0, 5)
+        .map((row) => ({
+          id: `homework-${row.id}`,
+          title: 'Homework assigned',
+          message: `${row.subject} homework is due ${formatDate(row.deadline)}.`,
+          time: formatDate(row.createdAt),
+          occurredAt: row.createdAt.toISOString(),
+          icon: 'assignment',
+          destination: '/student/homework',
+          unread: row.createdAt.getTime() >= Date.now() - 7 * 86400000,
+        })),
+      ...homeworkRows.flatMap((row) => {
+        const submission = row.submissions.find((item) => item.studentId === student.id);
+        return submission?.grade ? [{
+          id: `result-${submission.id}`,
+          title: 'New result published',
+          message: `${row.subject}: ${row.title} has been graded.`,
+          time: formatDate(submission.updatedAt),
+          occurredAt: submission.updatedAt.toISOString(),
+          icon: 'trending_up',
+          destination: '/student/results',
+          unread: submission.updatedAt.getTime() >= Date.now() - 7 * 86400000,
+        }] : [];
+      }),
+      ...student.studentAttendance.slice(0, 10).map((record) => ({
+        id: `attendance-${record.id}`,
+        title: 'Attendance marked',
+        message: `${record.class.course.name}: ${attendanceLabel(record.status)} on ${formatDate(record.date)}.`,
+        time: formatDate(record.updatedAt),
+        occurredAt: record.updatedAt.toISOString(),
+        icon: 'fact_check',
+        destination: '/student/attendance',
+        unread: record.updatedAt.getTime() >= Date.now() - 7 * 86400000,
+      })),
+      ...leaveRows
+        .filter((leave) => leave.status === 'APPROVED_LEVEL2' || leave.status === 'REJECTED')
+        .map((leave) => ({
+          id: `leave-${leave.id}`,
+          title: leave.status === 'APPROVED_LEVEL2' ? 'Leave approved' : 'Leave rejected',
+          message: `${formatDate(leave.startDate)}${leave.startDate.getTime() === leave.endDate.getTime() ? '' : ` to ${formatDate(leave.endDate)}`}: ${leave.remarks || leave.reason}.`,
+          time: formatDate(leave.updatedAt),
+          occurredAt: leave.updatedAt.toISOString(),
+          icon: leave.status === 'APPROVED_LEVEL2' ? 'event_available' : 'event_busy',
+          destination: '/student/attendance',
+          unread: leave.updatedAt.getTime() >= Date.now() - 7 * 86400000,
+        })),
+      ...student.certificates.slice(0, 5).map((certificate) => ({
+        id: `certificate-${certificate.id}`,
+        title: 'Certificate issued',
+        message: `${certificate.template.name} is ready to download.`,
+        time: formatDate(certificate.issuedDate),
+        occurredAt: certificate.issuedDate.toISOString(),
+        icon: 'workspace_premium',
+        destination: '/student/certificates',
+        unread: certificate.issuedDate.getTime() >= Date.now() - 7 * 86400000,
+      })),
+    ].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+
+    const assignedBranch = student.user.userRoles.find((role) => role.branch)?.branch ?? student.enrollments[0]?.class.branch;
+    return res.json({
+      generatedAt: new Date().toISOString(),
+      studentProfile: {
+        name: `${student.user.firstName} ${student.user.lastName}`,
+        initials: `${student.user.firstName.charAt(0)}${student.user.lastName.charAt(0)}`.toUpperCase(),
+        institution: student.user.tenant.name,
+        grade: student.grade?.name ?? 'Grade not assigned',
+        branch: assignedBranch?.name ?? 'Branch not assigned',
+        branchAddress: assignedBranch?.address,
+        rollNumber: student.id.slice(0, 6).toUpperCase(),
+        enrollmentId: student.id,
+        academicYear: `${new Date().getFullYear()}/${String(new Date().getFullYear() + 1).slice(-2)}`,
+        validUntil: 'While actively enrolled',
+        blocked: student.enrollments.some((enrollment) => enrollment.status === 'BLOCKED') || student.invoices.some((invoice) => invoice.status === 'OVERDUE'),
+        outstanding,
+        attendanceRate,
+        attendanceCounts: {
+          present: attendanceCounts.PRESENT ?? 0,
+          absent: attendanceCounts.ABSENT ?? 0,
+          excused: attendanceCounts.EXCUSED ?? 0,
+        },
+      },
+      todaySessions,
+      homework,
+      results,
+      insights,
+      attendance,
+      invoices,
+      events,
+      certificates,
+      notifications,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Failed to load the student portal.', details: error.message });
+  }
+});
+
+function moneyForNotification(value: number): string {
+  return `NPR ${value.toLocaleString('en-NP')}`;
+}
+
 router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Response) => {
   const caller = req.user as UserPayload;
   const tenantAdmin = isTenantAdmin(caller);
