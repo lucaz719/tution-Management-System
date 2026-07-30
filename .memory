@@ -236,6 +236,51 @@ Docker database volume.
   `apps/web/src/router/index.tsx`, and
   `apps/web/src/components/patterns/dashboardNavigation.ts`.
 
+## Teacher portal implementation
+
+- Rebuilt the Teacher workspace as a mobile-first, StyleSeed-aligned portal
+  across `/teacher/dashboard`, `/teacher/timetable`, `/teacher/attendance`,
+  `/teacher/daily-update-log`, `/teacher/homework`, `/teacher/results`,
+  `/teacher/profile`, and `/teacher/leave-requests`.
+- Preserved the live Teacher dashboard, geo-attendance IN/OUT, and daily-update
+  API calls. Geolocation failures, missing scheduled branches, outside-geofence
+  server rejection, and pending-update attendance gates are surfaced as explicit
+  error states; no teacher-side override is offered.
+- Added scheduled per-slot branch/geofence context and a separate personalized
+  class stream so multi-branch and regular/personalized sessions are not merged.
+- Added a teacher-visible attendance-stamp timeline that keeps IN, OUT,
+  AUTO-OUT, and RE-IN events separate, including the Branch Admin notification
+  explanation for an auto-departure.
+- Added the mandatory daily update workflow with separate fields for material
+  covered, issues/observations, and homework. A complete IN/OUT session remains
+  labelled `Present — Update Pending` until the live update is submitted.
+- Added the assigned-class student roster UX. Fee-blocked students have the
+  Present option disabled, while approved-leave students are pre-marked
+  `Absent (Excused)` and cannot be casually overwritten.
+- Added homework distribution, score-entry/analytics explanation, teacher-only
+  performance breakdown, own attendance history, leave balances, and casual,
+  early-out, and long-sick request views.
+- Workflows without complete list/write API contracts use realistic scoped
+  preview data and explicitly report validation-only status rather than claiming
+  persistence.
+- Added accessible labels, semantic controls, visible focus treatment, loading,
+  error, empty/locked states, 40px-or-larger touch targets, mobile safe-area
+  spacing, responsive layouts, and reduced-motion handling.
+- Added `apps/web/tests/teacher-smoke.js` for authenticated teacher verification
+  of the fee-blocked/approved-leave roster states and unmerged AUTO-OUT/RE-IN
+  history. Its authenticated assertions require `TMS_TEACHER_EMAIL` and
+  `TMS_TEACHER_PASSWORD`.
+- Demo teacher login email is `teacher@demo.tms.local`, but the current
+  `SEED_DEMO=true` seed hashes a random UUID and intentionally never prints it.
+  Manual login therefore requires creating/resetting a Teacher password or
+  adding a local-only configurable demo password before reseeding.
+- Primary implementation files:
+  `apps/web/src/pages/TeacherPortal.tsx`,
+  `apps/web/src/features/teacher/teacherPortal.css`,
+  `apps/web/src/features/teacher/teacherPortalData.ts`,
+  `apps/web/src/features/teacher/teacherPortalTypes.ts`, and
+  `apps/web/tests/teacher-smoke.js`.
+
 ## Integration coverage completed
 
 Test:
@@ -326,6 +371,7 @@ npm run build
 npm run lint --workspace web
 npx testcafe "chrome:headless" apps/web/tests/smoke.js
 npx testcafe "chrome:headless" apps/web/tests/parent-smoke.js
+npx testcafe "chrome:headless" apps/web/tests/teacher-smoke.js
 npx prisma validate --schema services/api/prisma/schema.prisma
 git diff --check
 ```
@@ -398,4 +444,8 @@ Known non-blocking warnings:
   remarks/teachers, appointment/leave UX, child-specific fees/certificates/
   calendar/notifications, unavailable-contract states, and authenticated parent
   Chrome smoke coverage.
+- Teacher web portal, mobile-first geo-attendance UX, scheduled multi-branch
+  context, separate personalized sessions, mandatory daily updates, locked
+  student-attendance states, homework/results previews, own performance/leave
+  records, unmerged stamp history, and credential-gated Teacher smoke coverage.
 - All validation commands listed above pass; changes are not yet committed.
