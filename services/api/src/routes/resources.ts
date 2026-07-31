@@ -3,7 +3,7 @@ import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware } from '../middleware/auth';
 import { MockPushNotificationService } from '../utils/notifications';
-import { canAccessBranch, hasBranchPermission } from '../utils/access-control';
+import { canAccessBranch, hasBranchPermission, hasRole } from '../utils/access-control';
 
 const router = Router();
 
@@ -52,6 +52,7 @@ router.post(
         maintenanceTask = await prisma.maintenanceTask.create({
             data: {
               branchId,
+              classroomId,
               description: `Issues logged by staff: ${remarks || 'None specified'}. Condition: ${JSON.stringify(itemsCondition)}`,
               assignedStaffId,
               status: 'PENDING',
@@ -76,6 +77,69 @@ router.post(
     }
   }
 );
+
+// A deliberately narrow worker view: Janitors only receive tasks assigned to
+// their authenticated identity and no student, finance, or HR records.
+router.get('/my-tasks', authMiddleware, async (req: TenantRequest, res: Response) => {
+  if (!hasRole(req.user!, 'Janitor')) {
+    return res.status(403).json({ error: 'Only maintenance staff may access this task list.' });
+  }
+
+  try {
+    const now = new Date();
+    const candidates = await prisma.maintenanceTask.findMany({
+      where: {
+        assignedStaffId: req.user!.id,
+        status: { not: 'COMPLETED' },
+        escalatedAt: null,
+        branch: { tenantId: req.tenantId! },
+      },
+      select: { id: true, createdAt: true, escalationDaysSnapshot: true },
+    });
+    const overdueIds = candidates
+      .filter((task) => task.createdAt.getTime() + task.escalationDaysSnapshot * 86_400_000 < now.getTime())
+      .map((task) => task.id);
+    if (overdueIds.length) {
+      await prisma.maintenanceTask.updateMany({
+        where: { id: { in: overdueIds }, escalatedAt: null },
+        data: { status: 'ESCALATED', escalatedAt: now },
+      });
+    }
+
+    const tasks = await prisma.maintenanceTask.findMany({
+      where: { assignedStaffId: req.user!.id, branch: { tenantId: req.tenantId! } },
+      include: { branch: { select: { name: true } } },
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+    });
+    const completerIds = [...new Set(tasks.flatMap((task) => task.completedById ? [task.completedById] : []))];
+    const completers = completerIds.length ? await prisma.user.findMany({
+      where: { id: { in: completerIds }, tenantId: req.tenantId! },
+      select: { id: true, firstName: true, lastName: true },
+    }) : [];
+    const names = new Map(completers.map((user) => [user.id, `${user.firstName} ${user.lastName}`.trim()]));
+
+    return res.status(200).json({
+      tasks: tasks.map((task) => {
+        const dueAt = new Date(task.createdAt.getTime() + task.escalationDaysSnapshot * 86_400_000);
+        return {
+          id: task.id,
+          classroomId: task.classroomId,
+          location: task.branch.name,
+          description: task.description,
+          status: task.status,
+          createdAt: task.createdAt,
+          dueAt,
+          overdue: task.status !== 'COMPLETED' && dueAt < now,
+          escalatedAt: task.escalatedAt,
+          completionTimestamp: task.completionTimestamp,
+          completedBy: task.completedById ? { id: task.completedById, name: names.get(task.completedById) ?? 'Maintenance staff' } : null,
+        };
+      }),
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Failed to retrieve assigned maintenance tasks.', details: error.message });
+  }
+});
 
 // 2. Get Maintenance Tasks
 router.get(
@@ -119,11 +183,13 @@ router.post(
       if (task.status === 'COMPLETED') {
         return res.status(409).json({ error: 'Maintenance task is already completed.' });
       }
+      const completedAt = new Date();
       const transition = await prisma.maintenanceTask.updateMany({
           where: { id: taskId, status: { not: 'COMPLETED' }, branch: { tenantId: req.tenantId! } },
           data: {
             status: 'COMPLETED',
-            completionTimestamp: new Date(),
+            completionTimestamp: completedAt,
+            completedById: req.user!.id,
           },
         });
       if (transition.count !== 1) {
@@ -135,7 +201,8 @@ router.post(
         task: {
           id: taskId,
           status: 'COMPLETED',
-          completionTimestamp: new Date(),
+          completionTimestamp: completedAt,
+          completedBy: { id: req.user!.id, name: `${req.user!.firstName} ${req.user!.lastName}`.trim() },
         },
       });
     } catch (error: any) {

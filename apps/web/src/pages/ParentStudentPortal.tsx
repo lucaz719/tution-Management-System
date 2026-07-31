@@ -1,20 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import QRCode from 'qrcode';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { invoiceTotal } from '../features/parent/parentPortalData';
 import {
-  invoiceTotal,
-  parentAppointments,
-  parentAttendance,
-  parentCertificates,
-  parentChildren,
-  parentEvents,
-  parentInvoices,
-  parentLeaves,
-  parentMessages,
-  parentNotifications,
-  parentRemarks,
-  parentSessions,
-  parentTeachers,
-} from '../features/parent/parentPortalData';
+  loadParentNepalPayQr,
+  loadParentPortal,
+  parentFileUrl,
+  requestAppointment,
+  requestStudentLeave,
+  sendParentMessage,
+} from '../features/parent/parentPortalService';
 import type {
   AppointmentState,
   AttendanceState,
@@ -22,9 +17,11 @@ import type {
   LeaveState,
   ParentChild,
   ParentInvoice,
+  ParentPortalDataset,
   ParentTone,
   ParentView,
 } from '../features/parent/parentPortalTypes';
+import { errorMessage } from '../services/api/client';
 import '../features/parent/parentPortal.css';
 
 const VIEW_COPY: Record<ParentView, [string, string]> = {
@@ -41,221 +38,205 @@ const VIEW_COPY: Record<ParentView, [string, string]> = {
   notifications: ['Notifications', 'Push and SMS activity scoped to the selected child.'],
 };
 
-function icon(name: string) {
-  return <span className="material-symbols-outlined" aria-hidden="true">{name}</span>;
+const ParentDataContext = createContext<ParentPortalDataset | null>(null);
+function useParentData() {
+  const value = useContext(ParentDataContext);
+  if (!value) throw new Error('Parent portal data is unavailable.');
+  return value;
 }
-
-function money(value: number) {
-  return `NPR ${Math.abs(value).toLocaleString('en-NP')}`;
-}
-
-function toneForAttendance(state: AttendanceState): ParentTone {
-  return state === 'Present' ? 'success' : state === 'Absent' ? 'error' : 'warning';
-}
-
-function toneForInvoice(state: InvoiceState): ParentTone {
-  return state === 'Paid' ? 'success' : state === 'Overdue' ? 'error' : state === 'Due soon' ? 'warning' : 'info';
-}
-
-function toneForAppointment(state: AppointmentState): ParentTone {
-  return state === 'Approved' || state === 'Confirmed' ? 'success' : state === 'Rejected' ? 'error' : state === 'Alternative proposed' ? 'warning' : 'info';
-}
-
-function toneForLeave(state: LeaveState): ParentTone {
-  return state === 'Approved' ? 'success' : state === 'Rejected' ? 'error' : state === 'Emergency departure' ? 'error' : 'warning';
-}
-
+function icon(name: string) { return <span className="material-symbols-outlined" aria-hidden="true">{name}</span>; }
+function money(value: number) { return `NPR ${Math.abs(value).toLocaleString('en-NP')}`; }
+function toneForAttendance(state: AttendanceState): ParentTone { return state === 'Present' ? 'success' : state === 'Absent' ? 'error' : 'warning'; }
+function toneForInvoice(state: InvoiceState): ParentTone { return state === 'Paid' ? 'success' : state === 'Overdue' ? 'error' : state === 'Due soon' ? 'warning' : 'info'; }
+function toneForAppointment(state: AppointmentState): ParentTone { return state === 'Approved' || state === 'Confirmed' ? 'success' : state === 'Rejected' ? 'error' : state === 'Alternative proposed' ? 'warning' : 'info'; }
+function toneForLeave(state: LeaveState): ParentTone { return state === 'Approved' ? 'success' : state === 'Rejected' || state === 'Emergency departure' ? 'error' : 'warning'; }
 function ParentStatus({ label, tone, iconName }: { label: string; tone: ParentTone; iconName: string }) {
   return <span className={`parent-status parent-status--${tone}`}>{icon(iconName)}<span>{label}</span></span>;
 }
-
 function SectionHeader({ title, description, action, onAction }: { title: string; description?: string; action?: string; onAction?: () => void }) {
-  return (
-    <div className="parent-section-head">
-      <div><h2>{title}</h2>{description ? <p>{description}</p> : null}</div>
-      {action && onAction ? <button type="button" className="parent-text-button" onClick={onAction}>{action}{icon('arrow_forward')}</button> : null}
-    </div>
-  );
+  return <div className="parent-section-head"><div><h2>{title}</h2>{description ? <p>{description}</p> : null}</div>{action && onAction ? <button type="button" className="parent-text-button" onClick={onAction}>{action}{icon('arrow_forward')}</button> : null}</div>;
 }
-
 function EmptyState({ title, message, iconName }: { title: string; message: string; iconName: string }) {
   return <div className="parent-empty" role="status">{icon(iconName)}<h3>{title}</h3><p>{message}</p></div>;
 }
 
-function UnavailableState({ title, message }: { title: string; message: string }) {
-  return <div className="parent-unavailable" role="status">{icon('construction')}<div><strong>{title}</strong><p>{message}</p></div></div>;
+function ChildSwitcher({ children, activeChild, onSelect }: { children: ParentChild[]; activeChild: ParentChild; onSelect: (id: string) => void }) {
+  return <section className="parent-child-switcher" aria-labelledby="linked-children-title"><div><span className="parent-eyebrow">LINKED STUDENTS</span><h2 id="linked-children-title">Choose a child</h2><p>Every record below changes with this selection.</p></div><div className="parent-child-tabs" role="group" aria-label="Linked children">{children.map((child) => <button key={child.id} type="button" aria-pressed={child.id === activeChild.id} className={child.id === activeChild.id ? 'is-active' : ''} onClick={() => onSelect(child.id)}><span>{child.initials}</span><span><strong>{child.name}</strong><small>{child.grade} · Roll {child.rollNumber}</small></span>{icon(child.blocked ? 'lock' : 'verified')}</button>)}</div></section>;
 }
-
-function ChildSwitcher({ activeChild, onSelect }: { activeChild: ParentChild; onSelect: (id: string) => void }) {
-  return (
-    <section className="parent-child-switcher" aria-labelledby="linked-children-title">
-      <div><span className="parent-eyebrow">LINKED STUDENTS</span><h2 id="linked-children-title">Choose a child</h2><p>Every record below changes with this selection.</p></div>
-      <div className="parent-child-tabs" role="group" aria-label="Linked children">
-        {parentChildren.map((child) => {
-          const active = child.id === activeChild.id;
-          return <button key={child.id} type="button" aria-pressed={active} className={active ? 'is-active' : ''} onClick={() => onSelect(child.id)}><span>{child.initials}</span><span><strong>{child.name}</strong><small>{child.grade} · Roll {child.rollNumber}</small></span>{child.blocked ? icon('lock') : icon('verified')}</button>;
-        })}
-      </div>
-    </section>
-  );
-}
-
 function ChildContext({ child }: { child: ParentChild }) {
-  return (
-    <div className="parent-child-context" aria-label={`Currently viewing ${child.name}`}>
-      <span className="parent-child-context__avatar">{child.initials}</span>
-      <span><small>Currently viewing</small><strong>{child.name}</strong><small>{child.grade} · {child.branch}</small></span>
-      <ParentStatus label={child.blocked ? 'Blocked' : 'Active'} tone={child.blocked ? 'error' : 'success'} iconName={child.blocked ? 'lock' : 'verified'} />
-    </div>
-  );
+  return <div className="parent-child-context" aria-label={`Currently viewing ${child.name}`}><span className="parent-child-context__avatar">{child.initials}</span><span><small>Currently viewing</small><strong>{child.name}</strong><small>{child.grade} · {child.branch}</small></span><ParentStatus label={child.blocked ? 'Blocked' : 'Active'} tone={child.blocked ? 'error' : 'success'} iconName={child.blocked ? 'lock' : 'verified'} /></div>;
 }
-
-function SessionList({ childId, compact = false }: { childId: string; compact?: boolean }) {
-  const sessions = parentSessions.filter((session) => session.childId === childId);
+function SessionList({ compact = false }: { compact?: boolean }) {
+  const { sessions } = useParentData();
   if (!sessions.length) return <EmptyState title="No classes today" message="The next scheduled class will appear here." iconName="event_available" />;
   return <div className="parent-session-list">{sessions.map((session) => <article className="parent-session" key={session.id}><time><strong>{session.time}</strong><span>{session.endTime}</span></time><i aria-hidden="true" /><div><h3>{session.subject}</h3><p>{session.teacher} · {session.room}</p></div>{compact ? null : <ParentStatus label={session.type} tone="info" iconName="school" />}</article>)}</div>;
 }
 
 function DashboardView({ child, go }: { child: ParentChild; go: (view: ParentView) => void }) {
-  const events = parentEvents.filter((event) => event.childId === child.id);
-  const remarks = parentRemarks.filter((remark) => remark.childId === child.id && remark.parentVisible);
-  const appointments = parentAppointments.filter((appointment) => appointment.childId === child.id);
-  const leaves = parentLeaves.filter((leave) => leave.childId === child.id);
-  return (
-    <div className="parent-view">
-      {child.blocked ? <section className="parent-alert parent-alert--error">{icon('lock')}<div><strong>{child.name} is blocked due to fee dues</strong><p>{money(child.outstanding)} remains outstanding. Academic and identity records are still visible.</p></div><button type="button" onClick={() => go('fees')}>View fees{icon('arrow_forward')}</button></section> : null}
-      <section className="parent-hero"><div><span className="parent-eyebrow">WEDNESDAY · 29 JULY 2026</span><h2>{child.name}’s day at a glance</h2><p>Timetable, attendance, fees, remarks, and events are kept separate from every other linked child.</p></div><div className="parent-hero__summary"><span>Attendance</span><strong>{child.attendanceRate}%</strong><small>{child.blocked ? `${money(child.outstanding)} due` : 'Fees up to date'}</small></div></section>
-      <div className="parent-dashboard-grid">
-        <section className="parent-card"><SectionHeader title="Today’s timetable" description={`${parentSessions.filter((session) => session.childId === child.id).length} scheduled sessions`} action="Full timetable" onAction={() => go('timetable')} /><SessionList childId={child.id} compact /></section>
-        <aside className="parent-card"><SectionHeader title="Parent-visible remarks" description="Internal institution notes are excluded." action="View performance" onAction={() => go('performance')} />{remarks.length ? <div className="parent-remark-list">{remarks.slice(0, 2).map((remark) => <article key={remark.id}><ParentStatus label={remark.signal} tone={remark.signal === 'Improving' ? 'success' : remark.signal === 'Needs support' ? 'warning' : 'info'} iconName={remark.signal === 'Improving' ? 'trending_up' : 'insights'} /><h3>{remark.subject}</h3><p>{remark.message}</p><small>{remark.author} · {remark.date}</small></article>)}</div> : <EmptyState title="No visible remarks" message="Approved teacher and admin remarks will appear here." iconName="visibility" />}</aside>
-      </div>
-      <section className="parent-metrics" aria-label={`${child.name} summary`}>
-        <button type="button" onClick={() => go('attendance')}>{icon('fact_check')}<span><small>Attendance</small><strong>{child.attendanceRate}%</strong></span>{icon('arrow_forward')}</button>
-        <button type="button" onClick={() => go('fees')}>{icon('payments')}<span><small>Outstanding</small><strong>{money(child.outstanding)}</strong></span>{icon('arrow_forward')}</button>
-        <button type="button" onClick={() => go('appointments')}>{icon('event')}<span><small>Appointments</small><strong>{appointments.length}</strong></span>{icon('arrow_forward')}</button>
-        <button type="button" onClick={() => go('leave')}>{icon('event_available')}<span><small>Leave records</small><strong>{leaves.length}</strong></span>{icon('arrow_forward')}</button>
-      </section>
-      <section className="parent-card"><SectionHeader title="Upcoming events" description={`Dates relevant to ${child.name}.`} action="Open calendar" onAction={() => go('calendar')} /><div className="parent-event-strip">{events.slice(0, 3).map((event) => <article key={event.id}><div><strong>{event.day}</strong><span>{event.month}</span></div><span><b>{event.title}</b><small>{event.kind}</small></span></article>)}</div></section>
-    </div>
-  );
+  const { appointments, events, leaves, remarks, sessions } = useParentData();
+  const today = new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date()).toUpperCase();
+  return <div className="parent-view">
+    {child.blocked ? <section className="parent-alert parent-alert--error">{icon('lock')}<div><strong>{child.name} is blocked due to fee dues</strong><p>{money(child.outstanding)} remains outstanding. Records remain visible.</p></div><button type="button" onClick={() => go('fees')}>View fees{icon('arrow_forward')}</button></section> : null}
+    <section className="parent-hero"><div><span className="parent-eyebrow">{today}</span><h2>{child.name}’s day at a glance</h2><p>Timetable, attendance, fees, remarks, and events stay separate from every sibling.</p></div><div className="parent-hero__summary"><span>Attendance</span><strong>{child.attendanceRate}%</strong><small>{child.blocked ? `${money(child.outstanding)} due` : 'Fees up to date'}</small></div></section>
+    <div className="parent-dashboard-grid"><section className="parent-card"><SectionHeader title="Today’s timetable" description={`${sessions.length} scheduled session${sessions.length === 1 ? '' : 's'}`} action="Full timetable" onAction={() => go('timetable')} /><SessionList compact /></section><aside className="parent-card"><SectionHeader title="Parent-visible remarks" description="Internal institution notes are excluded." action="View performance" onAction={() => go('performance')} />{remarks.length ? <div className="parent-remark-list">{remarks.slice(0, 2).map((remark) => <article key={remark.id}><ParentStatus label={remark.signal} tone={remark.signal === 'Improving' ? 'success' : remark.signal === 'Needs support' ? 'warning' : 'info'} iconName="insights" /><h3>{remark.subject}</h3><p>{remark.message}</p><small>{remark.author} · {remark.date}</small></article>)}</div> : <EmptyState title="No visible remarks" message="Published remarks and performance signals will appear here." iconName="visibility" />}</aside></div>
+    <section className="parent-metrics" aria-label={`${child.name} summary`}><button type="button" onClick={() => go('attendance')}>{icon('fact_check')}<span><small>Attendance</small><strong>{child.attendanceRate}%</strong></span>{icon('arrow_forward')}</button><button type="button" onClick={() => go('fees')}>{icon('payments')}<span><small>Outstanding</small><strong>{money(child.outstanding)}</strong></span>{icon('arrow_forward')}</button><button type="button" onClick={() => go('appointments')}>{icon('event')}<span><small>Appointments</small><strong>{appointments.length}</strong></span>{icon('arrow_forward')}</button><button type="button" onClick={() => go('leave')}>{icon('event_available')}<span><small>Leave records</small><strong>{leaves.length}</strong></span>{icon('arrow_forward')}</button></section>
+    <section className="parent-card"><SectionHeader title="Upcoming events" description={`Dates relevant to ${child.name}.`} action="Open calendar" onAction={() => go('calendar')} />{events.length ? <div className="parent-event-strip">{events.slice(0, 3).map((event) => <article key={event.id}><div><strong>{event.day}</strong><span>{event.month}</span></div><span><b>{event.title}</b><small>{event.kind}</small></span></article>)}</div> : <EmptyState title="No upcoming events" message="Published dates will appear here." iconName="event" />}</section>
+  </div>;
 }
-
-function TimetableView({ child }: { child: ParentChild }) {
-  return <div className="parent-view"><section className="parent-card"><SectionHeader title={`${child.name}’s merged schedule`} description="Regular, music, short-term, and personalized classes stay child-specific." /><SessionList childId={child.id} /></section><div className="parent-info-note">{icon('info')}<span>Switching children changes this schedule; sessions are never merged across siblings.</span></div></div>;
-}
-
+function TimetableView({ child }: { child: ParentChild }) { return <div className="parent-view"><section className="parent-card"><SectionHeader title={`${child.name}’s merged schedule`} description="Every active course type, scoped to this child." /><SessionList /></section><div className="parent-info-note">{icon('info')}<span>Switching children changes this schedule; sessions are never merged across siblings.</span></div></div>; }
 function AttendanceView({ child }: { child: ParentChild }) {
-  const records = parentAttendance.filter((record) => record.childId === child.id);
-  return <div className="parent-view"><section className="parent-attendance-summary"><div className="parent-ring" style={{ '--progress': `${child.attendanceRate}%` } as React.CSSProperties}><span>{child.attendanceRate}%</span></div><div><span className="parent-eyebrow">JULY 2026</span><h2>{child.name}’s attendance</h2><p>Approved leave appears as Absent (Excused).</p></div></section><section className="parent-card"><SectionHeader title="Session record" description="Read-only teacher-marked attendance." />{records.length ? <div className="parent-table-wrap"><table className="parent-table"><thead><tr><th>Date</th><th>Subject</th><th>Session</th><th>Status</th></tr></thead><tbody>{records.map((record) => <tr key={record.id}><td>{record.date}</td><td><strong>{record.subject}</strong></td><td>{record.session}</td><td><ParentStatus label={record.state} tone={toneForAttendance(record.state)} iconName={record.state === 'Present' ? 'check_circle' : record.state === 'Absent' ? 'cancel' : 'event_available'} /></td></tr>)}</tbody></table></div> : <EmptyState title="No attendance yet" message="Teacher-marked sessions will appear here." iconName="fact_check" />}</section></div>;
+  const { attendance } = useParentData();
+  return <div className="parent-view"><section className="parent-attendance-summary"><div className="parent-ring" style={{ '--progress': `${child.attendanceRate}%` } as React.CSSProperties}><span>{child.attendanceRate}%</span></div><div><span className="parent-eyebrow">CURRENT RECORD</span><h2>{child.name}’s attendance</h2><p>Approved leave appears as Absent (Excused).</p></div></section><section className="parent-card"><SectionHeader title="Session record" description="Read-only teacher-marked attendance." />{attendance.length ? <div className="parent-table-wrap"><table className="parent-table"><thead><tr><th>Date</th><th>Subject</th><th>Session</th><th>Status</th></tr></thead><tbody>{attendance.map((record) => <tr key={record.id}><td>{record.date}</td><td><strong>{record.subject}</strong></td><td>{record.session}</td><td><ParentStatus label={record.state} tone={toneForAttendance(record.state)} iconName={record.state === 'Present' ? 'check_circle' : record.state === 'Absent' ? 'cancel' : 'event_available'} /></td></tr>)}</tbody></table></div> : <EmptyState title="No attendance yet" message="Teacher-marked sessions will appear here." iconName="fact_check" />}</section></div>;
 }
-
 function PerformanceView({ child }: { child: ParentChild }) {
-  const visible = parentRemarks.filter((remark) => remark.childId === child.id && remark.parentVisible);
-  return <div className="parent-view"><div className="parent-privacy-note">{icon('visibility')}<span><strong>Visibility rules are enforced.</strong> Only remarks approved for parent viewing are shown; internal notes never render here.</span></div><section className="parent-card"><SectionHeader title="Performance signals & remarks" description={`Published observations for ${child.name}.`} />{visible.length ? <div className="parent-performance-list">{visible.map((remark) => <article key={remark.id}><span className="parent-icon-box">{icon(remark.signal === 'Improving' ? 'trending_up' : remark.signal === 'Needs support' ? 'track_changes' : 'remove')}</span><div><span className="parent-eyebrow">{remark.subject}</span><h3>{remark.signal}</h3><p>{remark.message}</p><small>{remark.author} · {remark.date}</small></div></article>)}</div> : <EmptyState title="No parent-visible insights" message="The institution has not published remarks for this child." iconName="insights" />}</section><UnavailableState title="Live performance analysis is not connected" message="The API currently returns 501 for persisted performance signals. This screen demonstrates the approved parent-visible state only." /></div>;
+  const { remarks } = useParentData();
+  return <div className="parent-view"><div className="parent-privacy-note">{icon('visibility')}<span><strong>Visibility rules are enforced.</strong> Only remarks explicitly published for parents are returned by the API.</span></div><section className="parent-card"><SectionHeader title="Performance signals & remarks" description={`Published observations for ${child.name}.`} />{remarks.length ? <div className="parent-performance-list">{remarks.map((remark) => <article key={remark.id}><span className="parent-icon-box">{icon(remark.signal === 'Improving' ? 'trending_up' : remark.signal === 'Needs support' ? 'track_changes' : 'remove')}</span><div><span className="parent-eyebrow">{remark.subject}</span><h3>{remark.signal}</h3><p>{remark.message}</p><small>{remark.author} · {remark.date}</small></div></article>)}</div> : <EmptyState title="No parent-visible insights" message="The institution has not published remarks or score signals for this child." iconName="insights" />}</section></div>;
 }
 
-function MessagesView({ child }: { child: ParentChild }) {
-  const teachers = useMemo(() => parentTeachers.filter((teacher) => teacher.childId === child.id), [child.id]);
+function MessagesView({ child, refresh }: { child: ParentChild; refresh: () => void }) {
+  const { messages, teachers } = useParentData();
   const [teacherId, setTeacherId] = useState(teachers[0]?.id ?? '');
+  const [text, setText] = useState('');
+  const [status, setStatus] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   useEffect(() => setTeacherId(teachers[0]?.id ?? ''), [child.id, teachers]);
   const selected = teachers.find((teacher) => teacher.id === teacherId);
-  const thread = parentMessages.filter((message) => message.childId === child.id && message.teacherId === teacherId);
-  return <div className="parent-view"><div className="parent-privacy-note">{icon('shield')}<span><strong>Privacy scoped to {child.name}.</strong> Only teachers assigned to this child are available, and sibling conversations remain separate.</span></div><div className="parent-message-layout"><aside className="parent-card parent-teacher-list"><SectionHeader title="Assigned teachers" description={`${teachers.length} eligible contacts`} />{teachers.map((teacher) => <button key={teacher.id} type="button" className={teacher.id === teacherId ? 'is-active' : ''} aria-pressed={teacher.id === teacherId} onClick={() => setTeacherId(teacher.id)}><span>{teacher.initials}</span><span><strong>{teacher.name}</strong><small>{teacher.subject}</small></span>{icon('chevron_right')}</button>)}</aside><section className="parent-card parent-thread"><SectionHeader title={selected ? selected.name : 'Conversation'} description={selected ? `${selected.subject} · regarding ${child.name}` : undefined} />{thread.length ? <div className="parent-message-list">{thread.map((message) => <article key={message.id} className={message.sender === 'Parent' ? 'is-parent' : ''}><strong>{message.sender === 'Parent' ? 'You' : selected?.name}</strong><p>{message.text}</p><small>{message.time}</small></article>)}</div> : <EmptyState title="No messages yet" message="A separate thread will be maintained for this child and teacher." iconName="forum" />}<div className="parent-composer"><label htmlFor="parent-message">Message about {child.name}</label><textarea id="parent-message" disabled placeholder="Messaging persistence is not available yet." /><button type="button" disabled>{icon('send')}Send message</button></div></section></div><UnavailableState title="Persistent messaging is not implemented" message="The API validates parent/teacher relationships but currently returns 501 instead of storing or retrieving threads." /></div>;
-}
-
-function AppointmentsView({ child }: { child: ParentChild }) {
-  const records = parentAppointments.filter((appointment) => appointment.childId === child.id);
-  const teachers = parentTeachers.filter((teacher) => teacher.childId === child.id);
-  const [scheduledAt, setScheduledAt] = useState('');
-  const [validation, setValidation] = useState('');
-  const handleSubmit = (event: React.FormEvent) => {
+  const thread = messages.filter((message) => message.teacherId === teacherId);
+  const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!scheduledAt) return setValidation('Choose a date and time.');
-    if (new Date(scheduledAt).getTime() < Date.now() + 24 * 60 * 60 * 1000) return setValidation('Appointments must be requested at least 24 hours in advance.');
-    setValidation('The request is valid, but appointment persistence is not implemented by the API yet.');
+    if (!teacherId || !text.trim()) return;
+    setSubmitting(true); setStatus('');
+    try { await sendParentMessage({ studentId: child.id, receiverId: teacherId, messageText: text }); setText(''); setStatus('Message sent.'); refresh(); }
+    catch (error) { setStatus(errorMessage(error)); } finally { setSubmitting(false); }
   };
-  return <div className="parent-view"><section className="parent-card"><SectionHeader title="Appointment history" description={`Requests and linked negotiations for ${child.name}.`} />{records.length ? <div className="parent-appointment-list">{records.map((appointment) => <article key={appointment.id}><div><ParentStatus label={appointment.state} tone={toneForAppointment(appointment.state)} iconName={appointment.state === 'Alternative proposed' ? 'swap_horiz' : 'event'} /><h3>{appointment.teacher}</h3><p>{appointment.subject} · {appointment.group ? 'Group meeting' : 'Individual appointment'}</p></div><dl><div><dt>Requested</dt><dd>{appointment.requestedTime}</dd></div>{appointment.alternativeTime ? <div><dt>Alternative</dt><dd>{appointment.alternativeTime}</dd></div> : null}</dl></article>)}</div> : <EmptyState title="No appointments" message="New requests will appear here." iconName="event" />}</section><section className="parent-card"><SectionHeader title="Request an appointment" description="Default booking window: 24 hours in advance." /><form className="parent-form" onSubmit={handleSubmit}><label>Teacher<select>{teachers.map((teacher) => <option key={teacher.id}>{teacher.name} · {teacher.subject}</option>)}</select></label><label>Meeting type<select><option>Individual</option><option>Group — all participants must approve</option></select></label><label>Date and time<input type="datetime-local" value={scheduledAt} onChange={(event) => { setScheduledAt(event.target.value); setValidation(''); }} /></label><label>Reason<textarea placeholder={`What would you like to discuss about ${child.name}?`} /></label>{validation ? <p className={validation.startsWith('The request') ? 'parent-form__notice' : 'parent-form__error'} role="alert">{validation}</p> : null}<button className="parent-primary-button" type="submit">{icon('event_upcoming')}Validate request</button></form></section><UnavailableState title="Appointment writes are not connected" message="Request, response, alternative-time negotiation, group approval, and notification persistence currently return 501." /></div>;
+  return <div className="parent-view"><div className="parent-privacy-note">{icon('shield')}<span><strong>Privacy scoped to {child.name}.</strong> Only assigned teachers are available; sibling threads stay separate.</span></div><div className="parent-message-layout"><aside className="parent-card parent-teacher-list"><SectionHeader title="Assigned teachers" description={`${teachers.length} eligible contact${teachers.length === 1 ? '' : 's'}`} />{teachers.length ? teachers.map((teacher) => <button key={teacher.id} type="button" className={teacher.id === teacherId ? 'is-active' : ''} aria-pressed={teacher.id === teacherId} onClick={() => setTeacherId(teacher.id)}><span>{teacher.initials}</span><span><strong>{teacher.name}</strong><small>{teacher.subject}</small></span>{icon('chevron_right')}</button>) : <EmptyState title="No assigned teachers" message="Teacher contacts appear after class assignment." iconName="person_off" />}</aside><section className="parent-card parent-thread"><SectionHeader title={selected?.name ?? 'Conversation'} description={selected ? `${selected.subject} · regarding ${child.name}` : undefined} />{thread.length ? <div className="parent-message-list">{thread.map((message) => <article key={message.id} className={message.sender === 'Parent' ? 'is-parent' : ''}><strong>{message.sender === 'Parent' ? 'You' : selected?.name}</strong><p>{message.text}</p><small>{message.time}</small></article>)}</div> : <EmptyState title="No messages yet" message="Messages remain in this child-and-teacher thread." iconName="forum" />}<form className="parent-composer" onSubmit={(event) => void submit(event)}><label htmlFor="parent-message">Message about {child.name}</label><textarea id="parent-message" value={text} maxLength={4000} disabled={!teacherId || submitting} onChange={(event) => setText(event.target.value)} placeholder={teacherId ? 'Write a private message…' : 'No eligible teacher selected'} />{status ? <p className={status === 'Message sent.' ? 'parent-form__notice' : 'parent-form__error'} role="status">{status}</p> : null}<button type="submit" disabled={!teacherId || !text.trim() || submitting} aria-busy={submitting}>{icon('send')}{submitting ? 'Sending…' : 'Send message'}</button></form></section></div></div>;
 }
 
-function LeaveView({ child }: { child: ParentChild }) {
-  const records = parentLeaves.filter((leave) => leave.childId === child.id);
-  const [message, setMessage] = useState('');
-  return <div className="parent-view"><section className="parent-card"><SectionHeader title="Leave history" description={`Planned leave and emergency departures for ${child.name}.`} />{records.length ? <div className="parent-leave-list">{records.map((leave) => <article key={leave.id} className={leave.state === 'Emergency departure' ? 'is-urgent' : ''}><ParentStatus label={leave.state} tone={toneForLeave(leave.state)} iconName={leave.state === 'Emergency departure' ? 'emergency' : 'event_available'} /><div><h3>{leave.reason}</h3><p>{leave.dates}</p><small>{leave.detail}</small></div></article>)}</div> : <EmptyState title="No leave records" message="Submitted and branch-recorded leave will appear here." iconName="event_available" />}</section><section className="parent-card"><SectionHeader title="Apply for planned leave" description="Branch Admin and assigned teachers will be notified." /><form className="parent-form" onSubmit={(event) => { event.preventDefault(); setMessage('Parent-to-child leave submission is not safely supported by the current API contract.'); }}><div className="parent-form-grid"><label>Start date<input type="date" required /></label><label>End date<input type="date" required /></label></div><label>Reason<select><option>Medical</option><option>Family event</option><option>Travel</option><option>Other</option></select></label><label>Details<textarea required placeholder={`Explain why ${child.name} needs leave.`} /></label>{message ? <p className="parent-form__error" role="alert">{message}</p> : null}<button className="parent-primary-button" type="submit">{icon('send')}Validate leave request</button></form></section><div className="parent-info-note">{icon('fact_check')}<span>Once approved, attendance for the covered date is automatically shown as Absent (Excused).</span></div></div>;
+function AppointmentsView({ child, refresh }: { child: ParentChild; refresh: () => void }) {
+  const { appointments, bookingWindowHours, teachers } = useParentData();
+  const [teacherId, setTeacherId] = useState(teachers[0]?.id ?? '');
+  const [scheduledAt, setScheduledAt] = useState('');
+  const [remarks, setRemarks] = useState('');
+  const [isGroup, setIsGroup] = useState(false);
+  const [status, setStatus] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  useEffect(() => setTeacherId(teachers[0]?.id ?? ''), [child.id, teachers]);
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault(); setStatus('');
+    if (!scheduledAt) return setStatus('Choose a date and time.');
+    if (new Date(scheduledAt).getTime() < Date.now() + bookingWindowHours * 3600000) return setStatus(`Appointments must be requested at least ${bookingWindowHours} hours in advance.`);
+    setSubmitting(true);
+    try { await requestAppointment({ studentId: child.id, teacherId, scheduledTime: new Date(scheduledAt).toISOString(), remarks, isGroup }); setStatus('Appointment requested.'); setScheduledAt(''); setRemarks(''); refresh(); }
+    catch (error) { setStatus(errorMessage(error)); } finally { setSubmitting(false); }
+  };
+  return <div className="parent-view"><section className="parent-card"><SectionHeader title="Appointment history" description={`Requests and linked negotiations for ${child.name}.`} />{appointments.length ? <div className="parent-appointment-list">{appointments.map((appointment) => <article key={appointment.id}><div><ParentStatus label={appointment.state} tone={toneForAppointment(appointment.state)} iconName={appointment.state === 'Alternative proposed' ? 'swap_horiz' : 'event'} /><h3>{appointment.teacher}</h3><p>{appointment.subject} · {appointment.group ? 'Group meeting' : 'Individual appointment'}</p></div><dl><div><dt>Requested</dt><dd>{appointment.requestedTime}</dd></div>{appointment.alternativeTime ? <div><dt>Alternative</dt><dd>{appointment.alternativeTime}</dd></div> : null}</dl></article>)}</div> : <EmptyState title="No appointments" message="New requests will appear here." iconName="event" />}</section><section className="parent-card"><SectionHeader title="Request an appointment" description={`${bookingWindowHours}-hour minimum booking window.`} /><form className="parent-form" onSubmit={(event) => void submit(event)}><label>Teacher<select value={teacherId} onChange={(event) => setTeacherId(event.target.value)} required>{teachers.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.name} · {teacher.subject}</option>)}</select></label><label>Meeting type<select value={isGroup ? 'group' : 'individual'} onChange={(event) => setIsGroup(event.target.value === 'group')}><option value="individual">Individual</option><option value="group">Group — all invited teachers must approve</option></select></label><label>Date and time<input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} required /></label><label>Reason<textarea value={remarks} onChange={(event) => setRemarks(event.target.value)} required placeholder={`What would you like to discuss about ${child.name}?`} /></label>{status ? <p className={status === 'Appointment requested.' ? 'parent-form__notice' : 'parent-form__error'} role="status">{status}</p> : null}<button className="parent-primary-button" type="submit" disabled={!teachers.length || submitting} aria-busy={submitting}>{icon('event_upcoming')}{submitting ? 'Requesting…' : 'Request appointment'}</button></form></section></div>;
+}
+
+function LeaveView({ child, refresh }: { child: ParentChild; refresh: () => void }) {
+  const { leaves } = useParentData();
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [reason, setReason] = useState('');
+  const [details, setDetails] = useState('');
+  const [status, setStatus] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!child.branchId) return setStatus('This child has no active branch assignment.');
+    if (new Date(endDate) < new Date(startDate)) return setStatus('End date cannot be before start date.');
+    setSubmitting(true); setStatus('');
+    try { await requestStudentLeave({ studentId: child.id, branchId: child.branchId, leaveType: reason === 'Medical' ? 'SICK' : 'CASUAL', startDate, endDate, reason: `${reason}: ${details}` }); setStatus('Leave request submitted.'); setStartDate(''); setEndDate(''); setReason(''); setDetails(''); refresh(); }
+    catch (error) { setStatus(errorMessage(error)); } finally { setSubmitting(false); }
+  };
+  return <div className="parent-view"><section className="parent-card"><SectionHeader title="Leave history" description={`Planned leave and emergency departures for ${child.name}.`} />{leaves.length ? <div className="parent-leave-list">{leaves.map((leave) => <article key={leave.id} className={leave.state === 'Emergency departure' ? 'is-urgent' : ''}><ParentStatus label={leave.state} tone={toneForLeave(leave.state)} iconName={leave.state === 'Emergency departure' ? 'emergency' : 'event_available'} /><div><h3>{leave.reason}</h3><p>{leave.dates}</p><small>{leave.detail}</small></div></article>)}</div> : <EmptyState title="No leave records" message="Submitted and branch-recorded leave will appear here." iconName="event_available" />}</section><section className="parent-card"><SectionHeader title="Apply for planned leave" description="Branch Admin and assigned teachers are notified." /><form className="parent-form" onSubmit={(event) => void submit(event)}><div className="parent-form-grid"><label>Start date<input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} required /></label><label>End date<input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} required /></label></div><label>Reason<select value={reason} onChange={(event) => setReason(event.target.value)} required><option value="">Choose a reason</option><option>Medical</option><option>Family event</option><option>Travel</option><option>Other</option></select></label><label>Details<textarea value={details} onChange={(event) => setDetails(event.target.value)} required placeholder={`Explain why ${child.name} needs leave.`} /></label>{status ? <p className={status === 'Leave request submitted.' ? 'parent-form__notice' : 'parent-form__error'} role="status">{status}</p> : null}<button className="parent-primary-button" type="submit" disabled={submitting} aria-busy={submitting}>{icon('send')}{submitting ? 'Submitting…' : 'Submit leave request'}</button></form></section><div className="parent-info-note">{icon('fact_check')}<span>Once approved, covered attendance is automatically recorded as Absent (Excused).</span></div></div>;
 }
 
 function PaymentDialog({ invoice, child, onClose }: { invoice: ParentInvoice; child: ParentChild; onClose: () => void }) {
   const dialogRef = useRef<HTMLElement>(null);
+  const [image, setImage] = useState('');
+  const [error, setError] = useState('');
   useEffect(() => {
-    const dialog = dialogRef.current;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    dialog?.querySelector<HTMLElement>('button')?.focus();
+    dialogRef.current?.querySelector<HTMLElement>('button')?.focus();
+    void loadParentNepalPayQr(invoice.id).then((payload) => QRCode.toDataURL(payload.qrString, { width: 360, margin: 2, color: { dark: '#002D72', light: '#FFFFFF' } })).then(setImage).catch((reason) => setError(errorMessage(reason)));
     return () => { document.body.style.overflow = previousOverflow; };
-  }, []);
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
-    if (event.key === 'Escape') return onClose();
+  }, [invoice.id]);
+  const keyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Escape') onClose();
     if (event.key !== 'Tab') return;
     const focusable = dialogRef.current?.querySelectorAll<HTMLElement>('button, [href], [tabindex]:not([tabindex="-1"])');
     if (!focusable?.length) return;
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
+    const first = focusable[0]; const last = focusable[focusable.length - 1];
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
     if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   };
-  return <div className="parent-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section ref={dialogRef} tabIndex={-1} onKeyDown={handleKeyDown} role="dialog" aria-modal="true" aria-labelledby="parent-qr-title" aria-describedby="parent-qr-description" className="parent-modal"><button type="button" className="parent-modal__close" aria-label="Close Nepal Pay QR" onClick={onClose}>{icon('close')}</button><span className="parent-eyebrow">NEPAL PAY · {child.name}</span><h2 id="parent-qr-title">Scan to pay {money(invoiceTotal(invoice))}</h2><p>{invoice.cycle} · {invoice.reference}</p><div className="parent-qr" aria-label="Nepal Pay QR placeholder">{icon('qr_code_2')}</div><small id="parent-qr-description">Verify the child, invoice reference, merchant, and amount before confirming payment.</small><button type="button" className="parent-primary-button" onClick={onClose}>Done</button></section></div>;
+  return <div className="parent-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section ref={dialogRef} tabIndex={-1} onKeyDown={keyDown} role="dialog" aria-modal="true" aria-labelledby="parent-qr-title" className="parent-modal"><button type="button" className="parent-modal__close" aria-label="Close Nepal Pay QR" onClick={onClose}>{icon('close')}</button><span className="parent-eyebrow">NEPAL PAY · {child.name}</span><h2 id="parent-qr-title">Scan to pay {money(invoiceTotal(invoice))}</h2><p>{invoice.cycle} · {invoice.reference}</p>{error ? <div className="parent-form__error" role="alert">{error}</div> : image ? <div className="parent-qr"><img src={image} width="360" height="360" alt={`Nepal Pay QR for ${child.name}, invoice ${invoice.id}`} /></div> : <div className="parent-qr" aria-busy="true" aria-label="Generating Nepal Pay QR" />}<small>Verify the child, merchant, invoice, and amount before confirming.</small><button type="button" className="parent-primary-button" onClick={onClose}>Done</button></section></div>;
 }
-
 function FeesView({ child }: { child: ParentChild }) {
-  const invoices = parentInvoices.filter((invoice) => invoice.childId === child.id);
+  const { invoices } = useParentData();
   const current = invoices.find((invoice) => invoice.state !== 'Paid') ?? invoices[0];
   const [selected, setSelected] = useState<ParentInvoice | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const closeDialog = () => { setSelected(null); window.setTimeout(() => triggerRef.current?.focus(), 0); };
-  if (!current) return <EmptyState title="No invoices" message="Billing cycles will appear here when issued." iconName="payments" />;
-  return <div className="parent-view"><section className="parent-fee-hero"><div><ParentStatus label={child.blocked ? 'Blocked' : current.state} tone={child.blocked ? 'gold' : toneForInvoice(current.state)} iconName={child.blocked ? 'lock' : 'payments'} /><span>Current payable for {child.name}</span><strong>{money(invoiceTotal(current))}</strong><p>{current.cycle} · Due {current.dueDate}</p></div><button ref={triggerRef} type="button" onClick={() => setSelected(current)}>{icon('qr_code_2')}Show Nepal Pay QR</button></section><section className="parent-card"><SectionHeader title="Payment calendar" description={`Every billing cycle belongs only to ${child.name}.`} /><div className="parent-payment-calendar">{invoices.map((invoice) => <article key={invoice.id} className={`is-${toneForInvoice(invoice.state)}`}><div><strong>{invoice.cycle}</strong><span>Due {invoice.dueDate}</span></div><ParentStatus label={invoice.state} tone={toneForInvoice(invoice.state)} iconName={invoice.state === 'Paid' ? 'check_circle' : invoice.state === 'Overdue' ? 'error' : 'schedule'} /><b>{money(invoiceTotal(invoice))}</b>{invoice.state !== 'Paid' ? <button type="button" onClick={() => setSelected(invoice)}>Open QR</button> : null}</article>)}</div></section><div className="parent-fees-layout"><section className="parent-card"><SectionHeader title={`${current.cycle} invoice`} description="Itemized current billing-cycle breakdown." /><div className="parent-invoice-lines">{current.lines.map((line) => <div key={line.label}><span>{line.label}</span><strong className={line.amount < 0 ? 'is-discount' : ''}>{line.amount < 0 ? '−' : ''}{money(line.amount)}</strong></div>)}<div className="parent-invoice-total"><span>Net payable</span><strong>{money(invoiceTotal(current))}</strong></div></div></section><aside className="parent-card parent-payment-help">{icon('verified_user')}<h3>Before you pay</h3><p>Confirm the selected child and exact invoice details in your payment app.</p><dl><div><dt>Child</dt><dd>{child.name}</dd></div><div><dt>Reference</dt><dd>{current.reference}</dd></div></dl></aside></div>{selected ? <PaymentDialog invoice={selected} child={child} onClose={closeDialog} /> : null}</div>;
+  if (!current) return <div className="parent-view"><section className="parent-card"><EmptyState title="No invoices" message="Billing cycles will appear when issued." iconName="payments" /></section></div>;
+  return <div className="parent-view"><section className="parent-fee-hero"><div><ParentStatus label={child.blocked ? 'Blocked' : current.state} tone={child.blocked ? 'gold' : toneForInvoice(current.state)} iconName={child.blocked ? 'lock' : 'payments'} /><span>Current payable for {child.name}</span><strong>{money(invoiceTotal(current))}</strong><p>{current.cycle} · Due {current.dueDate}</p></div><button ref={triggerRef} type="button" disabled={!current.qrAvailable} onClick={() => setSelected(current)}>{icon('qr_code_2')}{current.qrAvailable ? 'Show Nepal Pay QR' : 'Already paid'}</button></section><section className="parent-card"><SectionHeader title="Payment calendar" description={`Every billing cycle belongs only to ${child.name}.`} /><div className="parent-payment-calendar">{invoices.map((invoice) => <article key={invoice.id} className={`is-${toneForInvoice(invoice.state)}`}><div><strong>{invoice.cycle}</strong><span>Due {invoice.dueDate}</span></div><ParentStatus label={invoice.state} tone={toneForInvoice(invoice.state)} iconName={invoice.state === 'Paid' ? 'check_circle' : invoice.state === 'Overdue' ? 'error' : 'schedule'} /><b>{money(invoiceTotal(invoice))}</b>{invoice.qrAvailable ? <button type="button" onClick={() => setSelected(invoice)}>Open QR</button> : null}</article>)}</div></section><div className="parent-fees-layout"><section className="parent-card"><SectionHeader title={`${current.cycle} invoice`} description="Itemized current billing-cycle breakdown." /><div className="parent-invoice-lines">{current.lines.map((line) => <div key={line.label}><span>{line.label}</span><strong className={line.amount < 0 ? 'is-discount' : ''}>{line.amount < 0 ? '−' : ''}{money(line.amount)}</strong></div>)}<div className="parent-invoice-total"><span>Net payable</span><strong>{money(invoiceTotal(current))}</strong></div></div></section><aside className="parent-card parent-payment-help">{icon('verified_user')}<h3>Before you pay</h3><p>Confirm the selected child and exact invoice details.</p><dl><div><dt>Child</dt><dd>{child.name}</dd></div><div><dt>Reference</dt><dd>{current.reference}</dd></div></dl></aside></div>{selected ? <PaymentDialog invoice={selected} child={child} onClose={() => { setSelected(null); window.setTimeout(() => triggerRef.current?.focus(), 0); }} /> : null}</div>;
 }
-
 function CertificatesView({ child }: { child: ParentChild }) {
-  const certificates = parentCertificates.filter((certificate) => certificate.childId === child.id);
-  return <div className="parent-view"><div className="parent-privacy-note">{icon('verified')}<span><strong>Certificates remain available.</strong> Issued documents do not expire from {child.name}’s history.</span></div><section className="parent-card"><SectionHeader title="Certificate history" description={`${certificates.length} issued documents for ${child.name}`} />{certificates.length ? <div className="parent-certificate-list">{certificates.map((certificate) => <article key={certificate.id}><span className="parent-icon-box">{icon('workspace_premium')}</span><div><h3>{certificate.title}</h3><p>{certificate.course} · Issued {certificate.issuedDate}</p><small>{certificate.id}</small></div><button type="button" disabled title="Certificate download API is not available">{icon('download')}Download unavailable</button></article>)}</div> : <EmptyState title="No certificates issued" message="New documents will remain here after issuance." iconName="workspace_premium" />}</section><UnavailableState title="Certificate download is not connected" message="The API supports issuance and public verification, but no authenticated parent PDF-history/download contract is available." /></div>;
+  const { certificates } = useParentData();
+  return <div className="parent-view"><div className="parent-privacy-note">{icon('verified')}<span><strong>Certificates remain available.</strong> Issued documents do not expire from {child.name}’s history.</span></div><section className="parent-card"><SectionHeader title="Certificate history" description={`${certificates.length} issued document${certificates.length === 1 ? '' : 's'} for ${child.name}`} />{certificates.length ? <div className="parent-certificate-list">{certificates.map((certificate) => <article key={certificate.id}><span className="parent-icon-box">{icon('workspace_premium')}</span><div><h3>{certificate.title}</h3><p>{certificate.course} · Issued {certificate.issuedDate}</p><small>{certificate.id}</small></div>{certificate.pdfUrl ? <a className="parent-text-button" href={parentFileUrl(certificate.pdfUrl)}>{icon('download')}Download PDF</a> : <button type="button" disabled>PDF unavailable</button>}</article>)}</div> : <EmptyState title="No certificates issued" message="New documents remain here after issuance." iconName="workspace_premium" />}</section></div>;
 }
-
 function CalendarView({ child }: { child: ParentChild }) {
-  const events = parentEvents.filter((event) => event.childId === child.id);
-  return <div className="parent-view"><section className="parent-card"><SectionHeader title={`${child.name}’s upcoming events`} description="This calendar never combines dates from another linked child." />{events.length ? <div className="parent-calendar-list">{events.map((event) => <article key={event.id}><div><strong>{event.day}</strong><span>{event.month}</span></div><div><ParentStatus label={event.kind} tone={event.kind === 'Holiday' ? 'success' : event.kind === 'Exam' ? 'error' : event.kind === 'Fee due' ? 'warning' : 'info'} iconName="event" /><h3>{event.title}</h3><p>{event.details}</p></div><time>{event.date}</time></article>)}</div> : <EmptyState title="No upcoming events" message="Published academic and fee dates will appear here." iconName="date_range" />}</section></div>;
+  const { events } = useParentData();
+  return <div className="parent-view"><section className="parent-card"><SectionHeader title={`${child.name}’s upcoming events`} description="This calendar never combines dates from another child." />{events.length ? <div className="parent-calendar-list">{events.map((event) => <article key={event.id}><div><strong>{event.day}</strong><span>{event.month}</span></div><div><ParentStatus label={event.kind} tone={event.kind === 'Holiday' ? 'success' : event.kind === 'Exam' ? 'error' : event.kind === 'Fee due' ? 'warning' : 'info'} iconName="event" /><h3>{event.title}</h3><p>{event.details}</p></div><time>{event.date}</time></article>)}</div> : <EmptyState title="No upcoming events" message="Published academic and fee dates will appear here." iconName="date_range" />}</section></div>;
 }
-
-function NotificationsView({ child, go }: { child: ParentChild; go: (view: ParentView) => void }) {
-  const notices = useMemo(() => parentNotifications.filter((notice) => notice.childId === child.id), [child.id]);
-  const [readIds, setReadIds] = useState(() => new Set(notices.filter((notice) => !notice.unread).map((notice) => notice.id)));
-  useEffect(() => setReadIds(new Set(notices.filter((notice) => !notice.unread).map((notice) => notice.id))), [child.id, notices]);
-  return <div className="parent-view"><div className="parent-notification-actions"><p>SMS is reserved for configured attendance summaries, fee events, appointments, and urgent notices.</p><button type="button" onClick={() => setReadIds(new Set(notices.map((notice) => notice.id)))}>Mark all as read</button></div>{notices.length ? <section className="parent-card parent-notification-list">{notices.map((notice) => <button type="button" key={notice.id} className={`${readIds.has(notice.id) ? '' : 'is-unread'} ${notice.urgent ? 'is-urgent' : ''}`} onClick={() => { setReadIds((current) => new Set(current).add(notice.id)); go(notice.destination); }}><i aria-hidden="true" /><span className="parent-icon-box">{icon(notice.icon)}</span><span><strong>{notice.title}</strong><small>{notice.message}</small><time>{notice.time}</time><span className="parent-channel-row">{notice.channels.map((channel) => <b key={channel}>{channel}</b>)}</span></span>{icon('chevron_right')}</button>)}</section> : <EmptyState title="All caught up" message={`No notifications for ${child.name}.`} iconName="notifications" />}</div>;
+function NotificationsView({ child, go, readIds, storeRead }: { child: ParentChild; go: (view: ParentView) => void; readIds: Set<string>; storeRead: (ids: Set<string>) => void }) {
+  const { notifications } = useParentData();
+  return <div className="parent-view"><div className="parent-notification-actions"><p>SMS is reserved for fee, appointment, attendance-summary, and urgent events.</p><button type="button" disabled={!notifications.length} onClick={() => storeRead(new Set(notifications.map((notice) => notice.id)))}>Mark all as read</button></div>{notifications.length ? <section className="parent-card parent-notification-list">{notifications.map((notice) => <button type="button" key={notice.id} className={`${readIds.has(notice.id) ? '' : 'is-unread'} ${notice.urgent ? 'is-urgent' : ''}`} onClick={() => { storeRead(new Set(readIds).add(notice.id)); go(notice.destination); }}><i aria-hidden="true" /><span className="parent-icon-box">{icon(notice.icon)}</span><span><strong>{notice.title}</strong><small>{notice.message}</small><time dateTime={notice.occurredAt}>{notice.time}</time><span className="parent-channel-row">{notice.channels.map((channel) => <b key={channel}>{channel}</b>)}</span></span>{icon('chevron_right')}</button>)}</section> : <EmptyState title="All caught up" message={`No notifications for ${child.name}.`} iconName="notifications" />}</div>;
 }
 
 export function ParentStudentPortal() {
   const location = useLocation();
   const navigate = useNavigate();
+  const [data, setData] = useState<ParentPortalDataset | null>(null);
+  const [loadError, setLoadError] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
+  const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const view = useMemo<ParentView>(() => {
     const segment = location.pathname.split('/').filter(Boolean).at(-1);
     return segment && segment in VIEW_COPY ? segment as ParentView : 'home';
   }, [location.pathname]);
-  const childId = useMemo(() => new URLSearchParams(location.search).get('child') ?? parentChildren[0]?.id ?? '', [location.search]);
-  const activeChild = parentChildren.find((child) => child.id === childId) ?? parentChildren[0];
+  const requestedChildId = useMemo(() => new URLSearchParams(location.search).get('child') ?? undefined, [location.search]);
+  useEffect(() => {
+    let cancelled = false;
+    setLoadError('');
+    void loadParentPortal(requestedChildId).then((result) => { if (!cancelled) setData(result); }).catch((error) => { if (!cancelled) setLoadError(errorMessage(error)); });
+    return () => { cancelled = true; };
+  }, [location.pathname, requestedChildId, reloadKey]);
+  const activeChildId = data?.selected?.id;
+  useEffect(() => {
+    if (!activeChildId) return;
+    try { setReadIds(new Set(JSON.parse(localStorage.getItem(`tms_parent_read_notifications:${activeChildId}`) || '[]'))); }
+    catch { setReadIds(new Set()); }
+  }, [activeChildId]);
+  if (loadError) return <div className="parent-portal"><div className="parent-unavailable" role="alert">{icon('cloud_off')}<div><strong>Couldn’t load the parent portal</strong><p>{loadError}</p><button type="button" onClick={() => setReloadKey((value) => value + 1)}>Try again</button></div></div></div>;
+  if (!data) return <div className="parent-portal parent-loading" aria-busy="true" aria-label="Loading parent portal"><div /><div /><div /></div>;
+  if (!data.selected) return <div className="parent-portal"><EmptyState title="No linked students" message="Ask the institution to link your child to this parent account." iconName="family_restroom" /></div>;
+  const child = data.selected;
   const [title, subtitle] = VIEW_COPY[view];
-  if (!activeChild) return <EmptyState title="No linked students" message="Ask the institution to link your child to this parent account." iconName="family_restroom" />;
-  const go = (next: ParentView) => navigate(`/parent/${next}?child=${activeChild.id}`);
-  const selectChild = (nextChildId: string) => navigate(`${location.pathname}?child=${nextChildId}`, { replace: true });
-  const unread = parentNotifications.filter((notice) => notice.childId === activeChild.id && notice.unread).length;
-  const content = view === 'home' ? <DashboardView child={activeChild} go={go} />
-    : view === 'timetable' ? <TimetableView child={activeChild} />
-      : view === 'attendance' ? <AttendanceView child={activeChild} />
-        : view === 'performance' ? <PerformanceView child={activeChild} />
-          : view === 'messages' ? <MessagesView child={activeChild} />
-            : view === 'appointments' ? <AppointmentsView child={activeChild} />
-              : view === 'leave' ? <LeaveView child={activeChild} />
-                : view === 'fees' ? <FeesView child={activeChild} />
-                  : view === 'certificates' ? <CertificatesView child={activeChild} />
-                    : view === 'calendar' ? <CalendarView child={activeChild} />
-                      : <NotificationsView child={activeChild} go={go} />;
-  return <div className="parent-portal"><ChildSwitcher activeChild={activeChild} onSelect={selectChild} /><header className="parent-page-header"><div><span className="parent-eyebrow">PARENT PORTAL · {activeChild.name.toUpperCase()}</span><h1>{title}</h1><p>{subtitle}</p></div><button type="button" className="parent-notification-button" aria-label={`${unread} unread notifications for ${activeChild.name}`} onClick={() => go('notifications')}>{icon('notifications')}<span>{unread}</span></button></header><ChildContext child={activeChild} />{content}</div>;
+  const go = (next: ParentView) => navigate(`/parent/${next}?child=${child.id}`);
+  const refresh = () => setReloadKey((value) => value + 1);
+  const storeRead = (ids: Set<string>) => { setReadIds(ids); localStorage.setItem(`tms_parent_read_notifications:${child.id}`, JSON.stringify([...ids])); };
+  const unread = data.notifications.filter((notice) => notice.unread && !readIds.has(notice.id)).length;
+  const content = view === 'home' ? <DashboardView child={child} go={go} />
+    : view === 'timetable' ? <TimetableView child={child} />
+      : view === 'attendance' ? <AttendanceView child={child} />
+        : view === 'performance' ? <PerformanceView child={child} />
+          : view === 'messages' ? <MessagesView child={child} refresh={refresh} />
+            : view === 'appointments' ? <AppointmentsView child={child} refresh={refresh} />
+              : view === 'leave' ? <LeaveView child={child} refresh={refresh} />
+                : view === 'fees' ? <FeesView child={child} />
+                  : view === 'certificates' ? <CertificatesView child={child} />
+                    : view === 'calendar' ? <CalendarView child={child} />
+                      : <NotificationsView child={child} go={go} readIds={readIds} storeRead={storeRead} />;
+  return <ParentDataContext.Provider value={data}><div className="parent-portal"><ChildSwitcher children={data.children} activeChild={child} onSelect={(id) => navigate(`${location.pathname}?child=${id}`, { replace: true })} /><header className="parent-page-header"><div><span className="parent-eyebrow">PARENT PORTAL · {child.name.toUpperCase()}</span><h1>{title}</h1><p>{subtitle}</p><span className="parent-sync" role="status">{icon('cloud_done')}Loaded · {new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div><button type="button" className="parent-notification-button" aria-label={`${unread} unread notifications for ${child.name}`} onClick={() => go('notifications')}>{icon('notifications')}<span>{unread}</span></button></header><ChildContext child={child} />{content}</div></ParentDataContext.Provider>;
 }

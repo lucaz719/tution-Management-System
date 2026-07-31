@@ -27,6 +27,7 @@ export interface ParentChild {
   blocked: boolean;
   attendanceRate: number;
   outstanding: number;
+  branchId?: string;
 }
 
 export interface ParentSession {
@@ -104,6 +105,8 @@ export interface ParentInvoice {
   dueDate: string;
   state: InvoiceState;
   reference: string;
+  netPayable: number;
+  qrAvailable: boolean;
   lines: Array<{ label: string; amount: number }>;
 }
 
@@ -114,6 +117,7 @@ export interface ParentCertificate {
   course: string;
   issuedDate: string;
   fileName: string;
+  pdfUrl?: string;
 }
 
 export interface ParentEvent {
@@ -138,4 +142,34 @@ export interface ParentNotification {
   channels: Array<'Push' | 'SMS'>;
   urgent: boolean;
   unread: boolean;
+  occurredAt: string;
+}
+
+export interface ParentPortalDataset {
+  generatedAt: string;
+  bookingWindowHours: number;
+  children: ParentChild[];
+  selected: ParentChild | null;
+  sessions: ParentSession[];
+  attendance: ParentAttendance[];
+  remarks: ParentRemark[];
+  teachers: ParentTeacher[];
+  messages: ParentMessage[];
+  appointments: ParentAppointment[];
+  leaves: ParentLeave[];
+  invoices: ParentInvoice[];
+  certificates: ParentCertificate[];
+  events: ParentEvent[];
+  notifications: ParentNotification[];
+}
+
+export interface NepalPayPayload {
+  invoiceId: string;
+  merchantName: string;
+  merchantCity: string;
+  amount: number;
+  currency: string;
+  currencyCode: string;
+  studentName: string;
+  qrString: string;
 }

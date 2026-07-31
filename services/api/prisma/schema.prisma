@@ -101,6 +101,21 @@ enum LeaveStatus {
   REJECTED
 }
 
+enum AppointmentStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  ALTERNATIVE_PROPOSED
+  CONFIRMED
+  CANCELLED
+}
+
+enum PerformanceSignal {
+  IMPROVING
+  STABLE
+  NEEDS_SUPPORT
+}
+
 enum PettyCashStatus {
   PENDING
   APPROVED_LEVEL1
@@ -167,6 +182,10 @@ model Tenant {
   refunds                   RefundRequest[]
   paymentAttempts           PaymentAttempt[]
   policyVersions            TenantPolicyVersion[]
+  parentMessages            ParentMessage[]
+  appointments              Appointment[]
+  studentRemarks            StudentRemark[]
+  studentScores             StudentScore[]
 }
 
 // 2. Branch / Center
@@ -210,25 +229,31 @@ model Role {
 
 // 4. Core User Accounts
 model User {
-  id                String              @id @default(uuid())
-  tenantId          String
-  tenant            Tenant              @relation(fields: [tenantId], references: [id])
-  email             String              @unique
-  passwordHash      String
-  firstName         String
-  lastName          String
-  phone             String
-  status            UserStatus          @default(ACTIVE)
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-  userRoles         UserRole[]
-  staffRecord       StaffRecord?
-  student           Student?
-  parent            Parent?
-  leaves            Leave[]
-  teacherAttendance TeacherAttendance[]
-  teacherSessions   TeacherSession[]
-  assignedClasses   Class[]             @relation("AssignedClasses")
+  id                     String              @id @default(uuid())
+  tenantId               String
+  tenant                 Tenant              @relation(fields: [tenantId], references: [id])
+  email                  String              @unique
+  passwordHash           String
+  firstName              String
+  lastName               String
+  phone                  String
+  status                 UserStatus          @default(ACTIVE)
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+  userRoles              UserRole[]
+  staffRecord            StaffRecord?
+  student                Student?
+  parent                 Parent?
+  leaves                 Leave[]
+  teacherAttendance      TeacherAttendance[]
+  teacherSessions        TeacherSession[]
+  assignedClasses        Class[]             @relation("AssignedClasses")
+  sentParentMessages     ParentMessage[]     @relation("ParentMessageSender")
+  receivedParentMessages ParentMessage[]     @relation("ParentMessageReceiver")
+  requestedAppointments  Appointment[]       @relation("AppointmentRequester")
+  teacherAppointments    Appointment[]       @relation("AppointmentTeacher")
+  authoredStudentRemarks StudentRemark[]     @relation("StudentRemarkAuthor")
+  recordedStudentScores  StudentScore[]      @relation("StudentScoreRecorder")
 
   // Better Auth support
   name             String
@@ -313,6 +338,90 @@ model Student {
   canteenWallet       CanteenWallet?
   vehicleAssignment   StudentVehicle?
   refunds             RefundRequest[]
+  parentMessages      ParentMessage[]
+  appointments        Appointment[]
+  remarks             StudentRemark[]
+  scores              StudentScore[]
+}
+
+model ParentMessage {
+  id          String    @id @default(uuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  studentId   String
+  student     Student   @relation(fields: [studentId], references: [id])
+  senderId    String
+  sender      User      @relation("ParentMessageSender", fields: [senderId], references: [id])
+  receiverId  String
+  receiver    User      @relation("ParentMessageReceiver", fields: [receiverId], references: [id])
+  messageText String
+  createdAt   DateTime  @default(now())
+  readAt      DateTime?
+
+  @@index([tenantId, studentId, senderId, receiverId, createdAt])
+}
+
+model Appointment {
+  id                    String            @id @default(uuid())
+  tenantId              String
+  tenant                Tenant            @relation(fields: [tenantId], references: [id])
+  studentId             String
+  student               Student           @relation(fields: [studentId], references: [id])
+  requestedById         String
+  requestedBy           User              @relation("AppointmentRequester", fields: [requestedById], references: [id])
+  teacherId             String
+  teacher               User              @relation("AppointmentTeacher", fields: [teacherId], references: [id])
+  scheduledTime         DateTime
+  alternativeTime       DateTime?
+  originalAppointmentId String?
+  status                AppointmentStatus @default(REQUESTED)
+  isGroup               Boolean           @default(false)
+  participantIds        Json?
+  participantApprovals  Json?
+  remarks               String?
+  responseRemarks       String?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@index([tenantId, studentId, scheduledTime])
+  @@index([teacherId, status, scheduledTime])
+  @@index([originalAppointmentId])
+}
+
+model StudentRemark {
+  id            String            @id @default(uuid())
+  tenantId      String
+  tenant        Tenant            @relation(fields: [tenantId], references: [id])
+  studentId     String
+  student       Student           @relation(fields: [studentId], references: [id])
+  authorId      String
+  author        User              @relation("StudentRemarkAuthor", fields: [authorId], references: [id])
+  subject       String
+  message       String
+  signal        PerformanceSignal @default(STABLE)
+  parentVisible Boolean           @default(false)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([tenantId, studentId, parentVisible, createdAt])
+}
+
+model StudentScore {
+  id         String   @id @default(uuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  studentId  String
+  student    Student  @relation(fields: [studentId], references: [id])
+  recordedBy String
+  recorder   User     @relation("StudentScoreRecorder", fields: [recordedBy], references: [id])
+  subject    String
+  assessment String
+  score      Decimal  @db.Decimal(8, 2)
+  maximum    Decimal  @db.Decimal(8, 2)
+  testDate   DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, studentId, subject, testDate])
 }
 
 // 8. Parent / Guardian Records
@@ -555,12 +664,17 @@ model MaintenanceTask {
   branchId               String
   branch                 Branch    @relation(fields: [branchId], references: [id])
   assignedStaffId        String
+  classroomId            String    @default("Facility")
   description            String
   status                 String    @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED
   completionTimestamp    DateTime?
+  completedById          String?
+  escalatedAt            DateTime?
   escalationDaysSnapshot Int       @default(3)
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
+
+  @@index([assignedStaffId, status])
 }
 
 // ==========================================

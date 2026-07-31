@@ -66,20 +66,26 @@ router.post(
         logs.push('Alerts generated for contracts expiring within 30 days.');
       } else if (taskName === 'task-escalation') {
         try {
-          await prisma.maintenanceTask.updateMany({
+          const now = new Date();
+          const candidates = await prisma.maintenanceTask.findMany({
             where: {
               branch: { tenantId: req.tenantId! },
-              status: 'PENDING',
-              createdAt: { lt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) },
+              status: { not: 'COMPLETED' },
+              escalatedAt: null,
             },
-            data: {
-              status: 'ESCALATED',
-            },
+            select: { id: true, createdAt: true, escalationDaysSnapshot: true },
           });
+          const overdueIds = candidates
+            .filter((task) => task.createdAt.getTime() + task.escalationDaysSnapshot * 86_400_000 < now.getTime())
+            .map((task) => task.id);
+          if (overdueIds.length) await prisma.maintenanceTask.updateMany({
+            where: { id: { in: overdueIds }, escalatedAt: null },
+            data: { status: 'ESCALATED', escalatedAt: now },
+          });
+          logs.push(`Escalated ${overdueIds.length} overdue maintenance task(s) using each task's configured window.`);
         } catch (dbErr) {
           throw dbErr;
         }
-        logs.push('Escalated pending maintenance tasks older than 3 days.');
       } else if (taskName === 'connectips-revalidate') {
         const result = await reconcilePendingConnectIps();
         logs.push(`Revalidated ${result.checked} pending connectIPS payment(s); confirmed ${result.confirmed}.`);

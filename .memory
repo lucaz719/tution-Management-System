@@ -489,3 +489,24 @@ Known non-blocking warnings:
   student-attendance states, homework/results previews, own performance/leave
   records, unmerged stamp history, and credential-gated Teacher smoke coverage.
 - All validation commands listed above pass; changes are not yet committed.
+
+## Janitor / Cleaner maintenance workspace (2026-07-31)
+
+- Replaced the prototype `StaffTasksPage` fixture table with a live, responsive
+  maintenance queue using the canonical StyleSeed tokens and DashboardShell.
+- Added Janitor-only dashboard navigation and route enforcement at
+  `/staff/tasks`; this role receives no student, fee, payroll, or staff-HR
+  navigation.
+- Added authenticated `GET /api/resources/my-tasks`, scoped exclusively to the
+  signed-in Janitor's assigned task IDs and tenant.
+- Maintenance tasks now persist classroom/location context, `escalatedAt`,
+  `completedById`, and `completionTimestamp`. Mark Done is irreversible and its
+  compare-and-set update records actor and time together.
+- Overdue tasks use the per-task tenant-policy escalation snapshot, remain in
+  the worker's open queue with an overdue state, and are persisted as escalated
+  for Branch/Tenant Admin resource views. The cron workflow uses the same
+  per-task deadline rather than a hard-coded three-day rule.
+- Added migration `20260731120000_janitor_task_workflow` and the typed frontend
+  Janitor task service.
+- API and web production builds, Prisma generation, `git diff --check`, and web
+  lint pass. Existing repository lint warnings remain outside this feature.

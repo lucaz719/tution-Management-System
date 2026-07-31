@@ -23,6 +23,7 @@ import communicationRouter from './routes/communication';
 import appointmentsRouter from './routes/appointments';
 import resourcesRouter from './routes/resources';
 import cronRouter from './routes/cron';
+import parentRouter from './routes/parent';
 
 import { toNodeHandler } from 'better-auth/node';
 import { auth } from './utils/auth';
@@ -82,6 +83,7 @@ app.use('/api/communication', communicationRouter);
 app.use('/api/appointments', appointmentsRouter);
 app.use('/api/resources', resourcesRouter);
 app.use('/api/cron', cronRouter);
+app.use('/api/parent', parentRouter);
 
 // Centralized error handling middleware
 app.use((err: any, req: TenantRequest, res: Response, next: express.NextFunction) => {
