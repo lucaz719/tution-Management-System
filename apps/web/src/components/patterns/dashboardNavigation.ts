@@ -1,4 +1,4 @@
-export type DashboardRole = 'tenant-admin' | 'branch-admin' | 'teacher' | 'student' | 'parent' | 'janitor';
+export type DashboardRole = 'tenant-admin' | 'branch-admin' | 'teacher' | 'student' | 'parent' | 'receptionist' | 'janitor';
 
 export interface DashboardNavItem {
   label: string;
@@ -14,6 +14,7 @@ const ROLE_LABELS: Record<DashboardRole, string> = {
   teacher: 'Teacher',
   student: 'Student',
   parent: 'Parent',
+  receptionist: 'Receptionist',
   janitor: 'Maintenance Staff',
 };
 
@@ -92,6 +93,9 @@ export const DASHBOARD_NAVIGATION: Record<DashboardRole, DashboardNavItem[]> = {
     { section: 'Records', label: 'Certificates', icon: 'workspace_premium', path: '/parent/certificates' },
     { section: 'Calendar', label: 'Academic Calendar', icon: 'date_range', path: '/parent/calendar' },
   ],
+  receptionist: [
+    { section: 'Front desk', label: "Today's desk", icon: 'desk', path: '/staff/reception' },
+  ],
   janitor: [
     { section: 'Maintenance', label: 'My Tasks', icon: 'cleaning_services', path: '/staff/tasks' },
   ],
@@ -113,6 +117,8 @@ export function mapAuthRoleToDashboardRole(role: string): DashboardRole | null {
       return 'student';
     case 'PARENT':
       return 'parent';
+    case 'RECEPTIONIST':
+      return 'receptionist';
     case 'JANITOR':
       return 'janitor';
     default:

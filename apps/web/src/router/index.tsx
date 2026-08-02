@@ -278,7 +278,12 @@ const router = createBrowserRouter([
           },
 
           { path: '/staff/finance', element: <Suspense fallback={<FullPageSpinner />}><StaffFinancePage /></Suspense> },
-          { path: '/staff/reception', element: <Suspense fallback={<FullPageSpinner />}><StaffReceptionPage /></Suspense> },
+          {
+            element: <RequireRole allowedRoles={['RECEPTIONIST']} />,
+            children: [
+              { path: '/staff/reception', element: <Suspense fallback={<FullPageSpinner />}><StaffReceptionPage /></Suspense> },
+            ],
+          },
           {
             element: <RequireRole allowedRoles={['JANITOR']} />,
             children: [

@@ -736,6 +736,20 @@ model AcademicEvent {
   updatedAt   DateTime  @updatedAt
 }
 
+// Front-desk arrival record. This is intentionally separate from classroom attendance.
+model ReceptionCheckIn {
+  id            String   @id @default(uuid())
+  tenantId      String
+  branchId      String
+  studentId     String
+  checkedInById String
+  checkInDate   DateTime @db.Date
+  checkedInAt   DateTime @default(now())
+
+  @@unique([branchId, studentId, checkInDate])
+  @@index([tenantId, branchId, checkInDate])
+}
+
 // 24. Certificate Generation System
 enum CertificateType {
   COMPLETION

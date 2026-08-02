@@ -1,135 +1,177 @@
-import { useState } from 'react';
-import { PageShell } from '../components/patterns/PageShell';
-import { Button } from '../components/ui/Button';
-import { KPICard } from '../components/ui/KPICard';
-import { StatusBadge } from '../components/ui/StatusBadge';
+import { useEffect, useMemo, useState } from 'react';
 import { useToast } from '../components/ui/Toast';
-import { useAuth } from '../context/AuthContext';
+import { errorMessage } from '../services/api/client';
+import {
+  checkInStudent,
+  loadReceptionToday,
+  type ReceptionAppointment,
+  type ReceptionToday,
+} from '../features/reception/receptionService';
+import '../features/reception/reception.css';
 
-interface Visitor {
-  id: string;
-  name: string;
-  phone: string;
-  purpose: string;
-  time: string;
-  status: 'info' | 'success' | 'warning';
+type View = 'roster' | 'appointments' | 'announcements';
+
+const TIME_FORMAT = new Intl.DateTimeFormat('en-NP', { hour: 'numeric', minute: '2-digit' });
+const DATE_FORMAT = new Intl.DateTimeFormat('en-NP', { weekday: 'long', month: 'long', day: 'numeric' });
+
+function appointmentLabel(status: ReceptionAppointment['status']) {
+  return status.toLowerCase().replaceAll('_', ' ');
 }
 
 export function StaffReceptionPage() {
-  const { user, logout } = useAuth();
   const { showToast } = useToast();
+  const [data, setData] = useState<ReceptionToday | null>(null);
+  const [view, setView] = useState<View>('roster');
+  const [query, setQuery] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [checkingIn, setCheckingIn] = useState<string | null>(null);
 
-  const [visitors, setVisitors] = useState<Visitor[]>([
-    { id: '1', name: 'Hari Prasad Sharma', phone: '9841234567', purpose: 'Student Admission Inquiry', time: '10:15 AM', status: 'info' },
-    { id: '2', name: 'Sita Devi Karki', phone: '9801987654', purpose: 'Parent Meeting with Teacher', time: '11:00 AM', status: 'success' },
-    { id: '3', name: 'Ram Kumar KC', phone: '9851002233', purpose: 'Fee Payment Inquiry', time: '11:30 AM', status: 'warning' },
-  ]);
-
-  const [showModal, setShowModal] = useState(false);
-  const [visitorName, setVisitorName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [purpose, setPurpose] = useState('Admission Inquiry');
-
-  const handleAddVisitor = () => {
-    if (!visitorName.trim() || !phone.trim()) {
-      showToast('Please provide visitor name and phone number.', 'error');
-      return;
+  const refresh = async () => {
+    setLoading(true);
+    setLoadError('');
+    try {
+      setData(await loadReceptionToday());
+    } catch (error) {
+      setLoadError(errorMessage(error));
+    } finally {
+      setLoading(false);
     }
-    const newVisitor: Visitor = {
-      id: String(Date.now()),
-      name: visitorName.trim(),
-      phone: phone.trim(),
-      purpose,
-      time: 'Just Now',
-      status: 'info',
-    };
-    setVisitors([newVisitor, ...visitors]);
-    setShowModal(false);
-    setVisitorName('');
-    setPhone('');
-    showToast('Visitor check-in logged successfully.', 'success');
   };
 
+  useEffect(() => { void refresh(); }, []);
+
+  const visibleRoster = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) return data?.roster ?? [];
+    return (data?.roster ?? []).filter((student) =>
+      `${student.name} ${student.className}`.toLowerCase().includes(normalized),
+    );
+  }, [data?.roster, query]);
+
+  const checkedInCount = data?.roster.filter((student) => student.checkedInAt).length ?? 0;
+  const confirmedAppointments = data?.appointments.filter((item) => item.status === 'CONFIRMED').length ?? 0;
+
+  const handleCheckIn = async (studentId: string) => {
+    setCheckingIn(studentId);
+    try {
+      const result = await checkInStudent(studentId);
+      setData((current) => current ? {
+        ...current,
+        roster: current.roster.map((student) => student.id === studentId
+          ? { ...student, checkedInAt: result.checkedInAt }
+          : student),
+      } : current);
+      showToast(result.message, 'success');
+    } catch (error) {
+      showToast(errorMessage(error), 'error');
+    } finally {
+      setCheckingIn(null);
+    }
+  };
+
+  if (loading) {
+    return <ReceptionSkeleton />;
+  }
+
+  if (loadError || !data) {
+    return (
+      <section className="reception-state" role="alert">
+        <span className="material-symbols-outlined">cloud_off</span>
+        <h2>Front desk data is unavailable</h2>
+        <p>{loadError || 'The workspace could not be loaded.'}</p>
+        <button type="button" className="reception-primary-button" onClick={() => void refresh()}>
+          <span className="material-symbols-outlined" aria-hidden="true">refresh</span> Try again
+        </button>
+      </section>
+    );
+  }
+
   return (
-    <PageShell
-      title="Reception Dashboard"
-      subtitle="Visitor log, inquiry management, and front-desk student check-ins."
-      userRole={user?.role ?? 'RECEPTIONIST'}
-      userName={user?.name ?? 'Receptionist'}
-      onLogout={logout}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '20px', flex: 1, marginRight: '16px' }}>
-          <KPICard title="Visitors Today" value={String(visitors.length + 15)} delta="5 pending inquiries" />
-          <KPICard title="Active Classrooms" value="12 / 14" delta="2 rooms free for study" />
-          <KPICard title="Walk-in Admissions" value="4" delta="Today's total" />
+    <div className="reception-page">
+      <header className="reception-heading">
+        <div>
+          <p className="reception-eyebrow"><span className="reception-live-dot" /> Front desk open</p>
+          <h2>Good day, Reception</h2>
+          <p>{DATE_FORMAT.format(new Date())} · {data.branchName}</p>
         </div>
-        <Button onClick={() => setShowModal(true)} style={{ height: '48px' }}>
-          <span className="material-symbols-outlined" style={{ marginRight: '6px' }}>person_add</span>
-          Check-in New Visitor
-        </Button>
+        <div className="reception-scope" title="Your access is limited to front-desk operations">
+          <span className="material-symbols-outlined" aria-hidden="true">shield_lock</span>
+          Branch-limited view
+        </div>
+      </header>
+
+      <section className="reception-metrics" aria-label="Today's front desk summary">
+        <article><span className="metric-icon metric-icon--blue material-symbols-outlined">how_to_reg</span><div><strong>{checkedInCount}</strong><span>Students checked in</span></div></article>
+        <article><span className="metric-icon metric-icon--gold material-symbols-outlined">event_available</span><div><strong>{confirmedAppointments}</strong><span>Confirmed visits</span></div></article>
+        <article><span className="metric-icon metric-icon--green material-symbols-outlined">campaign</span><div><strong>{data.announcements.length}</strong><span>Active announcements</span></div></article>
+      </section>
+
+      <div className="reception-tabs" role="tablist" aria-label="Front desk views">
+        <Tab id="roster" icon="groups" label="Student check-in" active={view === 'roster'} onSelect={setView} />
+        <Tab id="appointments" icon="calendar_today" label="Appointments" count={data.appointments.length} active={view === 'appointments'} onSelect={setView} />
+        <Tab id="announcements" icon="campaign" label="Announcements" count={data.announcements.length} active={view === 'announcements'} onSelect={setView} />
       </div>
 
-      <div className="card" style={{ padding: '24px', background: 'var(--color-bg)', borderRadius: '16px', border: '1px solid var(--color-border)' }}>
-        <h3 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '16px' }}>Front-Desk Visitor Log</h3>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid var(--color-border)', textAlign: 'left', fontSize: '13px', color: 'var(--text-muted-foreground)' }}>
-              <th style={{ padding: '12px' }}>Visitor Name</th>
-              <th style={{ padding: '12px' }}>Contact Phone</th>
-              <th style={{ padding: '12px' }}>Purpose of Visit</th>
-              <th style={{ padding: '12px' }}>Check-in Time</th>
-              <th style={{ padding: '12px' }}>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visitors.map((v) => (
-              <tr key={v.id} style={{ borderBottom: '1px solid var(--color-border)', fontSize: '14px' }}>
-                <td style={{ padding: '12px', fontWeight: 600 }}>{v.name}</td>
-                <td style={{ padding: '12px' }}>{v.phone}</td>
-                <td style={{ padding: '12px' }}>{v.purpose}</td>
-                <td style={{ padding: '12px' }}>{v.time}</td>
-                <td style={{ padding: '12px' }}>
-                  <StatusBadge status={v.status} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Check-in Modal */}
-      {showModal ? (
-        <>
-          <div className="people-drawer-overlay" onClick={() => setShowModal(false)} />
-          <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', background: '#FFF', padding: '28px', borderRadius: '20px', zIndex: 1100, width: '90%', maxWidth: '420px', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '16px' }}>Visitor Check-in</h3>
-            <div style={{ display: 'grid', gap: '14px', marginBottom: '20px' }}>
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Full Name *</label>
-                <input type="text" className="auth-input" placeholder="e.g. Ramesh Thapa" value={visitorName} onChange={(e) => setVisitorName(e.target.value)} />
-              </div>
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Phone Number *</label>
-                <input type="tel" className="auth-input" placeholder="e.g. 9841000000" value={phone} onChange={(e) => setPhone(e.target.value)} />
-              </div>
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Purpose of Visit</label>
-                <select className="auth-input" value={purpose} onChange={(e) => setPurpose(e.target.value)}>
-                  <option value="Admission Inquiry">Admission Inquiry</option>
-                  <option value="Parent Teacher Meeting">Parent Teacher Meeting</option>
-                  <option value="Fee Payment Inquiry">Fee Payment Inquiry</option>
-                  <option value="Vendor / Delivery">Vendor / Delivery</option>
-                </select>
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <Button variant="outline" onClick={() => setShowModal(false)} style={{ flex: 1 }}>Cancel</Button>
-              <Button onClick={handleAddVisitor} style={{ flex: 1 }}>Complete Check-in</Button>
-            </div>
+      {view === 'roster' ? (
+        <section className="reception-workspace" role="tabpanel">
+          <div className="reception-toolbar">
+            <div><h3>Today’s student roster</h3><p>Front-desk arrivals only. Classroom attendance is marked separately by teachers.</p></div>
+            <label className="reception-search">
+              <span className="material-symbols-outlined" aria-hidden="true">search</span>
+              <span className="sr-only">Search students</span>
+              <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search student or class" />
+            </label>
           </div>
-        </>
+          {visibleRoster.length ? (
+            <div className="reception-table-wrap">
+              <table className="reception-table">
+                <thead><tr><th>Student</th><th>Class / destination</th><th>Arrival</th><th><span className="sr-only">Check-in action</span></th></tr></thead>
+                <tbody>{visibleRoster.map((student) => (
+                  <tr key={student.id}>
+                    <td><span className="student-avatar">{student.name.split(' ').map((part) => part[0]).slice(0, 2).join('')}</span><strong>{student.name}</strong></td>
+                    <td>{student.className}</td>
+                    <td>{student.checkedInAt ? <span className="arrival-status"><span className="material-symbols-outlined">check_circle</span>{TIME_FORMAT.format(new Date(student.checkedInAt))}</span> : <span className="muted-status">Not arrived</span>}</td>
+                    <td><button type="button" className="check-in-button" disabled={Boolean(student.checkedInAt) || checkingIn === student.id} onClick={() => void handleCheckIn(student.id)}>{checkingIn === student.id ? 'Checking in…' : student.checkedInAt ? 'Checked in' : 'Check in'}</button></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          ) : <Empty icon="person_search" title="No students found" detail={query ? 'Try a different name or class.' : 'There are no active students on today’s branch roster.'} />}
+        </section>
       ) : null}
-    </PageShell>
+
+      {view === 'appointments' ? (
+        <section className="reception-workspace" role="tabpanel">
+          <div className="reception-toolbar"><div><h3>Today’s appointments</h3><p>Confirm the visitor and direct them. Appointment changes are handled by teachers or administrators.</p></div><span className="read-only-chip"><span className="material-symbols-outlined">visibility</span> Read only</span></div>
+          {data.appointments.length ? <div className="appointment-list">{data.appointments.map((item) => (
+            <article key={item.id} className="appointment-row">
+              <time dateTime={item.scheduledTime}>{TIME_FORMAT.format(new Date(item.scheduledTime))}</time>
+              <div><strong>{item.parentName}</strong><span>Meeting with {item.destination}</span></div>
+              <span className={`appointment-status appointment-status--${item.status.toLowerCase()}`}>{appointmentLabel(item.status)}</span>
+            </article>
+          ))}</div> : <Empty icon="event_busy" title="No appointments today" detail="Booked parent and visitor appointments will appear here." />}
+        </section>
+      ) : null}
+
+      {view === 'announcements' ? (
+        <section className="reception-workspace" role="tabpanel">
+          <div className="reception-toolbar"><div><h3>Announcements to relay</h3><p>Use these approved notices when answering walk-in and phone queries.</p></div></div>
+          {data.announcements.length ? <div className="announcement-list">{data.announcements.map((item) => <article key={item.id}><span className="material-symbols-outlined">campaign</span><div><h4>{item.title}</h4><p>{item.description || 'No additional details were provided.'}</p></div></article>)}</div> : <Empty icon="campaign" title="No active announcements" detail="There are no institutional notices to relay today." />}
+        </section>
+      ) : null}
+    </div>
   );
+}
+
+function Tab({ id, icon, label, count, active, onSelect }: { id: View; icon: string; label: string; count?: number; active: boolean; onSelect: (view: View) => void }) {
+  return <button type="button" role="tab" aria-selected={active} className={active ? 'is-active' : ''} onClick={() => onSelect(id)}><span className="material-symbols-outlined" aria-hidden="true">{icon}</span>{label}{count !== undefined ? <span className="tab-count">{count}</span> : null}</button>;
+}
+
+function Empty({ icon, title, detail }: { icon: string; title: string; detail: string }) {
+  return <div className="reception-empty"><span className="material-symbols-outlined">{icon}</span><h4>{title}</h4><p>{detail}</p></div>;
+}
+
+function ReceptionSkeleton() {
+  return <div className="reception-skeleton" aria-busy="true" aria-label="Loading front desk"><div /><div className="skeleton-metrics"><span /><span /><span /></div><div className="skeleton-panel" /></div>;
 }
