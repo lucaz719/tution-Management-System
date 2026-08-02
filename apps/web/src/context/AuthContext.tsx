@@ -22,7 +22,7 @@ interface AuthContextValue {
 const USER_CACHE_KEY = 'tms_user';
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const ROLE_PRIORITY = ['Tenant Admin', 'Branch Admin', 'Teacher', 'Accountant', 'Receptionist', 'Janitor', 'Student', 'Parent'];
+const ROLE_PRIORITY = ['Super Admin', 'Tenant Admin', 'Branch Admin', 'Teacher', 'Accountant', 'Receptionist', 'Janitor', 'Student', 'Parent'];
 
 function mapSessionUser(sessionUser: any): AuthUser {
   const roles = Array.isArray(sessionUser.roles) ? sessionUser.roles : [];
@@ -142,6 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (user.requiresTwoFactor) return '/2fa';
     if (user.firstLogin && user.role === 'TENANT_ADMIN') return '/setup/tenant';
     if (user.firstLogin && user.role === 'BRANCH_ADMIN') return '/setup/branch';
+    if (user.role === 'SUPER_ADMIN') return '/platform/overview';
     return ROLE_DEFAULT_PATHS[user.role] ?? '/login';
   }, [user]);
 

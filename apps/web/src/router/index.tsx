@@ -44,6 +44,8 @@ const StudentPortal = lazy(() => import('../pages/StudentPortal').then((module) 
 const StaffFinancePage = lazy(() => import('../pages/StaffFinancePage').then((module) => ({ default: module.StaffFinancePage })));
 const StaffReceptionPage = lazy(() => import('../pages/StaffReceptionPage').then((module) => ({ default: module.StaffReceptionPage })));
 const StaffTasksPage = lazy(() => import('../pages/StaffTasksPage').then((module) => ({ default: module.StaffTasksPage })));
+const SuperAdminDashboard = lazy(() => import('../pages/SuperAdminDashboard').then((module) => ({ default: module.SuperAdminDashboard })));
+const SuperAdminTenants = lazy(() => import('../pages/SuperAdminTenants').then((module) => ({ default: module.SuperAdminTenants })));
 
 function RequireAuth() {
   const { isAuthenticated, isLoading, isTwoFactorPending } = useAuth();
@@ -225,6 +227,18 @@ const router = createBrowserRouter([
           { path: '/setup/tenant', element: <Suspense fallback={<FullPageSpinner />}><TenantSetupWizard /></Suspense> },
           { path: '/setup/branch', element: <Suspense fallback={<FullPageSpinner />}><BranchSetupWizard /></Suspense> },
 
+          {
+            element: <RequireRole allowedRoles={['SUPER_ADMIN']} />,
+            children: [
+              { path: '/platform/overview', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard view="overview" /></Suspense> },
+              { path: '/platform/onboarding', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard view="onboarding" /></Suspense> },
+              { path: '/platform/support', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard view="support" /></Suspense> },
+              { path: '/platform/policies', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard view="policies" /></Suspense> },
+              { path: '/platform/billing', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard view="billing" /></Suspense> },
+              { path: '/platform/audit', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard view="audit" /></Suspense> },
+              { path: '/platform/tenants', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminTenants /></Suspense> },
+            ],
+          },
           {
             element: <RequireRole allowedRoles={['TENANT_ADMIN']} />,
             children: [

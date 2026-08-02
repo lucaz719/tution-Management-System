@@ -1,4 +1,4 @@
-export type DashboardRole = 'tenant-admin' | 'branch-admin' | 'teacher' | 'student' | 'parent' | 'receptionist' | 'janitor';
+export type DashboardRole = 'super-admin' | 'tenant-admin' | 'branch-admin' | 'teacher' | 'student' | 'parent' | 'receptionist' | 'janitor';
 
 export interface DashboardNavItem {
   label: string;
@@ -9,6 +9,7 @@ export interface DashboardNavItem {
 }
 
 const ROLE_LABELS: Record<DashboardRole, string> = {
+  'super-admin': 'Super Admin',
   'tenant-admin': 'Tenant Admin',
   'branch-admin': 'Branch Admin',
   teacher: 'Teacher',
@@ -19,6 +20,15 @@ const ROLE_LABELS: Record<DashboardRole, string> = {
 };
 
 export const DASHBOARD_NAVIGATION: Record<DashboardRole, DashboardNavItem[]> = {
+  'super-admin': [
+    { section: 'Platform', label: 'Overview', icon: 'space_dashboard', path: '/platform/overview' },
+    { section: 'Platform', label: 'Tenants', icon: 'domain', path: '/platform/tenants' },
+    { section: 'Operations', label: 'Onboarding', icon: 'playlist_add_check', path: '/platform/onboarding' },
+    { section: 'Operations', label: 'Support Access', icon: 'support_agent', path: '/platform/support' },
+    { section: 'Governance', label: 'Policy Defaults', icon: 'tune', path: '/platform/policies' },
+    { section: 'Governance', label: 'Billing', icon: 'receipt_long', path: '/platform/billing' },
+    { section: 'Security', label: 'Audit Log', icon: 'policy', path: '/platform/audit' },
+  ],
   'tenant-admin': [
     { section: 'Main', label: 'Dashboard', icon: 'dashboard', path: '/tenant/dashboard' },
     { section: 'Main', label: 'Branches', icon: 'domain', path: '/tenant/branches' },
@@ -107,6 +117,8 @@ export function getDashboardRoleLabel(role: DashboardRole): string {
 
 export function mapAuthRoleToDashboardRole(role: string): DashboardRole | null {
   switch (role) {
+    case 'SUPER_ADMIN':
+      return 'super-admin';
     case 'TENANT_ADMIN':
       return 'tenant-admin';
     case 'BRANCH_ADMIN':
