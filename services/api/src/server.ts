@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import crypto from 'crypto';
 import express, { Response } from 'express';
 import cors from 'cors';
 import { tenantMiddleware, TenantRequest } from './middleware/tenant';
@@ -39,6 +40,39 @@ const legacyAuthPaths = new Set([
   '/verify-reset-otp',
   '/reset-password',
 ]);
+
+// Browser-facing API responses never need scripts, frames, or a referrer. The
+// web app is served separately by nginx, so this restrictive policy does not
+// interfere with its bundled assets.
+app.use((req, res, next) => {
+  const requestId = crypto.randomUUID();
+  res.locals.requestId = requestId;
+  res.setHeader('X-Request-Id', requestId);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'camera=(), geolocation=(), microphone=()');
+  res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+
+  if (req.path.startsWith('/api/')) {
+    res.setHeader('Content-Security-Policy', "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
+    res.setHeader('Cache-Control', 'no-store');
+
+    const sendJson = res.json.bind(res);
+    res.json = ((body: unknown) => {
+      if (res.statusCode >= 500) {
+        return sendJson({ error: 'Internal Server Error', requestId });
+      }
+      return sendJson(body);
+    }) as Response['json'];
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+
+  next();
+});
 
 // Enable CORS and parsing of JSON payloads
 app.use(cors({
@@ -101,12 +135,27 @@ app.use('/api/resources', resourcesRouter);
 app.use('/api/cron', cronRouter);
 app.use('/api/parent', parentRouter);
 
+// Integration-only probe for the central error boundary. It is never mounted
+// in local development or production.
+if (process.env.NODE_ENV === 'test') {
+  app.get('/api/_test/throw', () => {
+    throw new Error('test-only internal detail');
+  });
+}
+
 // Centralized error handling middleware
 app.use((err: any, req: TenantRequest, res: Response, next: express.NextFunction) => {
-  console.error(err.stack);
+  const requestId = res.locals.requestId || crypto.randomUUID();
+  console.error(JSON.stringify({
+    event: 'API_UNEXPECTED_ERROR',
+    requestId,
+    method: req.method,
+    path: req.originalUrl,
+    error: err instanceof Error ? err.message : String(err),
+  }));
   return res.status(500).json({
     error: 'Internal Server Error',
-    message: err.message || 'An unexpected error occurred.',
+    requestId,
   });
 });
 

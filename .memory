@@ -385,6 +385,21 @@ Additional defects fixed during the full route pass:
 
 ## Validation status
 
+### ConnectIPS backend readiness — 2026-08-02
+
+- The tenant-admin `connectips-revalidate` action is tenant-scoped; it cannot
+  query payment attempts belonging to another institution.
+- The server-only reconciliation command is available through
+  `npm run connectips:reconcile --workspace @tms/api`. It safely does nothing
+  while `CONNECTIPS_ENABLED=false`; hosting must schedule it every five minutes
+  after UAT is enabled.
+- Passing focused checks:
+  `npm run test:connectips --workspace @tms/api`,
+  `npm run test:connectips-reconciliation --workspace @tms/api`, and
+  `npm run build --workspace @tms/api`.
+- Still blocked before end-to-end UAT: payment-page wiring, public staging HTTPS
+  API/DNS, NCHL-registered return URLs, UAT credentials, and a UAT payer.
+
 Passing:
 
 ```powershell
@@ -486,6 +501,13 @@ Known non-blocking warnings:
   configured reverse proxy. Until then the limiter uses Better Auth's safe
   shared bucket rather than accepting a spoofable forwarding header. Configure
   the actual trusted proxy before an Internet-facing production deployment.
+- API responses now receive browser hardening headers (`Content-Security-Policy`
+  for `/api`, frame denial, no-sniff, referrer and permissions policy, and a
+  correlation ID); production additionally emits HSTS. Every API `5xx` JSON
+  response is replaced with a generic `Internal Server Error` plus that
+  correlation ID, including legacy route handlers that previously returned
+  `error.message`. Internal details are logged server-side only. The Tenant
+  Admin integration test verifies headers and the no-detail error boundary.
 
 ## Work incorporated in the current repository history
 

@@ -97,6 +97,20 @@ async function main(): Promise<void> {
       };
     };
 
+    const health = await request('GET', '/api/health');
+    assert.equal(health.status, 200, 'health checks remain public');
+    assert.equal(health.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(health.headers.get('x-frame-options'), 'DENY');
+    assert.equal(health.headers.get('referrer-policy'), 'no-referrer');
+    assert.equal(health.headers.get('content-security-policy'), "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
+    assert(health.headers.get('x-request-id'), 'API responses must include a correlation ID');
+
+    const unexpectedFailure = await request('GET', '/api/_test/throw');
+    assert.equal(unexpectedFailure.status, 500, 'unexpected failures must use the central error boundary');
+    assert.equal(unexpectedFailure.body.error, 'Internal Server Error');
+    assert(unexpectedFailure.body.requestId, 'unexpected failures must return a correlation ID');
+    assert.equal(unexpectedFailure.body.message, undefined, 'unexpected failures must not disclose internal error messages');
+
     const createTenantAdmin = async (
       tenantId: string,
       email: string,

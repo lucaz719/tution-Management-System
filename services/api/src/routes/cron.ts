@@ -87,7 +87,7 @@ router.post(
           throw dbErr;
         }
       } else if (taskName === 'connectips-revalidate') {
-        const result = await reconcilePendingConnectIps();
+        const result = await reconcilePendingConnectIps({ tenantId: req.tenantId! });
         logs.push(`Revalidated ${result.checked} pending connectIPS payment(s); confirmed ${result.confirmed}.`);
       } else {
         return res.status(400).json({ error: `Unknown taskName: ${taskName}.` });
