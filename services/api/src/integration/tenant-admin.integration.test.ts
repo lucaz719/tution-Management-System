@@ -46,6 +46,7 @@ async function main(): Promise<void> {
   process.env.BETTER_AUTH_SECRET = 'tenant-admin-integration-secret-at-least-32-characters';
   process.env.BETTER_AUTH_URL = 'http://127.0.0.1:0';
   process.env.WEB_ORIGIN = 'http://localhost:5173';
+  process.env.NODE_ENV = 'test';
   process.env.PLATFORM_ADMIN_ENABLED = 'false';
   process.env.SMS_PROVIDER = 'MOCK';
   process.env.CONNECTIPS_ENABLED = 'false';
@@ -53,9 +54,10 @@ async function main(): Promise<void> {
   resetIntegrationSchema(databaseUrl);
 
   // These modules must load only after the isolated DATABASE_URL is installed.
-  const [{ PrismaClient }, { default: app }] = await Promise.all([
+  const [{ PrismaClient }, { default: app }, { getMockVerificationCodeForTest }] = await Promise.all([
     import('@prisma/client'),
     import('../server'),
+    import('../utils/delivery'),
   ]);
   const prisma = new PrismaClient();
   const server = app.listen(0, '127.0.0.1');
@@ -94,6 +96,20 @@ async function main(): Promise<void> {
         headers: response.headers,
       };
     };
+
+    const health = await request('GET', '/api/health');
+    assert.equal(health.status, 200, 'health checks remain public');
+    assert.equal(health.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(health.headers.get('x-frame-options'), 'DENY');
+    assert.equal(health.headers.get('referrer-policy'), 'no-referrer');
+    assert.equal(health.headers.get('content-security-policy'), "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
+    assert(health.headers.get('x-request-id'), 'API responses must include a correlation ID');
+
+    const unexpectedFailure = await request('GET', '/api/_test/throw');
+    assert.equal(unexpectedFailure.status, 500, 'unexpected failures must use the central error boundary');
+    assert.equal(unexpectedFailure.body.error, 'Internal Server Error');
+    assert(unexpectedFailure.body.requestId, 'unexpected failures must return a correlation ID');
+    assert.equal(unexpectedFailure.body.message, undefined, 'unexpected failures must not disclose internal error messages');
 
     const createTenantAdmin = async (
       tenantId: string,
@@ -177,6 +193,47 @@ async function main(): Promise<void> {
         ['manage_branches', 'manage_students', 'manage_billing', 'view_reports'],
       ),
     ]);
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const failedLogin = await request('POST', '/api/auth/sign-in/email', undefined, {
+        email: adminA.email,
+        password: 'incorrect-password',
+      });
+      assert.equal(failedLogin.status, 401, 'an incorrect password must remain a generic login failure');
+    }
+    const blockedLogin = await request('POST', '/api/auth/sign-in/email', undefined, {
+      email: adminA.email,
+      password: 'incorrect-password',
+    });
+    assert.equal(blockedLogin.status, 429, 'the sixth failed login must be rate-limited');
+    assert(blockedLogin.headers.get('x-retry-after'), 'rate-limited logins must provide a retry delay');
+    for (let retry = 0; retry < 20; retry += 1) {
+      const securityEvents = await (prisma as any).authSecurityEvent.count({
+        where: { event: 'AUTH_LOGIN_RATE_LIMITED' },
+      });
+      if (securityEvents === 1) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(
+      await (prisma as any).authSecurityEvent.count({ where: { event: 'AUTH_LOGIN_RATE_LIMITED' } }),
+      1,
+      'a rate-limited login must create a security-monitoring event',
+    );
+    await (prisma as any).rateLimit.deleteMany();
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const resetRequest = await request('POST', '/api/auth/forgot-password', undefined, {
+        email: adminA.email,
+      });
+      assert.equal(resetRequest.status, 200, 'password-reset requests within the limit must return the generic success response');
+    }
+    const blockedResetRequest = await request('POST', '/api/auth/forgot-password', undefined, {
+      email: adminA.email,
+    });
+    assert.equal(blockedResetRequest.status, 429, 'the sixth password-reset request must be rate-limited');
+    assert(blockedResetRequest.headers.get('x-retry-after'), 'rate-limited reset requests must provide a retry delay');
+    await (prisma as any).rateLimit.deleteMany();
+
     const branchAdminA = await createTenantAdmin(
       tenantA.id,
       'branch-a-admin@integration.tms.local',
@@ -195,6 +252,63 @@ async function main(): Promise<void> {
       branchA.id,
       ['manage_billing', 'manage_petty_cash', 'view_reports'],
     );
+
+    const twoFactorUser = await createTenantAdmin(
+      tenantA.id,
+      'two-factor-admin@integration.tms.local',
+      'Tenant Admin',
+      null,
+      ['manage_branches'],
+    );
+    await prisma.user.update({
+      where: { id: twoFactorUser.id },
+      data: { twoFactorEnabled: true },
+    });
+    await prisma.twoFactor.create({
+      data: {
+        id: `email-otp-${twoFactorUser.id}`,
+        userId: twoFactorUser.id,
+        secret: 'integration-email-otp-placeholder',
+        backupCodes: '[]',
+      },
+    });
+
+    let response = await request('POST', '/api/auth/sign-in/email', undefined, {
+      email: twoFactorUser.email,
+      password: TEST_PASSWORD,
+    });
+    assert.equal(response.status, 200, '2FA password verification should start a challenge');
+    assert.equal(response.body.twoFactorRedirect, true,
+      'a 2FA-enabled user must not receive an authenticated session after password entry');
+    const twoFactorChallengeCookies: string[] =
+      (response.headers as any).getSetCookie?.() ??
+      [response.headers.get('set-cookie')].filter(Boolean);
+    const twoFactorChallengeCookie = twoFactorChallengeCookies
+      .map((value) => value.split(';', 1)[0])
+      .join('; ');
+    response = await request('GET', '/api/branches', twoFactorChallengeCookie);
+    assert.equal(response.status, 401,
+      'a pending 2FA challenge must not authorize protected API requests');
+    response = await request('POST', '/api/auth/two-factor/send-otp', twoFactorChallengeCookie, {});
+    assert.equal(response.status, 200, 'a pending 2FA challenge should send a mock OTP');
+    const twoFactorCode = getMockVerificationCodeForTest(twoFactorUser.email, 'TWO_FACTOR');
+    assert(twoFactorCode, 'mock delivery should retain the 2FA OTP for integration verification');
+    response = await request('POST', '/api/auth/two-factor/verify-otp', twoFactorChallengeCookie, {
+      code: twoFactorCode,
+      trustDevice: false,
+    });
+    assert.equal(response.status, 200, 'the correct OTP should create a session');
+    const verifiedTwoFactorCookies: string[] =
+      (response.headers as any).getSetCookie?.() ??
+      [response.headers.get('set-cookie')].filter(Boolean);
+    const verifiedTwoFactorCookie = verifiedTwoFactorCookies
+      .map((value) => value.split(';', 1)[0])
+      .join('; ');
+    response = await request('GET', '/api/branches', verifiedTwoFactorCookie);
+    assert.equal(response.status, 200,
+      'a successfully verified 2FA session should access authorized protected routes');
+
+    await (prisma as any).rateLimit.deleteMany();
     const [adminACookie, adminBCookie, branchAdminCookie, accountantCookie] = await Promise.all([
       signIn(adminA.email),
       signIn(adminB.email),
@@ -202,7 +316,7 @@ async function main(): Promise<void> {
       signIn(accountantA.email),
     ]);
 
-    let response = await request('GET', '/api/branches');
+    response = await request('GET', '/api/branches');
     assert.equal(response.status, 401, 'protected routes must reject missing sessions');
 
     response = await request('GET', '/api/users/me', adminACookie);
@@ -365,6 +479,7 @@ async function main(): Promise<void> {
     const credentialIssue = concurrentCredentialIssues.find((result) => result.status === 200)!;
     const studentCredentials = credentialIssue.body.student;
     const parentCredentials = credentialIssue.body.parent;
+    await (prisma as any).rateLimit.deleteMany();
     const [studentCookie, parentCookie] = await Promise.all([
       signIn(studentCredentials.email, studentCredentials.temporaryPassword),
       signIn(parentCredentials.email, parentCredentials.temporaryPassword),

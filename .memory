@@ -1,11 +1,36 @@
 # TMS Working Memory
 
-Last updated: 2026-07-30
+Last reconciled: 2026-08-02
 Repository: `https://github.com/lucazsoft/tution-Management-System/`
 Branch: `main`
-Last committed revision: `038a72f complete tenant security and manual finance workflows`
+Repository baseline: `bba14be janitor ui/ux` (2026-07-31)
+Worktree at reconciliation: clean
 
-## Current runtime
+## Documentation authority
+
+This file is the repository's operational source of truth for the current
+implementation state, verified validation status, known gaps, and next work.
+Read it before development and update it in the same change set whenever those
+facts change.
+
+- `README.md` is the entry point and must link to the current documents.
+- `documents/auth-docs/AUTH_AND_AUTHORIZATION_HANDOFF.md` is the active,
+  detailed runbook for authentication and authorization only.
+- The documents under `documents/code-audits/` and
+  `documents/auth-docs/audit-auth-security.md` are historical assessments.
+  They provide context but do not override this file or describe the current
+  release posture.
+
+## Reconciliation notes (2026-08-02)
+
+- The prior revision reference (`038a72f`) and the "Current uncommitted work"
+  label were stale. The work described in that section is now incorporated in
+  repository history through `bba14be`; the worktree was clean when reconciled.
+- Runtime claims below remain the last locally verified environment record. Do
+  not treat them as a live-health assertion after this reconciliation date;
+  verify the stack before relying on it.
+
+## Current runtime (last verified 2026-07-30)
 
 - Docker Desktop is running with the WSL 2 Linux engine.
 - PostgreSQL 16 is healthy for this Compose project at `localhost:5433`.
@@ -360,6 +385,21 @@ Additional defects fixed during the full route pass:
 
 ## Validation status
 
+### ConnectIPS backend readiness — 2026-08-02
+
+- The tenant-admin `connectips-revalidate` action is tenant-scoped; it cannot
+  query payment attempts belonging to another institution.
+- The server-only reconciliation command is available through
+  `npm run connectips:reconcile --workspace @tms/api`. It safely does nothing
+  while `CONNECTIPS_ENABLED=false`; hosting must schedule it every five minutes
+  after UAT is enabled.
+- Passing focused checks:
+  `npm run test:connectips --workspace @tms/api`,
+  `npm run test:connectips-reconciliation --workspace @tms/api`, and
+  `npm run build --workspace @tms/api`.
+- Still blocked before end-to-end UAT: payment-page wiring, public staging HTTPS
+  API/DNS, NCHL-registered return URLs, UAT credentials, and a UAT payer.
+
 Passing:
 
 ```powershell
@@ -424,7 +464,52 @@ Known non-blocking warnings:
 - Refunds are approved and reconciled manually using an external reference.
 - Payroll is calculated/approved/reconciled in TMS; salary funds are paid outside TMS.
 
-## Current uncommitted work
+## Active uncommitted work
+
+- Server-enforced email OTP two-factor authentication now uses the Better Auth
+  two-factor plugin. A password sign-in for a `twoFactorEnabled` user creates
+  only a short-lived challenge; there is no authenticated session until OTP
+  verification succeeds. The web client uses the plugin's challenge, OTP,
+  verification, and server-issued trusted-device cookies rather than
+  client-side authorization state.
+- Migrations `20260802090000_better_auth_two_factor` and
+  `20260802100000_backfill_email_otp_two_factor` add/backfill the
+  plugin-managed 2FA record for legacy users. The seed flow also creates or
+  removes that record consistently with `SEED_ADMIN_2FA`.
+- The live Compose validation on 2026-08-02 passed the complete 2FA path:
+  password sign-in returned a two-factor challenge, the pending challenge was
+  denied a protected route with `401`, a correct mock OTP created the session,
+  and that session read the authorized provisioning queue. The isolated
+  Tenant Admin integration test also passes against PostgreSQL on local port
+  `5433`.
+- Compose/runtime configuration now distinguishes local development from
+  production: production requires explicit secrets and HTTPS auth/web origins,
+  rejects the development provisioning surface and mock SMS, and local Compose
+  forwards the documented `SEED_ADMIN_*` variables so `npm run db:seed` works
+  normally. `npm run test:runtime-config`, API build, Compose validation, and
+  the local seed command pass.
+- Authentication throttling and monitoring are now server-side and persistent.
+  Migration `20260802110000_auth_rate_limit_and_monitoring` adds Better Auth's
+  PostgreSQL-backed `RateLimit` counter and a privacy-preserving
+  `AuthSecurityEvent` record. Credential sign-in, Better Auth 2FA, and the
+  existing password-reset endpoints allow five requests per fifteen minutes
+  before returning `429` with `X-Retry-After`; failed/rate-limited credential
+  sign-ins are recorded without passwords, emails, or raw IP addresses. The
+  Tenant Admin integration test verifies the login and password-reset limits,
+  the monitoring event, and the rest of the authorization flow.
+- Client IP forwarding is deliberately not trusted until deployment provides a
+  configured reverse proxy. Until then the limiter uses Better Auth's safe
+  shared bucket rather than accepting a spoofable forwarding header. Configure
+  the actual trusted proxy before an Internet-facing production deployment.
+- API responses now receive browser hardening headers (`Content-Security-Policy`
+  for `/api`, frame denial, no-sniff, referrer and permissions policy, and a
+  correlation ID); production additionally emits HSTS. Every API `5xx` JSON
+  response is replaced with a generic `Internal Server Error` plus that
+  correlation ID, including legacy route handlers that previously returned
+  `error.message`. Internal details are logged server-side only. The Tenant
+  Admin integration test verifies headers and the no-detail error boundary.
+
+## Work incorporated in the current repository history
 
 - Atomic workflow hardening across auth, onboarding, admissions, sessions,
   homework, HR, users, NepalPay, and connectIPS.
@@ -488,7 +573,9 @@ Known non-blocking warnings:
   context, separate personalized sessions, mandatory daily updates, locked
   student-attendance states, homework/results previews, own performance/leave
   records, unmerged stamp history, and credential-gated Teacher smoke coverage.
-- All validation commands listed above pass; changes are not yet committed.
+- The changes listed in this section were incorporated into repository history
+  by the reconciliation baseline. Re-run the relevant checks after any further
+  changes; this historical record is not a claim of a current test run.
 
 ## Janitor / Cleaner maintenance workspace (2026-07-31)
 

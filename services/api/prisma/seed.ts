@@ -101,6 +101,23 @@ async function main() {
     });
   }
 
+  if (twoFactorSetting === true) {
+    // Email OTP does not use the TOTP secret, but Better Auth uses this
+    // plugin-owned row for account-level verification state and lockouts.
+    await prisma.twoFactor.upsert({
+      where: { userId: adminUserId },
+      update: {},
+      create: {
+        id: `email-otp-${adminUserId}`,
+        userId: adminUserId,
+        secret: crypto.randomBytes(32).toString('base64url'),
+        backupCodes: '[]',
+      },
+    });
+  } else if (twoFactorSetting === false) {
+    await prisma.twoFactor.deleteMany({ where: { userId: adminUserId } });
+  }
+
   if (adminPasswordHash) {
     await prisma.account.upsert({
       where: { providerId_accountId: { providerId: 'credential', accountId: adminUserId } },

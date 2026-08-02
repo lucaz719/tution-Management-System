@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { removeAuthToken } from '../services/api';
-import { AuthFlowError, ROLE_DEFAULT_PATHS, requestTwoFactorCode } from '../features/auth/service';
+import { AuthFlowError, ROLE_DEFAULT_PATHS } from '../features/auth/service';
 import type { AuthUser } from '../features/auth/types';
 import { authClient } from '../features/auth/auth-client';
 
@@ -15,7 +15,7 @@ interface AuthContextValue {
   login: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
   logout: () => void;
   roleRedirectPath: () => string;
-  verify2FA: () => void;
+  verify2FA: () => Promise<void>;
   resetAttemptCount: () => void;
 }
 
@@ -85,6 +85,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
     try {
       const result = await authClient.signIn.email({ email: email.trim().toLowerCase(), password, dontNavigate: true } as any);
+      if ((result?.data as any)?.twoFactorRedirect) {
+        const otpResult = await authClient.twoFactor.sendOtp();
+        if (otpResult.error) {
+          throw new AuthFlowError('TWO_FACTOR_EXPIRED', 'Unable to send a verification code right now. Please try again.');
+        }
+        const pendingUser: AuthUser = {
+          id: '',
+          email: email.trim().toLowerCase(),
+          name: email.trim().toLowerCase(),
+          role: 'TEACHER',
+          requiresTwoFactor: true,
+          firstLogin: false,
+        };
+        cacheUser(pendingUser);
+        setUser(pendingUser);
+        setAttemptCount(0);
+        return;
+      }
       const sessionData = result?.data ? (await authClient.getSession()).data : null;
       if (!sessionData?.user) {
         throw new AuthFlowError('INVALID_CREDENTIALS', 'Invalid email or password.');
@@ -95,9 +113,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(nextUser);
       setAttemptCount(0);
 
-      if (nextUser.requiresTwoFactor) {
-        await requestTwoFactorCode(nextUser.email);
-      }
     } catch (error) {
       const nextAttemptCount = attemptCount + 1;
       setAttemptCount(nextAttemptCount);
@@ -130,12 +145,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return ROLE_DEFAULT_PATHS[user.role] ?? '/login';
   }, [user]);
 
-  const verify2FA = useCallback(() => {
-    if (!user) return;
-    const updatedUser = { ...user, requiresTwoFactor: false };
-    cacheUser(updatedUser);
-    setUser(updatedUser);
-  }, [user]);
+  const verify2FA = useCallback(async () => {
+    const sessionData = (await authClient.getSession()).data;
+    if (!sessionData?.user) {
+      throw new AuthFlowError('TWO_FACTOR_INVALID', 'Two-factor verification did not create a session. Please sign in again.');
+    }
+    const verifiedUser = mapSessionUser(sessionData.user);
+    cacheUser(verifiedUser);
+    setUser(verifiedUser);
+  }, []);
 
   const value = useMemo<AuthContextValue>(() => ({
     user,

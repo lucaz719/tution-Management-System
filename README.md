@@ -159,17 +159,30 @@ connectIPS is disabled by default. Configure the `CONNECTIPS_*` values shown in
 `services/api/.env.example` using NCHL-issued UAT credentials. The creditor PFX
 must be supplied as base64 and must never be committed.
 
-Register these static API return URLs with NCHL:
+Register the publicly reachable static **HTTPS staging API** return URLs with
+NCHL (never `localhost`):
 
 ```text
-http://localhost:3001/api/finances/connectips/return/success
-http://localhost:3001/api/finances/connectips/return/failure
+https://api.staging.sanskardipshikshalaya.com.np/api/finances/connectips/return/success
+https://api.staging.sanskardipshikshalaya.com.np/api/finances/connectips/return/failure
 ```
 
-Use the corresponding HTTPS production URLs for live certification. Run
-`connectips-revalidate` through the protected cron endpoint on a five-minute
-schedule to reconcile successful payments when the customer closes the browser
-before returning.
+ConnectIPS redirects the payer's browser to these URLs; it is not a webhook.
+TMS then validates the transaction server-to-server before changing an invoice
+to paid. Use the corresponding HTTPS production URLs only during live
+certification.
+
+After UAT is enabled, run the server-only reconciliation command every five
+minutes to recover payments where the customer closes the browser before
+returning:
+
+```powershell
+npm run connectips:reconcile --workspace @tms/api
+```
+
+The protected `connectips-revalidate` API action is an on-demand,
+tenant-scoped administrative retry; it is not a replacement for the server
+scheduler.
 
 ## Development provisioning flow
 
@@ -251,9 +264,18 @@ Production requirements:
 
 ## Documentation
 
-- [Authentication and authorization handoff](documents/AUTH_AND_AUTHORIZATION_HANDOFF.md)
-- [Authentication security audit](documents/audit-auth-security.md)
-- [Web/backend audit](documents/audit-web-backend-codebase.md)
-- and kindly read .memory folder before development and update afterward
+- [Operational working memory and current project status](.memory) — read this
+  first before development and update it in the same change set when current
+  state, validation, known gaps, or next work changes.
+- [Authentication and authorization handoff](documents/auth-docs/AUTH_AND_AUTHORIZATION_HANDOFF.md)
+  — active runbook for the authentication and authorization boundary.
+- [Authentication security audit](documents/auth-docs/audit-auth-security.md)
+  — historical assessment; its retired JWT findings are not the current design.
+- [Web/backend audit](documents/code-audits/audit-web-backend-codebase.md)
+  — historical assessment; revalidate findings before acting on them.
+- [Tenant Admin API gaps](documents/frontend-handoffs/TENANT_ADMIN_API_GAPS.md)
+  — current record of intentionally unavailable Tenant Admin contracts.
 
-The handoff document is the operational source of truth for continuing authentication, authorization, testing, and deployment work.
+`.memory` is the operational source of truth for current implementation state,
+validation status, known gaps, and work priority. The linked handoff is the
+authoritative detailed guide for authentication and authorization only.

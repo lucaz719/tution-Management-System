@@ -1,18 +1,40 @@
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
-import { customSession } from 'better-auth/plugins';
+import { customSession, twoFactor } from 'better-auth/plugins';
 import bcrypt from 'bcryptjs';
 import prisma from './db';
+import { sendVerificationCode } from './delivery';
+import { validateRuntimeConfig } from './runtime-config';
 
-const authSecret = process.env.BETTER_AUTH_SECRET;
-if (!authSecret) {
-  throw new Error('BETTER_AUTH_SECRET is required before starting the API.');
-}
+const runtimeConfig = validateRuntimeConfig();
 
 export const auth = betterAuth({
-  secret: authSecret,
-  baseURL: process.env.BETTER_AUTH_URL || 'http://localhost:3001',
-  trustedOrigins: [process.env.WEB_ORIGIN || 'http://localhost:5173'],
+  secret: runtimeConfig.authSecret,
+  appName: 'TMS',
+  baseURL: runtimeConfig.authUrl,
+  trustedOrigins: [runtimeConfig.webOrigin],
+  // Store counters in PostgreSQL so limits survive restarts and apply to every
+  // API instance. The long default window also prevents cleanup from removing
+  // an active custom-rule counter.
+  rateLimit: {
+    enabled: true,
+    storage: 'database',
+    window: 15 * 60,
+    max: 100,
+    customRules: {
+      '/sign-in/email': { window: 15 * 60, max: 5 },
+      '/two-factor/send-otp': { window: 15 * 60, max: 5 },
+      '/two-factor/verify-otp': { window: 15 * 60, max: 5 },
+      '/request-password-reset': { window: 15 * 60, max: 5 },
+    },
+  },
+  // Do not accept a caller-supplied forwarding header until the production
+  // reverse proxy is explicitly configured as trusted. With no configured
+  // proxy, Better Auth uses its safe shared bucket instead of trusting a
+  // spoofable client IP value.
+  advanced: {
+    ipAddress: { ipAddressHeaders: [] },
+  },
   database: prismaAdapter(prisma, {
     provider: 'postgresql',
   }),
@@ -38,6 +60,19 @@ export const auth = betterAuth({
     updateAge: 60 * 60,
   },
   plugins: [
+    twoFactor({
+      // TMS currently supports the existing email-delivered OTP flow. The
+      // plugin discards the password-created session until that OTP is proven.
+      totpOptions: { disable: true },
+      otpOptions: {
+        period: 5,
+        allowedAttempts: 5,
+        storeOTP: 'hashed',
+        sendOTP: async ({ user, otp }) => {
+          await sendVerificationCode(user.email, otp, 'TWO_FACTOR');
+        },
+      },
+    }),
     customSession(async ({ user, session }) => {
       const assignments = await prisma.userRole.findMany({
         where: { userId: user.id },

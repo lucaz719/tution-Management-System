@@ -213,11 +213,20 @@ export async function validateAndConfirmConnectIps(txnId: string) {
   });
 }
 
-export async function reconcilePendingConnectIps(limit = 50): Promise<{ checked: number; confirmed: number }> {
+export interface ReconcilePendingConnectIpsOptions {
+  /** Omit only for a trusted server-side scheduler that intentionally processes every tenant. */
+  tenantId?: string;
+  limit?: number;
+}
+
+export async function reconcilePendingConnectIps(
+  { tenantId, limit = 50 }: ReconcilePendingConnectIpsOptions = {},
+): Promise<{ checked: number; confirmed: number }> {
   const staleBefore = new Date(Date.now() - 2 * 60 * 1000);
   const attempts = await prisma.paymentAttempt.findMany({
     where: {
       provider: 'CONNECTIPS',
+      ...(tenantId ? { tenantId } : {}),
       status: { in: ['PENDING', 'INCOMPLETE'] },
       OR: [{ lastValidatedAt: null }, { lastValidatedAt: { lt: staleBefore } }],
     },

@@ -7,7 +7,6 @@ import {
   AuthFlowError,
   getFriendlyErrorMessage,
   resendTwoFactorChallenge,
-  trustDeviceForThirtyDays,
   verifyTwoFactorChallenge,
 } from '../../features/auth/service';
 import { maskEmail } from '../../features/auth/utils';
@@ -37,11 +36,8 @@ export function TwoFactorPage() {
     setStatusMessage('');
 
     try {
-      await verifyTwoFactorChallenge(user.email, otpValue);
-      if (trustDevice) {
-        trustDeviceForThirtyDays(user.email);
-      }
-      verify2FA();
+      await verifyTwoFactorChallenge(user.email, otpValue, trustDevice);
+      await verify2FA();
       showToast('Two-factor verification successful.', 'success');
     } catch (error) {
       const nextAttemptsRemaining = attemptsRemaining - 1;

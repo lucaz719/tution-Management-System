@@ -1,5 +1,12 @@
 # Web & Backend Codebase Audit
 
+> **Historical assessment — not current release posture.** This review reflects
+> a static review on 2026-07-27 and predates the Better Auth hardening and later
+> portal work. Use `.memory` for current implementation status and
+> `documents/auth-docs/AUTH_AND_AUTHORIZATION_HANDOFF.md` for the active
+> authentication and authorization runbook. Revalidate every finding against
+> the current code before scheduling work from this document.
+
 **Scope:** `apps/web`, `services/api`, and `packages/types` only. The mobile application was intentionally not inspected.  
 **Method:** static review plus `npm run build` on 2026-07-27. The build passed; Webpack reported two asset-size warnings.
 

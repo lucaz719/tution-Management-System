@@ -42,18 +42,6 @@ export const api = {
         body: JSON.stringify({ resetToken, newPassword }),
       });
     },
-    requestTwoFactorCode: async (email: string) => {
-      return request<{ success: boolean }>('/auth/2fa/request', {
-        method: 'POST',
-        body: JSON.stringify({ email }),
-      });
-    },
-    verifyTwoFactorCode: async (email: string, code: string) => {
-      return request<{ success: boolean }>('/auth/2fa/verify', {
-        method: 'POST',
-        body: JSON.stringify({ email, code }),
-      });
-    },
   },
 
   // Finances
