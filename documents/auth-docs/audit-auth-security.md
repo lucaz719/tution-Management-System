@@ -1,5 +1,12 @@
 # Authentication, Authorization & Security Audit
 
+> **Historical assessment — not current release posture.** This review records
+> the retired JWT-based design and its findings. The repository now uses Better
+> Auth database-backed sessions and centralized tenant/branch scope controls.
+> Use `.memory` for current status and
+> `AUTH_AND_AUTHORIZATION_HANDOFF.md` for the active runbook. Revalidate every
+> finding against the current code before scheduling work from this document.
+
 **Scope:** web and backend authentication/authorization only; mobile excluded.  
 **Assessment:** historical review. The JWT design described below has been retired; Better Auth sessions and centralized scope enforcement are now the supported design. Re-evaluate any remaining findings against the current implementation before release.
 

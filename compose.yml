@@ -7,7 +7,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-tms}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -23,7 +23,7 @@ services:
       context: .
       dockerfile: services/api/Dockerfile
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-tms}?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/${POSTGRES_DB:-tms}?schema=public
     command: ["npx", "prisma", "migrate", "deploy"]
     depends_on:
       db:
@@ -36,14 +36,18 @@ services:
       dockerfile: services/api/Dockerfile
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-tms}?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/${POSTGRES_DB:-tms}?schema=public
       PORT: 3001
-      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-local-development-secret-change-before-sharing}
-      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3001}
-      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:5173}
+      NODE_ENV: ${NODE_ENV:-production}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET must be set}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL must be set}
+      WEB_ORIGIN: ${WEB_ORIGIN:?WEB_ORIGIN must be set}
       PLATFORM_ADMIN_ENABLED: ${PLATFORM_ADMIN_ENABLED:-false}
       SMS_PROVIDER: ${SMS_PROVIDER:-MOCK}
-      NEPALPAY_WEBHOOK_SECRET: ${NEPALPAY_WEBHOOK_SECRET:-local-nepalpay-webhook-secret-change-me}
+      NEPALPAY_WEBHOOK_SECRET: ${NEPALPAY_WEBHOOK_SECRET:?NEPALPAY_WEBHOOK_SECRET must be set}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      SEED_ADMIN_2FA: ${SEED_ADMIN_2FA:-false}
       CONNECTIPS_ENABLED: ${CONNECTIPS_ENABLED:-false}
       CONNECTIPS_MERCHANT_ID: ${CONNECTIPS_MERCHANT_ID:-}
       CONNECTIPS_APP_ID: ${CONNECTIPS_APP_ID:-}

@@ -262,6 +262,20 @@ model User {
   image            String?
   sessions         Session[]
   accounts         Account[]
+  twoFactor        TwoFactor?
+}
+
+model TwoFactor {
+  id                      String    @id @default(cuid())
+  secret                  String
+  backupCodes             String
+  userId                  String    @unique
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  verified                Boolean   @default(true)
+  failedVerificationCount Int       @default(0)
+  lockedUntil             DateTime?
+
+  @@index([secret])
 }
 
 // 5. User-Role-Branch Junction (Handles multiple branches per teacher/admin)
@@ -981,6 +995,26 @@ model Verification {
   expiresAt  DateTime
   createdAt  DateTime? @default(now())
   updatedAt  DateTime? @updatedAt
+}
+
+// Better Auth's persistent, cross-instance request limiter.
+model RateLimit {
+  id          String @id @default(uuid())
+  key         String @unique
+  count       Int
+  lastRequest BigInt
+}
+
+// Contains no credentials, email address, or raw IP address. It records only
+// security-relevant failed authentication outcomes for operational monitoring.
+model AuthSecurityEvent {
+  id         String   @id @default(uuid())
+  event      String
+  sourceHash String
+  statusCode Int
+  createdAt  DateTime @default(now())
+
+  @@index([event, createdAt])
 }
 
 model VerificationCode {

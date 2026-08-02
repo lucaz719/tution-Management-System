@@ -1,8 +1,14 @@
 # TMS Authentication and Authorization Handoff
 
-**Document status:** Active implementation runbook
-**Last updated:** 2026-07-28
+**Document status:** Active implementation runbook for authentication and authorization
+**Last reconciled:** 2026-08-02
 **Audience:** API, web, mobile, database, security, and release engineers
+
+> **Authority boundary:** `.memory` is the repository-wide operational source
+> of truth. This document is authoritative only for the detailed
+> authentication, authorization, tenant-isolation, and related release
+> procedures described here. Reconcile it with `.memory` whenever either
+> boundary changes.
 
 This document explains how the Tuition Management System (TMS) authentication, tenant isolation, branch authority, testing, and deployment flow work after the security and Better Auth update. A new team member should be able to use this document to run the system locally, validate the security model, and continue implementation safely.
 

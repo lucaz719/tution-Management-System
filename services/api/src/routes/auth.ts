@@ -10,9 +10,9 @@ import {
   generateOtpCode,
   generateResetToken,
   hashCode,
-  isRateLimited,
   type VerificationPurpose,
 } from '../utils/otp';
+import { consumePersistentRateLimit } from '../utils/persistent-rate-limit';
 
 const router = Router();
 
@@ -119,8 +119,12 @@ router.post('/forgot-password', async (req: TenantRequest, res: Response) => {
     return res.status(400).json({ error: 'Email is required.' });
   }
 
-  if (isRateLimited(rateKey(req, 'forgot', email))) {
-    return res.status(429).json({ error: 'Too many OTP requests. Please wait a few minutes and try again.' });
+  const limit = await consumePersistentRateLimit(rateKey(req, 'forgot', email), 15 * 60 * 1000, 5);
+  if (!limit.allowed) {
+    return res
+      .set('X-Retry-After', String(limit.retryAfterSeconds))
+      .status(429)
+      .json({ error: 'Too many OTP requests. Please wait a few minutes and try again.' });
   }
 
   try {
@@ -149,8 +153,12 @@ router.post('/verify-reset-otp', async (req: TenantRequest, res: Response) => {
     return res.status(400).json({ error: 'Email and OTP are required.' });
   }
 
-  if (isRateLimited(rateKey(req, 'verify-reset', email))) {
-    return res.status(429).json({ error: 'Too many verification attempts. Please wait a few minutes and try again.' });
+  const limit = await consumePersistentRateLimit(rateKey(req, 'verify-reset', email), 15 * 60 * 1000, 5);
+  if (!limit.allowed) {
+    return res
+      .set('X-Retry-After', String(limit.retryAfterSeconds))
+      .status(429)
+      .json({ error: 'Too many verification attempts. Please wait a few minutes and try again.' });
   }
 
   try {
@@ -241,65 +249,6 @@ router.post('/reset-password', async (req: TenantRequest, res: Response) => {
     return res.json({ success: true });
   } catch (error: any) {
     console.error('Reset-password error:', error);
-    return res.status(500).json({ error: 'Internal server error.' });
-  }
-});
-
-router.post('/2fa/request', async (req: TenantRequest, res: Response) => {
-  const email = normalizeEmail(req.body?.email);
-
-  if (!email) {
-    return res.status(400).json({ error: 'Email is required.' });
-  }
-
-  if (isRateLimited(rateKey(req, '2fa-request', email))) {
-    return res.status(429).json({ error: 'Too many code requests. Please wait a few minutes and try again.' });
-  }
-
-  try {
-    const user = await prisma.user.findUnique({ where: { email } });
-
-    if (user && user.status === 'ACTIVE' && user.twoFactorEnabled) {
-      const code = generateOtpCode();
-      await issueCode(email, 'TWO_FACTOR', code, OTP_TTL_MS);
-      await sendVerificationCode(email, code, 'TWO_FACTOR');
-    }
-
-    return res.json({ success: true });
-  } catch (error: any) {
-    console.error('2FA request error:', error);
-    return res.status(500).json({ error: 'Internal server error.' });
-  }
-});
-
-router.post('/2fa/verify', async (req: TenantRequest, res: Response) => {
-  const email = normalizeEmail(req.body?.email);
-  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
-
-  if (!email || !code) {
-    return res.status(400).json({ error: 'Email and verification code are required.' });
-  }
-
-  if (isRateLimited(rateKey(req, '2fa-verify', email))) {
-    return res.status(429).json({ error: 'Too many verification attempts. Please wait a few minutes and try again.' });
-  }
-
-  try {
-    const result = await consumeCode(email, 'TWO_FACTOR', code);
-
-    if (result === 'expired') {
-      return res.status(410).json({ error: 'Your verification code has expired. Please request a new one.' });
-    }
-    if (result === 'locked') {
-      return res.status(429).json({ error: 'Too many incorrect attempts. Please request a new code.' });
-    }
-    if (result === 'invalid') {
-      return res.status(401).json({ error: 'The verification code you entered is incorrect.' });
-    }
-
-    return res.json({ success: true });
-  } catch (error: any) {
-    console.error('2FA verify error:', error);
     return res.status(500).json({ error: 'Internal server error.' });
   }
 });

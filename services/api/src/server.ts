@@ -27,13 +27,22 @@ import parentRouter from './routes/parent';
 
 import { toNodeHandler } from 'better-auth/node';
 import { auth } from './utils/auth';
+import { validateRuntimeConfig } from './utils/runtime-config';
+import { monitorCredentialSignIn } from './middleware/auth-security-monitor';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
+const runtimeConfig = validateRuntimeConfig();
+const parseLegacyAuthJson = express.json();
+const legacyAuthPaths = new Set([
+  '/forgot-password',
+  '/verify-reset-otp',
+  '/reset-password',
+]);
 
 // Enable CORS and parsing of JSON payloads
 app.use(cors({
-  origin: process.env.WEB_ORIGIN || 'http://localhost:5173',
+  origin: runtimeConfig.webOrigin,
   credentials: true,
 }));
 
@@ -49,9 +58,17 @@ app.get('/api/health', (req: TenantRequest, res: Response) => {
 // Serve static login UI without tenant isolation
 app.use('/login', staticRouter);
 
+// The existing password-reset flow is owned by our legacy router. Parse JSON
+// only for these three endpoints so Better Auth still receives its own raw
+// requests and body parsing remains correct.
+app.use('/api/auth', (req, res, next) => {
+  if (legacyAuthPaths.has(req.path)) return parseLegacyAuthJson(req, res, next);
+  return next();
+}, authRouter);
+
 // Better Auth must receive the request before express.json() so its body
 // parser and cookie/session handling remain intact.
-app.all('/api/auth/*', toNodeHandler(auth));
+app.all('/api/auth/*', monitorCredentialSignIn, toNodeHandler(auth));
 
 app.use(express.json());
 
@@ -59,7 +76,6 @@ app.use(express.json());
 app.use(tenantMiddleware);
 
 // Bind domain routers
-app.use('/api/auth', authRouter);
 // Tenant provisioning is a development operator surface only. It is not
 // mounted in the single-institution production deployment.
 if (process.env.PLATFORM_ADMIN_ENABLED === 'true') {

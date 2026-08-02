@@ -251,9 +251,18 @@ Production requirements:
 
 ## Documentation
 
-- [Authentication and authorization handoff](documents/AUTH_AND_AUTHORIZATION_HANDOFF.md)
-- [Authentication security audit](documents/audit-auth-security.md)
-- [Web/backend audit](documents/audit-web-backend-codebase.md)
-- and kindly read .memory folder before development and update afterward
+- [Operational working memory and current project status](.memory) — read this
+  first before development and update it in the same change set when current
+  state, validation, known gaps, or next work changes.
+- [Authentication and authorization handoff](documents/auth-docs/AUTH_AND_AUTHORIZATION_HANDOFF.md)
+  — active runbook for the authentication and authorization boundary.
+- [Authentication security audit](documents/auth-docs/audit-auth-security.md)
+  — historical assessment; its retired JWT findings are not the current design.
+- [Web/backend audit](documents/code-audits/audit-web-backend-codebase.md)
+  — historical assessment; revalidate findings before acting on them.
+- [Tenant Admin API gaps](documents/frontend-handoffs/TENANT_ADMIN_API_GAPS.md)
+  — current record of intentionally unavailable Tenant Admin contracts.
 
-The handoff document is the operational source of truth for continuing authentication, authorization, testing, and deployment work.
+`.memory` is the operational source of truth for current implementation state,
+validation status, known gaps, and work priority. The linked handoff is the
+authoritative detailed guide for authentication and authorization only.
