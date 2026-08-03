@@ -3,8 +3,19 @@ import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { canAccessBranch, hasBranchPermission, isTenantAdmin } from '../utils/access-control';
+import { parsePlainRecord, parseStrictKeys, readFiniteNumber, readTrimmedString, type ValidationResult } from '../utils/request-validation';
 
 const router = Router();
+
+function parseEnrollmentIds(body: unknown, additional: readonly string[] = []) {
+  const shape = parseStrictKeys(body, ['studentId', 'courseId', ...additional]);
+  if (!shape.success) return shape;
+  const studentId = readTrimmedString(shape.data, 'studentId', { required: true, maxLength: 128, message: 'A valid studentId is required.' });
+  const courseId = readTrimmedString(shape.data, 'courseId', { required: true, maxLength: 128, message: 'A valid courseId is required.' });
+  if (!studentId.success) return studentId;
+  if (!courseId.success) return courseId;
+  return { success: true as const, data: { shape: shape.data, studentId: studentId.data, courseId: courseId.data } };
+}
 
 // 1. Create a new Course (Tenant Admin/Branch Admin)
 router.post(
@@ -233,13 +244,13 @@ router.post(
   '/enroll',
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
-    const { studentId, courseId, classId, admissionDate } = req.body;
-
-    if (!studentId || !courseId || !classId) {
-      return res.status(400).json({
-        error: 'Missing required enrollment parameters: studentId, courseId, classId.',
-      });
-    }
+    const input = parseEnrollmentIds(req.body, ['classId', 'admissionDate']);
+    if (!input.success) return res.status(400).json({ error: input.error });
+    const { studentId, courseId } = input.data;
+    const classId = readTrimmedString(input.data.shape, 'classId', { required: true, maxLength: 128, message: 'A valid classId is required.' });
+    const admissionDate = readTrimmedString(input.data.shape, 'admissionDate', { required: false, maxLength: 40, message: 'admissionDate must be a valid date.' });
+    if (!classId.success) return res.status(400).json({ error: classId.error });
+    if (!admissionDate.success || (admissionDate.data && Number.isNaN(new Date(admissionDate.data).getTime()))) return res.status(400).json({ error: 'admissionDate must be a valid date.' });
 
     try {
       // 1. Fetch course and verify it belongs to the caller's tenant.
@@ -257,7 +268,7 @@ router.post(
           where: { id: studentId, user: { tenantId: req.tenantId! } },
           include: { grade: { select: { name: true } }, user: { select: { status: true } } },
         }),
-        prisma.class.findFirst({ where: { id: classId, course: { tenantId: req.tenantId! } } }),
+        prisma.class.findFirst({ where: { id: classId.data, course: { tenantId: req.tenantId! } } }),
       ]);
       if (!student) {
         return res.status(404).json({ error: 'Student not found in your institution.' });
@@ -282,7 +293,7 @@ router.post(
       }
 
       // Prevent duplicate active enrolment in the same class.
-      const dup = await prisma.enrollment.findFirst({ where: { studentId, classId, status: 'ACTIVE' } });
+      const dup = await prisma.enrollment.findFirst({ where: { studentId, classId: classId.data, status: 'ACTIVE' } });
       if (dup) {
         return res.status(409).json({ error: 'Student is already enrolled in this class.' });
       }
@@ -293,9 +304,9 @@ router.post(
         data: {
           studentId,
           courseId,
-          classId,
+          classId: classId.data,
           status: 'ACTIVE',
-          admissionDate: admissionDate ? new Date(admissionDate) : new Date(),
+          admissionDate: admissionDate.data ? new Date(admissionDate.data) : new Date(),
         },
       });
 
@@ -571,10 +582,9 @@ router.post(
   authMiddleware,
   hasPermission('manage_billing'),
   async (req: TenantRequest, res: Response) => {
-    const { studentId, courseId } = req.body;
-    if (!studentId || !courseId) {
-      return res.status(400).json({ error: 'Missing required parameters: studentId, courseId.' });
-    }
+    const input = parseEnrollmentIds(req.body);
+    if (!input.success) return res.status(400).json({ error: input.error });
+    const { studentId, courseId } = input.data;
     try {
       const [student, course] = await Promise.all([
         prisma.student.findFirst({ where: { id: studentId, user: { tenantId: req.tenantId! } } }),
@@ -608,10 +618,11 @@ router.post(
   authMiddleware,
   hasPermission('manage_billing'),
   async (req: TenantRequest, res: Response) => {
-    const { studentId, courseId, reason } = req.body;
-    if (!studentId || !courseId || !reason) {
-      return res.status(400).json({ error: 'Missing required parameters: studentId, courseId, reason.' });
-    }
+    const input = parseEnrollmentIds(req.body, ['reason']);
+    if (!input.success) return res.status(400).json({ error: input.error });
+    const { studentId, courseId } = input.data;
+    const reason = readTrimmedString(input.data.shape, 'reason', { required: true, maxLength: 2_000, message: 'An override reason is required.' });
+    if (!reason.success) return res.status(400).json({ error: reason.error });
     try {
       const [student, course] = await Promise.all([
         prisma.student.findFirst({ where: { id: studentId, user: { tenantId: req.tenantId! } } }),
@@ -635,7 +646,7 @@ router.post(
       
       return res.json({
         message: 'Admin override processed successfully. Student access unblocked.',
-        reason,
+        reason: reason.data,
       });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to override enrollment block.' });
@@ -649,11 +660,17 @@ router.post(
   authMiddleware,
   hasPermission('manage_courses'),
   async (req: TenantRequest, res: Response) => {
-    const { studentId, courseId, classId, type, customFeeSettings } = req.body;
-
-    if (!studentId || !courseId || !classId || !type) {
-      return res.status(400).json({ error: 'Missing required parameters: studentId, courseId, classId, type.' });
-    }
+    const input = parseEnrollmentIds(req.body, ['classId', 'type', 'customFeeSettings']);
+    if (!input.success) return res.status(400).json({ error: input.error });
+    const { studentId, courseId } = input.data;
+    const classId = readTrimmedString(input.data.shape, 'classId', { required: true, maxLength: 128, message: 'A valid classId is required.' });
+    const type = readTrimmedString(input.data.shape, 'type', { required: true, maxLength: 20, pattern: /^(MUSIC|SHORT_TERM|LONG_TERM|PERSONALIZED)$/, message: 'A valid specialized enrollment type is required.' });
+    const customFeeSettings: ValidationResult<Record<string, unknown>> = input.data.shape.customFeeSettings === undefined
+      ? { success: true, data: {} }
+      : parsePlainRecord(input.data.shape.customFeeSettings);
+    if (!classId.success) return res.status(400).json({ error: classId.error });
+    if (!type.success) return res.status(400).json({ error: type.error });
+    if (!customFeeSettings.success) return res.status(400).json({ error: 'customFeeSettings must be a JSON object.' });
 
     try {
       const [student, course, klass] = await Promise.all([
@@ -661,7 +678,7 @@ router.post(
           where: { id: studentId, user: { tenantId: req.tenantId!, status: 'ACTIVE' }, admissionStatus: 'ACTIVE' },
         }),
         prisma.course.findFirst({ where: { id: courseId, tenantId: req.tenantId! } }),
-        prisma.class.findFirst({ where: { id: classId, course: { tenantId: req.tenantId! } } }),
+         prisma.class.findFirst({ where: { id: classId.data, course: { tenantId: req.tenantId! } } }),
       ]);
       if (!student || !course || !klass) {
         return res.status(404).json({ error: 'Student, course, or class not found in your institution.' });
@@ -670,32 +687,32 @@ router.post(
       if (!canAccessBranch(req.user!, course.branchId)) {
         return res.status(403).json({ error: 'You cannot enroll students in this course branch.' });
       }
-      if (!['MUSIC', 'SHORT_TERM', 'LONG_TERM', 'PERSONALIZED'].includes(type) || course.type !== type) {
+       if (course.type !== type.data) {
         return res.status(400).json({ error: 'Enrollment type must match the specialized course type.' });
       }
-      const duplicate = await prisma.enrollment.findFirst({ where: { studentId, classId, status: 'ACTIVE' } });
+       const duplicate = await prisma.enrollment.findFirst({ where: { studentId, classId: classId.data, status: 'ACTIVE' } });
       if (duplicate) return res.status(409).json({ error: 'Student is already enrolled in this class.' });
       const enrollment = await prisma.enrollment.create({
           data: {
             studentId,
             courseId,
-            classId,
+             classId: classId.data,
             status: 'ACTIVE',
             admissionDate: new Date(),
           },
         });
 
       let billingDetails = {};
-      if (type === 'MUSIC') {
+       if (type.data === 'MUSIC') {
         billingDetails = {
           mode: 'INSTALLMENTS',
-          instalmentCount: customFeeSettings?.installmentsCount || 3,
-          amountPerInstallment: customFeeSettings?.amountPerInstallment || 2500,
+           instalmentCount: customFeeSettings.data.installmentsCount || 3,
+           amountPerInstallment: customFeeSettings.data.amountPerInstallment || 2500,
         };
-      } else if (type === 'SHORT_TERM') {
+       } else if (type.data === 'SHORT_TERM') {
         billingDetails = {
           mode: 'FIXED_DURATION',
-          endDate: customFeeSettings?.endDate || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+           endDate: customFeeSettings.data.endDate || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
         };
       } else {
         billingDetails = {
@@ -704,10 +721,10 @@ router.post(
       }
 
       return res.status(201).json({
-        message: `Specialized ${type} enrollment processed successfully.`,
+         message: `Specialized ${type.data} enrollment processed successfully.`,
         enrollment,
         specializedConfig: {
-          type,
+           type: type.data,
           billingDetails,
         },
       });
@@ -722,16 +739,15 @@ router.post(
   '/refund/request',
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
-    const { studentId, courseId, reason, refundAmount } = req.body;
+    const input = parseEnrollmentIds(req.body, ['reason', 'refundAmount']);
+    if (!input.success) return res.status(400).json({ error: input.error });
+    const { studentId, courseId } = input.data;
+    const reason = readTrimmedString(input.data.shape, 'reason', { required: true, maxLength: 2_000, message: 'A refund reason is required.' });
+    const refundAmount = readFiniteNumber(input.data.shape, 'refundAmount', { min: 0.01, max: 100_000_000, message: 'Refund amount must be a positive finite number.' });
+    if (!reason.success) return res.status(400).json({ error: reason.error });
+    if (!refundAmount.success) return res.status(400).json({ error: refundAmount.error });
     const tenantId = req.tenantId!;
-
-    if (!studentId || !courseId || !reason || refundAmount === undefined) {
-      return res.status(400).json({ error: 'Missing required parameters: studentId, courseId, reason, refundAmount.' });
-    }
-    const requestedAmount = Number(refundAmount);
-    if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
-      return res.status(400).json({ error: 'Refund amount must be a positive number.' });
-    }
+    const requestedAmount = refundAmount.data;
 
     try {
       const [tenantPolicy, student, course] = await Promise.all([
@@ -755,7 +771,7 @@ router.post(
             tenantId,
             studentId,
             courseId,
-            reason,
+             reason: reason.data,
             refundAmount: requestedAmount,
             deductionAmount: 0.0,
             status: 'PENDING',
