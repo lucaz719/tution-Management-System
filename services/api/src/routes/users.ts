@@ -13,7 +13,7 @@ import {
 } from '../utils/roles';
 import { UserPayload } from '@tms/types';
 import { canReleaseAdmissionLogins } from '../utils/billing-rules';
-import { parseStrictKeys, parseStrictObject } from '../utils/request-validation';
+import { parseStrictKeys, parseStrictObject, readTrimmedString } from '../utils/request-validation';
 
 const router = Router();
 
@@ -1288,6 +1288,67 @@ interface BulkStudentRow {
   parentPhone?: string;
 }
 
+function parseBulkStudentImport(body: unknown): { success: true; data: BulkStudentRow[] } | { success: false; error: string } {
+  const request = parseStrictKeys(body, ['students']);
+  if (!request.success) return request;
+  if (!Array.isArray(request.data.students) || request.data.students.length === 0 || request.data.students.length > 500) {
+    return { success: false, error: 'students must contain between 1 and 500 rows.' };
+  }
+
+  const fields = ['firstName', 'lastName', 'email', 'phone', 'branchName', 'grade', 'emergencyContact', 'parentFirstName', 'parentLastName', 'parentEmail', 'parentPhone'] as const;
+  const normalized: BulkStudentRow[] = [];
+  for (const [index, row] of request.data.students.entries()) {
+    const shape = parseStrictKeys(row, fields);
+    if (!shape.success) return { success: false, error: `Row ${index + 1}: ${shape.error}` };
+    const value = (key: typeof fields[number], required = false, email = false) => readBulkField(shape.data, key, required, email);
+    const firstName = value('firstName', true);
+    const lastName = value('lastName', true);
+    const email = value('email', true, true);
+    const phone = value('phone');
+    const branchName = value('branchName');
+    const grade = value('grade');
+    const emergencyContact = value('emergencyContact');
+    const parentFirstName = value('parentFirstName');
+    const parentLastName = value('parentLastName');
+    const parentEmail = value('parentEmail', false, true);
+    const parentPhone = value('parentPhone');
+    if (!firstName.success) return { success: false, error: `Row ${index + 1}: ${firstName.error}` };
+    if (!lastName.success) return { success: false, error: `Row ${index + 1}: ${lastName.error}` };
+    if (!email.success) return { success: false, error: `Row ${index + 1}: ${email.error}` };
+    if (!phone.success) return { success: false, error: `Row ${index + 1}: ${phone.error}` };
+    if (!branchName.success) return { success: false, error: `Row ${index + 1}: ${branchName.error}` };
+    if (!grade.success) return { success: false, error: `Row ${index + 1}: ${grade.error}` };
+    if (!emergencyContact.success) return { success: false, error: `Row ${index + 1}: ${emergencyContact.error}` };
+    if (!parentFirstName.success) return { success: false, error: `Row ${index + 1}: ${parentFirstName.error}` };
+    if (!parentLastName.success) return { success: false, error: `Row ${index + 1}: ${parentLastName.error}` };
+    if (!parentEmail.success) return { success: false, error: `Row ${index + 1}: ${parentEmail.error}` };
+    if (!parentPhone.success) return { success: false, error: `Row ${index + 1}: ${parentPhone.error}` };
+    normalized.push({
+      firstName: firstName.data,
+      lastName: lastName.data,
+      email: email.data.toLowerCase(),
+      phone: phone.data,
+      branchName: branchName.data,
+      grade: grade.data,
+      emergencyContact: emergencyContact.data,
+      parentFirstName: parentFirstName.data,
+      parentLastName: parentLastName.data,
+      parentEmail: parentEmail.data.toLowerCase(),
+      parentPhone: parentPhone.data,
+    });
+  }
+  return { success: true, data: normalized };
+}
+
+function readBulkField(body: Record<string, unknown>, key: string, required = false, email = false) {
+  return readTrimmedString(body, key, {
+    required,
+    maxLength: email ? 254 : key.includes('Phone') || key === 'phone' || key === 'emergencyContact' ? 30 : 120,
+    pattern: email ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/ : key.includes('Phone') || key === 'phone' || key === 'emergencyContact' ? /^[0-9+()\-\s]*$/ : undefined,
+    message: email ? `${key} must be a valid email address.` : `${key} must be valid text.`,
+  });
+}
+
 router.post('/bulk-students', authMiddleware, async (req: TenantRequest, res: Response) => {
   const caller = req.user as UserPayload;
   const tenantAdmin = isTenantAdmin(caller);
@@ -1296,13 +1357,9 @@ router.post('/bulk-students', authMiddleware, async (req: TenantRequest, res: Re
     return res.status(403).json({ error: 'You do not have permission to import students.' });
   }
 
-  const rows: BulkStudentRow[] = Array.isArray(req.body?.students) ? req.body.students : [];
-  if (rows.length === 0) {
-    return res.status(400).json({ error: 'No rows provided.' });
-  }
-  if (rows.length > 500) {
-    return res.status(400).json({ error: 'Too many rows in one import (max 500). Split the file.' });
-  }
+  const input = parseBulkStudentImport(req.body);
+  if (!input.success) return res.status(400).json({ error: input.error });
+  const rows = input.data;
 
   // Resolve the tenant's branches once, scoped for branch admins.
   const branches = await prisma.branch.findMany({

@@ -55,6 +55,7 @@ export function readTrimmedString(
   if (raw === undefined && !options.required) return { success: true, data: '' };
   if (typeof raw !== 'string') return { success: false, error: options.message };
   const value = raw.trim();
+  if (!value && !options.required) return { success: true, data: '' };
   if (
     (options.required && !value) ||
     (options.minLength !== undefined && value.length < options.minLength) ||

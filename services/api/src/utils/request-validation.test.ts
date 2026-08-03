@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { authInputSchemas, parseStrictKeys, parseStrictObject, readFiniteNumber } from './request-validation';
+import { authInputSchemas, parseStrictKeys, parseStrictObject, readFiniteNumber, readTrimmedString } from './request-validation';
 
 function expectInvalid(body: unknown, expectedError: string): void {
   const result = parseStrictObject(body, authInputSchemas.forgotPassword);
@@ -53,5 +53,14 @@ if (geoShape.success) {
   assert.equal(readFiniteNumber(geoShape.data, 'gpsAccuracy', { min: 0, max: 20, message: 'invalid' }).success, true);
 }
 assert.equal(parseStrictKeys({ branchId: 'branch-1', spoofed: true }, ['branchId']).success, false);
+assert.deepEqual(
+  readTrimmedString({ parentEmail: '' }, 'parentEmail', {
+    maxLength: 254,
+    pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+    message: 'invalid email',
+  }),
+  { success: true, data: '' },
+  'optional CSV fields may be empty while supplied values must still match their schema',
+);
 
 console.log('request-validation tests passed');
