@@ -12,7 +12,7 @@ import {
 const router = Router();
 
 router.post('/student/scores', authMiddleware, hasPermission('manage_grades'), async (req: TenantRequest, res: Response) => {
-  const { studentId, subject, assessment, score, maximum = 100, testDate } = req.body;
+  const { studentId, subject, assessment, score, maximum = 100, passMarks, percentile, resultSheetUrl, testDate } = req.body;
   const numericScore = Number(score);
   const numericMaximum = Number(maximum);
   if (!studentId || !subject?.trim() || !assessment?.trim() || !Number.isFinite(numericScore) || !Number.isFinite(numericMaximum)) {
@@ -39,6 +39,10 @@ router.post('/student/scores', authMiddleware, hasPermission('manage_grades'), a
         assessment: assessment.trim(),
         score: numericScore,
         maximum: numericMaximum,
+        passMarks: passMarks == null ? null : Number(passMarks),
+        percentile: percentile == null ? null : Number(percentile),
+        resultSheetUrl: resultSheetUrl || null,
+        publishedAt: new Date(),
         testDate: testDate ? new Date(testDate) : new Date(),
       },
     });

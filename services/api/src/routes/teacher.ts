@@ -5,141 +5,205 @@ import { authMiddleware } from '../middleware/auth';
 import { UserPayload } from '@tms/types';
 
 const router = Router();
+const ACTIVE_ENROLLMENTS = ['ACTIVE', 'BLOCKED'];
 
-function teacherBranchId(user: UserPayload): string | null {
-  const teacherRole = user.roles.find((r) => r.roleName === 'Teacher' && r.branchId);
-  return teacherRole?.branchId ?? null;
-}
-
-// Start/end of the current day for date-range queries.
 function dayBounds(date = new Date()) {
-  const start = new Date(date);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(date);
-  end.setHours(23, 59, 59, 999);
+  const start = new Date(date); start.setHours(0, 0, 0, 0);
+  const end = new Date(date); end.setHours(23, 59, 59, 999);
   return { start, end };
 }
 
-// Consolidated teacher dashboard: today's classes, the pending daily-update gate,
-// current attendance state, and the branch geofence needed to mark in.
-router.get('/dashboard', authMiddleware, async (req: TenantRequest, res: Response) => {
-  const user = req.user as UserPayload;
-  const teacherId = user.id;
-  const branchId = teacherBranchId(user);
-
-  try {
-    const { start, end } = dayBounds();
-
-    const branch = branchId
-      ? await prisma.branch.findFirst({ where: { id: branchId, tenantId: req.tenantId! } })
-      : null;
-
-    // Today's sessions (each session = one class the teacher runs today).
-    const todaySessions = await prisma.teacherSession.findMany({
-      where: { teacherId, date: { gte: start, lte: end } },
-      include: { class: { include: { course: true } } },
-      orderBy: { createdAt: 'asc' },
-    });
-
-    // Pending daily-update gate: any session (today or earlier) not yet logged.
-    const pendingSessions = await prisma.teacherSession.findMany({
-      where: { teacherId, dailyUpdateSubmitted: false },
-      include: { class: { include: { course: true } } },
-      orderBy: { date: 'asc' },
-    });
-
-    // Current attendance state from today's stamps.
-    const stamps = await prisma.teacherAttendance.findMany({
-      where: { userId: teacherId, timestamp: { gte: start, lte: end } },
-      orderBy: { timestamp: 'desc' },
-      take: 1,
-    });
-    const lastStamp = stamps[0] ?? null;
-    const checkedIn = lastStamp ? lastStamp.stampType === 'IN' || lastStamp.stampType === 'RE_IN' : false;
-
-    return res.json({
-      teacher: { id: user.id, name: `${user.firstName} ${user.lastName}` },
-      branch: branch
-        ? {
-            id: branch.id,
-            name: branch.name,
-            latitude: branch.latitude,
-            longitude: branch.longitude,
-            radiusMeters: branch.radiusMeters,
-          }
-        : null,
-      attendance: {
-        checkedIn,
-        lastStampType: lastStamp?.stampType ?? null,
-        lastStampAt: lastStamp?.timestamp ?? null,
+async function ownedClass(classId: string, teacherId: string, tenantId: string) {
+  return prisma.class.findFirst({
+    where: { id: classId, teacherId, course: { tenantId } },
+    include: {
+      course: true,
+      branch: true,
+      enrollments: {
+        where: { status: { in: ACTIVE_ENROLLMENTS } },
+        include: { student: { include: { user: true } } },
+        orderBy: { student: { user: { firstName: 'asc' } } },
       },
-      todayClasses: todaySessions.map((s) => ({
-        sessionId: s.id,
-        classId: s.classId,
-        className: s.class.name,
-        courseName: s.class.course.name,
-        schedule: s.class.schedule,
-        status: s.status,
-        dailyUpdateSubmitted: s.dailyUpdateSubmitted,
-        checkInTime: s.checkInTime,
-        checkOutTime: s.checkOutTime,
+    },
+  });
+}
+
+router.get('/workspace', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const user = req.user as UserPayload;
+  const { start, end } = dayBounds();
+  try {
+    const [classes, stamps, sessions, staff, leaves, scores] = await Promise.all([
+      prisma.class.findMany({
+        where: { teacherId: user.id, course: { tenantId: req.tenantId! } },
+        include: {
+          course: true, branch: true,
+          enrollments: { where: { status: { in: ACTIVE_ENROLLMENTS } }, include: { student: { include: { user: true } } } },
+          sessions: { orderBy: { date: 'desc' }, take: 30, include: { studentAttendance: true } },
+          syllabi: { include: { chapters: { orderBy: { position: 'asc' } }, dailyLogs: { orderBy: { logDate: 'desc' }, take: 20 } } },
+          homework: { orderBy: { createdAt: 'desc' }, take: 20 },
+        },
+        orderBy: { name: 'asc' },
+      }),
+      prisma.teacherAttendance.findMany({ where: { userId: user.id }, include: { branch: true }, orderBy: { timestamp: 'desc' }, take: 60 }),
+      prisma.teacherSession.findMany({ where: { teacherId: user.id, date: { gte: start, lte: end } }, include: { class: { include: { course: true, branch: true } } }, orderBy: { createdAt: 'asc' } }),
+      prisma.staffRecord.findFirst({ where: { userId: user.id }, include: { performanceScore: true, payrolls: { orderBy: [{ year: 'desc' }, { month: 'desc' }] } } }),
+      prisma.leave.findMany({ where: { tenantId: req.tenantId!, userId: user.id }, include: { branch: true }, orderBy: { createdAt: 'desc' } }),
+      prisma.studentScore.findMany({ where: { tenantId: req.tenantId!, recordedBy: user.id }, include: { student: { include: { user: true } } }, orderBy: { createdAt: 'desc' }, take: 100 }),
+    ]);
+    const lastStamp = stamps[0] ?? null;
+    const checkedIn = Boolean(lastStamp && ['IN', 'RE_IN'].includes(lastStamp.stampType));
+    const completedSessions = classes.flatMap((item) => item.sessions).filter((item) => ['PRESENT_CONFIRMED', 'PRESENT_UPDATE_PENDING'].includes(item.status));
+    const confirmedSessions = completedSessions.filter((item) => item.dailyUpdateSubmitted);
+    const presentStamps = stamps.filter((stamp) => ['IN', 'RE_IN'].includes(stamp.stampType));
+    const absentLeaves = leaves.filter((leave) => ['APPROVED_LEVEL1', 'APPROVED_LEVEL2'].includes(leave.status));
+    const attendanceRate = presentStamps.length + absentLeaves.length
+      ? Math.round((presentStamps.length / (presentStamps.length + absentLeaves.length)) * 100)
+      : 0;
+    return res.json({
+      generatedAt: new Date().toISOString(),
+      teacher: {
+        id: user.id, name: `${user.firstName} ${user.lastName}`, email: user.email,
+        phone: staff?.userId ? undefined : '', designation: staff?.designation ?? 'Teacher',
+        joiningDate: staff?.joiningDate ?? null, contractType: staff?.contractType ?? null,
+        branches: [...new Map(classes.map((item) => [item.branch.id, { id: item.branch.id, name: item.branch.name }])).values()],
+      },
+      statistics: {
+        attendanceRate, presentDays: presentStamps.length, approvedLeaveDays: absentLeaves.length,
+        totalSessions: completedSessions.length,
+        updateCompliance: completedSessions.length ? Math.round((confirmedSessions.length / completedSessions.length) * 100) : 0,
+        assignedClasses: classes.length,
+      },
+      attendance: { checkedIn, lastStampType: lastStamp?.stampType ?? null, lastStampAt: lastStamp?.timestamp ?? null },
+      stamps: stamps.map((stamp) => ({ ...stamp, branchName: stamp.branch.name })),
+      todayClasses: sessions.map((session) => ({
+        sessionId: session.id, classId: session.classId, className: session.class.name, courseName: session.class.course.name,
+        branch: session.class.branch, schedule: session.class.schedule, status: session.status,
+        dailyUpdateSubmitted: session.dailyUpdateSubmitted, checkInTime: session.checkInTime, checkOutTime: session.checkOutTime,
       })),
-      pendingUpdates: pendingSessions.map((s) => ({
-        sessionId: s.id,
-        classId: s.classId,
-        className: s.class.name,
-        courseName: s.class.course.name,
-        date: s.date,
+      pendingUpdates: classes.flatMap((item) => item.sessions.filter((session) => !session.dailyUpdateSubmitted).map((session) => ({
+        sessionId: session.id, classId: item.id, className: item.name, courseName: item.course.name, date: session.date,
+      }))),
+      classes: classes.map((item) => ({
+        id: item.id, name: item.name, subject: item.course.name, type: item.course.type, schedule: item.schedule,
+        branch: { id: item.branch.id, name: item.branch.name, address: item.branch.address, radiusMeters: item.branch.radiusMeters },
+        students: item.enrollments.map((enrollment) => ({ id: enrollment.student.id, name: `${enrollment.student.user.firstName} ${enrollment.student.user.lastName}`, status: enrollment.status })),
+        attendance: item.sessions.flatMap((session) => session.studentAttendance),
+        syllabi: item.syllabi, homework: item.homework,
       })),
+      results: scores.map((score) => ({ ...score, score: Number(score.score), maximum: Number(score.maximum), passMarks: score.passMarks == null ? null : Number(score.passMarks), percentile: score.percentile == null ? null : Number(score.percentile), studentName: `${score.student.user.firstName} ${score.student.user.lastName}` })),
+      profile: { performance: staff?.performanceScore ?? null, salaryStructure: staff?.salaryStructure ?? null },
+      leaves,
+      payrolls: staff?.payrolls ?? [],
     });
   } catch (error: any) {
-    return res.status(500).json({ error: 'Failed to load teacher dashboard.', details: error.message });
+    return res.status(500).json({ error: 'Failed to load teacher workspace.', details: error.message });
   }
 });
 
-// Submit the daily update for one session (clears it from the pending gate).
-router.post('/session/:sessionId/update', authMiddleware, async (req: TenantRequest, res: Response) => {
-  const user = req.user as UserPayload;
-  const { sessionId } = req.params;
-  const updateContent = typeof req.body?.updateContent === 'string' ? req.body.updateContent.trim() : '';
+router.get('/dashboard', authMiddleware, async (req: TenantRequest, res: Response) => {
+  return res.redirect(307, '/api/teacher/workspace');
+});
 
-  if (!updateContent) {
-    return res.status(400).json({ error: 'A lesson summary is required.' });
-  }
-
+router.post('/class/:classId/attendance', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const { classId } = req.params;
+  const date = req.body?.date ? new Date(req.body.date) : new Date();
+  const records = Array.isArray(req.body?.records) ? req.body.records : [];
+  if (!records.length || Number.isNaN(date.getTime())) return res.status(400).json({ error: 'Date and at least one attendance record are required.' });
+  const { start, end } = dayBounds(date);
   try {
-    // Ownership: only the assigned teacher can log their own session.
-    const session = await prisma.teacherSession.findFirst({
-      where: { id: sessionId, teacherId: user.id, class: { course: { tenantId: req.tenantId! } } },
-    });
-    if (!session) {
-      return res.status(404).json({ error: 'Session not found.' });
+    const klass = await ownedClass(classId, req.user!.id, req.tenantId!);
+    if (!klass) return res.status(404).json({ error: 'Assigned class not found.' });
+    const enrollmentMap = new Map(klass.enrollments.map((item) => [item.studentId, item]));
+    if (records.some((item: any) => !enrollmentMap.has(item.studentId) || !['PRESENT', 'ABSENT'].includes(item.status))) {
+      return res.status(422).json({ error: 'Every attendance record must belong to this class and use Present or Absent.' });
     }
-
-    const transition = await prisma.teacherSession.updateMany({
-      where: {
-        id: session.id,
-        teacherId: user.id,
-        dailyUpdateSubmitted: false,
-      },
-      data: {
-        updateContent,
-        dailyUpdateSubmitted: true,
-        status: 'PRESENT_CONFIRMED',
-      },
+    const studentUserIds = klass.enrollments.map((item) => item.student.userId);
+    const approvedLeaves = await prisma.leave.findMany({ where: { userId: { in: studentUserIds }, startDate: { lte: end }, endDate: { gte: start }, status: { in: ['APPROVED_LEVEL1', 'APPROVED_LEVEL2'] } } });
+    const excusedUsers = new Set(approvedLeaves.map((item) => item.userId));
+    const normalized: Array<{ studentId: string; status: 'PRESENT' | 'ABSENT' | 'EXCUSED' }> = records.map((item: any) => {
+      const enrollment = enrollmentMap.get(item.studentId)!;
+      if (excusedUsers.has(enrollment.student.userId)) return { studentId: item.studentId, status: 'EXCUSED' as const };
+      if (enrollment.status === 'BLOCKED' && item.status === 'PRESENT') throw new Error(`${enrollment.student.user.firstName} is fee-blocked and cannot be marked present.`);
+      return { studentId: item.studentId, status: item.status as 'PRESENT' | 'ABSENT' };
     });
-    if (transition.count !== 1) {
-      return res.status(409).json({ error: 'The daily update was already submitted by another request.' });
-    }
-    const updated = await prisma.teacherSession.findUniqueOrThrow({ where: { id: session.id } });
-
-    return res.json({
-      message: 'Daily update submitted.',
-      session: { sessionId: updated.id, dailyUpdateSubmitted: true, status: updated.status },
-    });
+    let session = await prisma.teacherSession.findFirst({ where: { teacherId: req.user!.id, classId, date: { gte: start, lte: end } } });
+    session ??= await prisma.teacherSession.create({ data: { teacherId: req.user!.id, classId, date: start } });
+    await prisma.$transaction([
+      prisma.studentAttendance.deleteMany({ where: { sessionId: session.id, markedBy: req.user!.id } }),
+      prisma.studentAttendance.createMany({ data: normalized.map((item) => ({ ...item, classId, sessionId: session!.id, date: start, markedBy: req.user!.id })) }),
+    ]);
+    return res.json({ message: 'Class attendance saved.', sessionId: session.id, records: normalized });
   } catch (error: any) {
-    return res.status(500).json({ error: 'Failed to submit daily update.', details: error.message });
+    return res.status(error.message?.includes('fee-blocked') ? 422 : 500).json({ error: error.message || 'Failed to save attendance.' });
   }
+});
+
+router.post('/syllabus', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const { classId, subject } = req.body;
+  const chapters = Array.isArray(req.body?.chapters) ? req.body.chapters.map((item: unknown) => String(item).trim()).filter(Boolean) : [];
+  if (!classId || !String(subject).trim() || !chapters.length) return res.status(400).json({ error: 'Class, subject, and at least one chapter are required.' });
+  try {
+    const klass = await ownedClass(classId, req.user!.id, req.tenantId!);
+    if (!klass) return res.status(404).json({ error: 'Assigned class not found.' });
+    const syllabus = await prisma.syllabus.create({ data: { classId, subject: String(subject).trim(), createdBy: req.user!.id, chapters: { create: chapters.map((title: string, position: number) => ({ title, position: position + 1 })) } }, include: { chapters: true } });
+    return res.status(201).json({ message: 'Syllabus shared with enrolled students.', syllabus });
+  } catch (error: any) {
+    return res.status(error.code === 'P2002' ? 409 : 500).json({ error: error.code === 'P2002' ? 'A syllabus already exists for this class and subject.' : 'Failed to create syllabus.' });
+  }
+});
+
+router.post('/syllabus/:syllabusId/log', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const { chapterId, status, notes, logDate } = req.body;
+  if (!chapterId || !['IN_PROGRESS', 'COMPLETED', 'LEFT'].includes(status)) return res.status(400).json({ error: 'Chapter and a valid progress status are required.' });
+  try {
+    const syllabus = await prisma.syllabus.findFirst({ where: { id: req.params.syllabusId, createdBy: req.user!.id, class: { teacherId: req.user!.id, course: { tenantId: req.tenantId! } }, chapters: { some: { id: chapterId } } } });
+    if (!syllabus) return res.status(404).json({ error: 'Owned syllabus chapter not found.' });
+    const date = logDate ? new Date(logDate) : new Date(); date.setHours(0, 0, 0, 0);
+    const [log] = await prisma.$transaction([
+      prisma.dailyLessonLog.upsert({ where: { chapterId_logDate: { chapterId, logDate: date } }, create: { syllabusId: syllabus.id, chapterId, teacherId: req.user!.id, classId: syllabus.classId, logDate: date, status, notes: notes?.trim() || null }, update: { status, notes: notes?.trim() || null } }),
+      prisma.syllabusChapter.update({ where: { id: chapterId }, data: { status } }),
+    ]);
+    return res.json({ message: 'Daily syllabus progress shared with students.', log });
+  } catch (error: any) { return res.status(500).json({ error: 'Failed to update syllabus progress.', details: error.message }); }
+});
+
+router.post('/results', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const { classId, subject, assessment, maximum, passMarks, testDate, resultSheetUrl } = req.body;
+  const marks = Array.isArray(req.body?.marks) ? req.body.marks : [];
+  const max = Number(maximum); const pass = Number(passMarks);
+  if (!classId || !subject?.trim() || !assessment?.trim() || !marks.length || !(max > 0) || pass < 0 || pass > max) return res.status(400).json({ error: 'Class, assessment, valid mark limits, and student marks are required.' });
+  try {
+    const klass = await ownedClass(classId, req.user!.id, req.tenantId!);
+    if (!klass) return res.status(404).json({ error: 'Assigned class not found.' });
+    const allowed = new Set(klass.enrollments.map((item) => item.studentId));
+    const numeric = marks.map((item: any) => ({ studentId: String(item.studentId), score: Number(item.score) }));
+    if (numeric.some((item: any) => !allowed.has(item.studentId) || item.score < 0 || item.score > max || !Number.isFinite(item.score))) return res.status(422).json({ error: 'Each mark must belong to an enrolled student and be within the full marks.' });
+    const sorted = numeric.map((item: any) => item.score).sort((a: number, b: number) => a - b);
+    const created = await prisma.$transaction(numeric.map((item: any) => prisma.studentScore.create({ data: {
+      tenantId: req.tenantId!, studentId: item.studentId, recordedBy: req.user!.id, subject: subject.trim(), assessment: assessment.trim(),
+      score: item.score, maximum: max, passMarks: pass, percentile: Math.round((sorted.filter((value: number) => value <= item.score).length / sorted.length) * 10000) / 100,
+      resultSheetUrl: resultSheetUrl || null, testDate: testDate ? new Date(testDate) : new Date(), publishedAt: null,
+    } })));
+    return res.status(201).json({ message: 'Result draft saved. Share it when ready.', resultIds: created.map((item) => item.id) });
+  } catch (error: any) { return res.status(500).json({ error: 'Failed to save result draft.', details: error.message }); }
+});
+
+router.post('/results/share', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const ids = Array.isArray(req.body?.resultIds) ? req.body.resultIds.map(String) : [];
+  if (!ids.length) return res.status(400).json({ error: 'Select at least one result to share.' });
+  const update = await prisma.studentScore.updateMany({ where: { id: { in: ids }, tenantId: req.tenantId!, recordedBy: req.user!.id, publishedAt: null }, data: { publishedAt: new Date() } });
+  if (!update.count) return res.status(409).json({ error: 'These results were already shared or are not yours.' });
+  return res.json({ message: `${update.count} student result${update.count === 1 ? '' : 's'} shared.`, sharedCount: update.count });
+});
+
+router.post('/session/:sessionId/update', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const updateContent = typeof req.body?.updateContent === 'string' ? req.body.updateContent.trim() : '';
+  if (!updateContent) return res.status(400).json({ error: 'A lesson summary is required.' });
+  try {
+    const transition = await prisma.teacherSession.updateMany({ where: { id: req.params.sessionId, teacherId: req.user!.id, dailyUpdateSubmitted: false, class: { course: { tenantId: req.tenantId! } } }, data: { updateContent, dailyUpdateSubmitted: true, status: 'PRESENT_CONFIRMED' } });
+    if (!transition.count) return res.status(409).json({ error: 'Session not found or its update was already submitted.' });
+    return res.json({ message: 'Daily update submitted.', session: { sessionId: req.params.sessionId, dailyUpdateSubmitted: true, status: 'PRESENT_CONFIRMED' } });
+  } catch (error: any) { return res.status(500).json({ error: 'Failed to submit daily update.', details: error.message }); }
 });
 
 export default router;

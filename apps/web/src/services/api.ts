@@ -152,31 +152,25 @@ export const api = {
 
   // Teacher workspace
   teacher: {
-    getDashboard: async () => {
-      return request<{
-        teacher: { id: string; name: string };
-        branch: { id: string; name: string; latitude: number; longitude: number; radiusMeters: number } | null;
-        attendance: { checkedIn: boolean; lastStampType: string | null; lastStampAt: string | null };
-        todayClasses: Array<{
-          sessionId: string;
-          classId: string;
-          className: string;
-          courseName: string;
-          schedule: any;
-          status: string;
-          dailyUpdateSubmitted: boolean;
-          checkInTime: string | null;
-          checkOutTime: string | null;
-        }>;
-        pendingUpdates: Array<{ sessionId: string; classId: string; className: string; courseName: string; date: string }>;
-      }>('/teacher/dashboard');
-    },
+    getDashboard: async () => request<any>('/teacher/workspace'),
     submitSessionUpdate: async (sessionId: string, updateContent: string) => {
       return request<{ message: string; session: any }>(`/teacher/session/${sessionId}/update`, {
         method: 'POST',
         body: JSON.stringify({ updateContent }),
       });
     },
+    saveClassAttendance: async (classId: string, date: string, records: Array<{ studentId: string; status: 'PRESENT' | 'ABSENT' }>) =>
+      request<any>(`/teacher/class/${classId}/attendance`, { method: 'POST', body: JSON.stringify({ date, records }) }),
+    createSyllabus: async (payload: { classId: string; subject: string; chapters: string[] }) =>
+      request<any>('/teacher/syllabus', { method: 'POST', body: JSON.stringify(payload) }),
+    updateSyllabusLog: async (syllabusId: string, payload: { chapterId: string; status: 'IN_PROGRESS' | 'COMPLETED' | 'LEFT'; notes?: string; logDate?: string }) =>
+      request<any>(`/teacher/syllabus/${syllabusId}/log`, { method: 'POST', body: JSON.stringify(payload) }),
+    createHomework: async (payload: { classId: string; subject: string; title: string; description?: string; contentUrl?: string; deadline: string }) =>
+      request<any>('/homework', { method: 'POST', body: JSON.stringify(payload) }),
+    saveResultDraft: async (payload: any) => request<{ message: string; resultIds: string[] }>('/teacher/results', { method: 'POST', body: JSON.stringify(payload) }),
+    shareResults: async (resultIds: string[]) => request<any>('/teacher/results/share', { method: 'POST', body: JSON.stringify({ resultIds }) }),
+    requestLeave: async (payload: { branchId: string; leaveType: string; startDate: string; endDate: string; reason: string }) =>
+      request<any>('/leaves/request', { method: 'POST', body: JSON.stringify(payload) }),
   },
 
   // Geo attendance (Teacher)

@@ -18,6 +18,7 @@ type StudentView =
   | 'home'
   | 'timetable'
   | 'homework'
+  | 'syllabus'
   | 'results'
   | 'attendance'
   | 'fees'
@@ -30,6 +31,7 @@ const VIEW_TITLES: Record<StudentView, [string, string]> = {
   home: ['Student dashboard', 'Here is what needs your attention today.'],
   timetable: ['My timetable', 'Every enrolled course, merged into one schedule.'],
   homework: ['Homework', 'Your pending assignments and due dates.'],
+  syllabus: ['Syllabus progress', 'Chapter plans and daily progress shared by your teachers.'],
   results: ['Results & insights', 'Published scores, class comparisons, and subject trends.'],
   attendance: ['Attendance', 'Your teacher-marked session record.'],
   fees: ['Fees & payment', 'Billing cycles, itemized dues, and Nepal Pay.'],
@@ -255,6 +257,12 @@ function ResultsView() {
       </div>
     </div>
   );
+}
+
+function SyllabusView() {
+  const { syllabi } = useStudentData();
+  const tone = (status: string) => status === 'COMPLETED' ? 'success' : status === 'IN_PROGRESS' ? 'warning' : 'error';
+  return <div className="student-view"><div className="student-live-note" role="status">{icon('sync')}<span>Teacher syllabus updates appear here on your next automatic refresh.</span></div>{syllabi.length ? syllabi.map((syllabus) => <section className="student-card" key={syllabus.id}><SectionHeader title={syllabus.subject} description={`${syllabus.className} · ${syllabus.chapters.length} chapters`} /><div className="student-syllabus-list">{syllabus.chapters.map((chapter) => { const latest = syllabus.dailyLogs.find((log) => log.chapterId === chapter.id); return <article key={chapter.id} className={`is-${tone(chapter.status)}`}><span>{chapter.position}</span><div><h3>{chapter.title}</h3><p>{latest?.notes || (chapter.status === 'COMPLETED' ? 'Chapter completed' : chapter.status === 'IN_PROGRESS' ? 'Currently being taught' : 'Not covered / left')}</p>{latest ? <small>Updated {latest.logDate}</small> : null}</div><StatusPill label={chapter.status === 'COMPLETED' ? 'Completed' : chapter.status === 'IN_PROGRESS' ? 'In progress' : 'Left'} iconName={chapter.status === 'COMPLETED' ? 'check_circle' : chapter.status === 'IN_PROGRESS' ? 'pending' : 'cancel'} tone={tone(chapter.status)} /></article>; })}</div></section>) : <section className="student-card"><EmptyState title="No syllabus shared" message="Teacher-created chapter plans will appear here." iconName="menu_book" /></section>}</div>;
 }
 
 function attendanceTone(state: AttendanceState) {
@@ -489,13 +497,14 @@ export function StudentPortal() {
   const content = view === 'home' ? <DashboardView go={go} />
     : view === 'timetable' ? <TimetableView go={go} />
       : view === 'homework' ? <HomeworkView />
-        : view === 'results' ? <ResultsView />
-          : view === 'attendance' ? <AttendanceView />
-            : view === 'fees' ? <FeesView />
-              : view === 'digital-id' ? <DigitalIdView />
-                : view === 'certificates' ? <CertificatesView />
-                  : view === 'calendar' ? <CalendarView />
-                    : <NotificationsView go={go} readIds={readIds} markRead={markRead} markAllRead={markAllRead} />;
+        : view === 'syllabus' ? <SyllabusView />
+          : view === 'results' ? <ResultsView />
+            : view === 'attendance' ? <AttendanceView />
+              : view === 'fees' ? <FeesView />
+                : view === 'digital-id' ? <DigitalIdView />
+                  : view === 'certificates' ? <CertificatesView />
+                    : view === 'calendar' ? <CalendarView />
+                      : <NotificationsView go={go} readIds={readIds} markRead={markRead} markAllRead={markAllRead} />;
 
   return (
     <StudentDataContext.Provider value={data}><div className="student-portal">

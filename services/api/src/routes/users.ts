@@ -466,6 +466,7 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
               include: {
                 assignedTeacher: { select: { firstName: true, lastName: true } },
                 branch: { select: { name: true, address: true } },
+                syllabi: { include: { chapters: { orderBy: { position: 'asc' } }, dailyLogs: { orderBy: { logDate: 'desc' }, take: 20 } } },
               },
             },
           },
@@ -496,7 +497,7 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
       : [];
 
     const branchIds = Array.from(new Set(student.enrollments.map((enrollment) => enrollment.class.branchId)));
-    const [calendarRows, leaveRows] = await Promise.all([
+    const [calendarRows, leaveRows, scoreRows] = await Promise.all([
       prisma.academicEvent.findMany({
         where: {
           tenantId: req.tenantId!,
@@ -509,6 +510,11 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
         where: { tenantId: req.tenantId!, userId: student.userId },
         orderBy: { updatedAt: 'desc' },
         take: 30,
+      }),
+      prisma.studentScore.findMany({
+        where: { tenantId: req.tenantId!, studentId: student.id, publishedAt: { not: null } },
+        orderBy: { testDate: 'desc' },
+        take: 100,
       }),
     ]);
 
@@ -577,7 +583,7 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
       };
     });
 
-    const results = homeworkRows.flatMap((row) => {
+    const homeworkResults = homeworkRows.flatMap((row) => {
       const ownSubmission = row.submissions.find((submission) => submission.studentId === student.id);
       const ownGrade = parseNumericGrade(ownSubmission?.grade);
       if (!ownSubmission || !ownGrade) return [];
@@ -597,6 +603,20 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
         teacherRemarks: ownSubmission.remarks ?? undefined,
       }];
     });
+
+    const results = [
+      ...scoreRows.map((row) => ({
+        id: row.id, subject: row.subject, assessment: row.assessment, score: Number(row.score), maximum: Number(row.maximum),
+        passMarks: row.passMarks == null ? undefined : Number(row.passMarks), percentile: row.percentile == null ? undefined : Number(row.percentile),
+        resultSheetUrl: row.resultSheetUrl ?? undefined, classAverage: Number(row.score), publishedLabel: `Shared ${formatDate(row.publishedAt!)}`,
+      })),
+      ...homeworkResults,
+    ];
+    const syllabi = student.enrollments.flatMap((enrollment) => enrollment.class.syllabi.map((syllabus) => ({
+      id: syllabus.id, className: enrollment.class.name, subject: syllabus.subject,
+      chapters: syllabus.chapters.map((chapter) => ({ id: chapter.id, title: chapter.title, position: chapter.position, status: chapter.status })),
+      dailyLogs: syllabus.dailyLogs.map((log) => ({ id: log.id, chapterId: log.chapterId, status: log.status, notes: log.notes, logDate: formatDate(log.logDate) })),
+    })));
 
     const insightMap = new Map<string, number[]>();
     results.slice().reverse().forEach((result) => {
@@ -763,6 +783,7 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
       homework,
       results,
       insights,
+      syllabi,
       attendance,
       invoices,
       events,

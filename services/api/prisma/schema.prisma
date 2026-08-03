@@ -437,19 +437,23 @@ model StudentRemark {
 }
 
 model StudentScore {
-  id         String   @id @default(uuid())
-  tenantId   String
-  tenant     Tenant   @relation(fields: [tenantId], references: [id])
-  studentId  String
-  student    Student  @relation(fields: [studentId], references: [id])
-  recordedBy String
-  recorder   User     @relation("StudentScoreRecorder", fields: [recordedBy], references: [id])
-  subject    String
-  assessment String
-  score      Decimal  @db.Decimal(8, 2)
-  maximum    Decimal  @db.Decimal(8, 2)
-  testDate   DateTime
-  createdAt  DateTime @default(now())
+  id             String    @id @default(uuid())
+  tenantId       String
+  tenant         Tenant    @relation(fields: [tenantId], references: [id])
+  studentId      String
+  student        Student   @relation(fields: [studentId], references: [id])
+  recordedBy     String
+  recorder       User      @relation("StudentScoreRecorder", fields: [recordedBy], references: [id])
+  subject        String
+  assessment     String
+  score          Decimal   @db.Decimal(8, 2)
+  maximum        Decimal   @db.Decimal(8, 2)
+  passMarks      Decimal?  @db.Decimal(8, 2)
+  percentile     Decimal?  @db.Decimal(8, 2)
+  resultSheetUrl String?
+  publishedAt    DateTime?
+  testDate       DateTime
+  createdAt      DateTime  @default(now())
 
   @@index([tenantId, studentId, subject, testDate])
 }
@@ -515,6 +519,7 @@ model Class {
   studentAttendance StudentAttendance[]
   // Phase 2 relations
   homework          Homework[]
+  syllabi           Syllabus[]
 }
 
 // 12. Student Enrollment
@@ -741,6 +746,59 @@ model HomeworkSubmission {
   updatedAt     DateTime @updatedAt
 
   @@unique([homeworkId, studentId])
+}
+
+enum ChapterProgressStatus {
+  IN_PROGRESS
+  COMPLETED
+  LEFT
+}
+
+model Syllabus {
+  id        String            @id @default(uuid())
+  classId   String
+  class     Class             @relation(fields: [classId], references: [id])
+  subject   String
+  createdBy String
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  chapters  SyllabusChapter[]
+  dailyLogs DailyLessonLog[]
+
+  @@unique([classId, subject])
+  @@index([createdBy, classId])
+}
+
+model SyllabusChapter {
+  id         String                @id @default(uuid())
+  syllabusId String
+  syllabus   Syllabus              @relation(fields: [syllabusId], references: [id], onDelete: Cascade)
+  title      String
+  position   Int
+  status     ChapterProgressStatus @default(LEFT)
+  createdAt  DateTime              @default(now())
+  updatedAt  DateTime              @updatedAt
+  dailyLogs  DailyLessonLog[]
+
+  @@unique([syllabusId, position])
+}
+
+model DailyLessonLog {
+  id         String                @id @default(uuid())
+  syllabusId String
+  syllabus   Syllabus              @relation(fields: [syllabusId], references: [id], onDelete: Cascade)
+  chapterId  String
+  chapter    SyllabusChapter       @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  teacherId  String
+  classId    String
+  logDate    DateTime              @db.Date
+  status     ChapterProgressStatus
+  notes      String?
+  createdAt  DateTime              @default(now())
+  updatedAt  DateTime              @updatedAt
+
+  @@unique([chapterId, logDate])
+  @@index([classId, logDate])
 }
 
 // 22. Academic & Event Calendar

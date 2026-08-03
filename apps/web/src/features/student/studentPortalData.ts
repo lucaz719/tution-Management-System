@@ -36,6 +36,17 @@ export interface TestResult {
   classAverage: number;
   publishedLabel: string;
   teacherRemarks?: string;
+  passMarks?: number;
+  percentile?: number;
+  resultSheetUrl?: string;
+}
+
+export interface StudentSyllabus {
+  id: string;
+  className: string;
+  subject: string;
+  chapters: Array<{ id: string; title: string; position: number; status: 'IN_PROGRESS' | 'COMPLETED' | 'LEFT' }>;
+  dailyLogs: Array<{ id: string; chapterId: string; status: string; notes?: string; logDate: string }>;
 }
 
 export interface SubjectInsight {
@@ -138,6 +149,7 @@ export interface StudentPortalDataset {
   homework: HomeworkItem[];
   results: TestResult[];
   insights: SubjectInsight[];
+  syllabi: StudentSyllabus[];
   attendance: AttendanceRecord[];
   invoices: Invoice[];
   events: AcademicEvent[];
