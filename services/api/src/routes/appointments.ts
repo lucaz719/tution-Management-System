@@ -18,6 +18,19 @@ async function linkedStudent(parentUserId: string, tenantId: string, studentId: 
   });
 }
 
+async function notifyAppointmentUsers(userIds: string[], title: string, message: string) {
+  const uniqueIds = [...new Set(userIds)];
+  const users = await prisma.user.findMany({
+    where: { id: { in: uniqueIds } },
+    select: { id: true, phone: true },
+  });
+  const smsSender = new MockSmsSender();
+  await Promise.all(users.flatMap((user) => [
+    MockPushNotificationService.sendPush(user.id, title, message),
+    ...(user.phone ? [smsSender.sendSms(user.phone, `${title}: ${message}`)] : []),
+  ]));
+}
+
 router.post('/request', authMiddleware, async (req: TenantRequest, res: Response) => {
   const { studentId, teacherId, scheduledTime, remarks, isGroup = false, participantIds = [] } = req.body;
   if (!studentId || !teacherId || !scheduledTime) {
@@ -59,7 +72,7 @@ router.post('/request', authMiddleware, async (req: TenantRequest, res: Response
       },
       include: { teacher: { select: { firstName: true, lastName: true } } },
     });
-    await MockPushNotificationService.sendPush(teacherId, 'Appointment requested', `A parent requested an appointment about ${student.user.firstName}.`);
+    await notifyAppointmentUsers(uniqueParticipants, 'Appointment requested', `A parent requested an appointment about ${student.user.firstName}.`);
     return res.status(201).json({ message: 'Appointment requested.', appointment, bookingWindowHours: tenant.appointmentWindowHours });
   } catch (error: any) {
     return res.status(500).json({ error: 'Failed to request appointment.', details: error.message });
@@ -107,13 +120,13 @@ router.post('/respond/:appointmentId', authMiddleware, async (req: TenantRequest
           },
         });
       });
-      await MockPushNotificationService.sendPush(appointment.requestedById, 'Alternative appointment proposed', `A new time was proposed for ${appointment.student.user.firstName}.`);
+      await notifyAppointmentUsers([appointment.requestedById], 'Alternative appointment proposed', `A new time was proposed for ${appointment.student.user.firstName}.`);
       return res.json({ message: 'Alternative time proposed as a linked request.', appointment: linked });
     }
 
     if (action === 'REJECT') {
       const updated = await prisma.appointment.update({ where: { id: appointment.id }, data: { status: 'REJECTED', responseRemarks: remarks?.trim() || null } });
-      await MockPushNotificationService.sendPush(appointment.requestedById, 'Appointment rejected', `The appointment about ${appointment.student.user.firstName} was rejected.`);
+      await notifyAppointmentUsers([appointment.requestedById], 'Appointment rejected', `The appointment about ${appointment.student.user.firstName} was rejected.`);
       return res.json({ message: 'Appointment rejected.', appointment: updated });
     }
 
@@ -124,7 +137,7 @@ router.post('/respond/:appointmentId', authMiddleware, async (req: TenantRequest
       where: { id: appointment.id },
       data: { participantApprovals: approvals, status: allApproved ? 'CONFIRMED' : 'APPROVED', responseRemarks: remarks?.trim() || null },
     });
-    await MockPushNotificationService.sendPush(appointment.requestedById, allApproved ? 'Appointment confirmed' : 'Appointment participant approved', `Appointment update for ${appointment.student.user.firstName}.`);
+    await notifyAppointmentUsers([appointment.requestedById], allApproved ? 'Appointment confirmed' : 'Appointment participant approved', `Appointment update for ${appointment.student.user.firstName}.`);
     return res.json({ message: allApproved ? 'Appointment confirmed.' : 'Participant approval recorded.', appointment: updated });
   } catch (error: any) {
     return res.status(500).json({ error: 'Failed to respond to appointment.', details: error.message });

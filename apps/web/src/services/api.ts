@@ -280,7 +280,7 @@ export const api = {
         body: JSON.stringify(payload),
       });
     },
-    create: async (payload: { firstName: string; lastName: string; email: string; phone?: string; role: string; branchId: string; gradeId?: string }) => {
+    create: async (payload: { firstName: string; lastName: string; email: string; phone?: string; role: string; branchId: string; gradeId?: string; studentId?: string }) => {
       return request<{ message: string; user: any; temporaryPassword: string }>('/users', {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -426,6 +426,28 @@ export const api = {
         body: JSON.stringify(changes),
       });
     },
+  },
+
+  // Branch Admin operations. Authorization and branch scoping are enforced by the API.
+  branchAdmin: {
+    decideLeave: async (leaveId: string, action: 'APPROVE' | 'REJECT', remarks?: string) =>
+      request<{ message: string; leave: any }>(`/leaves/approve/${leaveId}`, { method: 'POST', body: JSON.stringify({ action, remarks }) }),
+    emergencyDeparture: async (payload: { studentId: string; branchId: string; reason: string; collectedBy?: string; departureTime?: string }) =>
+      request<{ message: string; leave: any }>('/leaves/emergency-out', { method: 'POST', body: JSON.stringify(payload) }),
+    addRemark: async (payload: { studentId: string; subject: string; message: string; parentVisible: boolean }) =>
+      request<{ message: string; remark: any }>('/performance/student/remarks', { method: 'POST', body: JSON.stringify(payload) }),
+    createPersonalizedClass: async (payload: { branchId: string; name: string; courseId: string; schedule: unknown; feeStructure: unknown }) =>
+      request<{ message: string; class: any }>('/classes/personalized', { method: 'POST', body: JSON.stringify(payload) }),
+    createCalendarEvent: async (payload: { branchId: string; title: string; description?: string; eventType: string; startDate: string; endDate: string }) =>
+      request<{ message: string; event: any }>('/academic-events', { method: 'POST', body: JSON.stringify(payload) }),
+    issueCertificate: async (payload: { studentId: string; templateId: string; branchId: string }) =>
+      request<{ message: string; certificate: any }>('/certificates/issue', { method: 'POST', body: JSON.stringify(payload) }),
+    completeMaintenanceTask: async (taskId: string) =>
+      request<{ message: string; task: any }>(`/resources/tasks/complete/${taskId}`, { method: 'POST' }),
+    grantFeeOverride: async (payload: { studentId: string; branchId: string; scope: 'ONE_SESSION' | 'ONE_DAY'; reason: string }) =>
+      request<{ message: string; override: any }>('/branch-admin/fee-overrides', { method: 'POST', body: JSON.stringify(payload) }),
+    createSocialDraft: async (payload: { branchId: string; text: string; platforms: string[]; mediaUrls: string[]; proposedTime?: string }) =>
+      request<{ message: string; draft: any }>('/branch-admin/social-drafts', { method: 'POST', body: JSON.stringify(payload) }),
   },
 
   // Onboarding & tenant provisioning (Super Admin)

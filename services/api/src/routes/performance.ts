@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
-import { canAccessBranch, isTenantAdmin } from '../utils/access-control';
+import { canAccessBranch, hasBranchPermission, isTenantAdmin } from '../utils/access-control';
 
 const router = Router();
 
@@ -50,9 +50,14 @@ router.post('/student/remarks', authMiddleware, async (req: TenantRequest, res: 
   }
   try {
     const enrollment = await prisma.enrollment.findFirst({
-      where: { studentId, class: { teacherId: req.user!.id, course: { tenantId: req.tenantId! } }, status: { in: ['ACTIVE', 'BLOCKED'] } },
+      where: { studentId, class: { course: { tenantId: req.tenantId! } }, status: { in: ['ACTIVE', 'BLOCKED'] } },
+      include: { class: { select: { branchId: true, teacherId: true } } },
     });
-    if (!enrollment && !isTenantAdmin(req.user!)) return res.status(403).json({ error: 'You may only remark on students assigned to your classes.' });
+    const teachesStudent = enrollment?.class.teacherId === req.user!.id;
+    const managesStudentBranch = Boolean(enrollment && hasBranchPermission(req.user!, 'manage_student_exceptions', enrollment.class.branchId));
+    if (!teachesStudent && !managesStudentBranch && !isTenantAdmin(req.user!)) {
+      return res.status(403).json({ error: 'You may only remark on students assigned to your class or branch.' });
+    }
     const remark = await prisma.studentRemark.create({
       data: {
         tenantId: req.tenantId!,

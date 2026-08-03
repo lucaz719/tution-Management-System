@@ -26,6 +26,7 @@ import resourcesRouter from './routes/resources';
 import cronRouter from './routes/cron';
 import parentRouter from './routes/parent';
 import receptionRouter from './routes/reception';
+import branchAdminRouter from './routes/branch-admin';
 
 import { toNodeHandler } from 'better-auth/node';
 import { auth } from './utils/auth';
@@ -136,6 +137,7 @@ app.use('/api/resources', resourcesRouter);
 app.use('/api/cron', cronRouter);
 app.use('/api/parent', parentRouter);
 app.use('/api/reception', receptionRouter);
+app.use('/api/branch-admin', branchAdminRouter);
 
 // Integration-only probe for the central error boundary. It is never mounted
 // in local development or production.

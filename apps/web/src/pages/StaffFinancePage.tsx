@@ -82,11 +82,14 @@ function StatusPill({ status }: { status: CashStatus | InvoiceStatus }) {
 
 function Modal({ title, description, onClose, children }: { title: string; description: string; onClose: () => void; children: React.ReactNode }) {
   const modalRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     modalRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') onCloseRef.current();
       if (event.key !== 'Tab' || !modalRef.current) return;
       const elements = modalRef.current.querySelectorAll<HTMLElement>('button, input, select, textarea, [tabindex]:not([tabindex="-1"])');
       if (!elements.length) return;
@@ -97,7 +100,7 @@ function Modal({ title, description, onClose, children }: { title: string; descr
     };
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('keydown', onKey); previous?.focus(); };
-  }, [onClose]);
+  }, []);
   return (
     <div className="accountant-modal-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <div ref={modalRef} className="accountant-modal" role="dialog" aria-modal="true" aria-labelledby="accountant-modal-title" aria-describedby="accountant-modal-description" tabIndex={-1}>

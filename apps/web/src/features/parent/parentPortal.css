@@ -330,7 +330,8 @@
 
 .parent-form { display: flex; flex-direction: column; gap: var(--sp-4); }
 .parent-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); }
-.parent-form label { display: flex; flex-direction: column; gap: 6px; color: var(--parent-text); font-size: 12px; font-weight: 700; }
+.parent-form label { color: var(--parent-text); font-size: 12px; font-weight: 700; }
+.parent-form-grid > div { display: flex; flex-direction: column; gap: 6px; }
 .parent-form input,
 .parent-form select,
 .parent-form textarea { width: 100%; padding: 11px var(--sp-3); border: 1px solid var(--parent-border); border-radius: var(--radius-sm); background: var(--color-bg); color: var(--parent-text); }
@@ -339,6 +340,14 @@
 .parent-form__notice { padding: var(--sp-3); border-radius: var(--radius-sm); font-size: 12px; }
 .parent-form__error { background: rgba(230, 57, 70, .08); color: #b51f2b; }
 .parent-form__notice { background: rgba(224, 142, 0, .09); color: #7c4e00; }
+.parent-participant-fieldset { margin: 0; padding: var(--sp-4); border: 1px solid var(--parent-border); border-radius: var(--radius-sm); }
+.parent-participant-fieldset legend { padding: 0 var(--sp-1); color: var(--parent-text); font-size: 12px; font-weight: 800; }
+.parent-participant-fieldset > p { margin-bottom: var(--sp-3); color: var(--parent-muted); font-size: 12px; }
+.parent-participant-fieldset > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); }
+.parent-participant-fieldset label { min-height: 44px; display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--parent-border); border-radius: var(--radius-sm); cursor: pointer; }
+.parent-participant-fieldset input { width: 18px; height: 18px; padding: 0; accent-color: var(--parent-blue); }
+.parent-participant-fieldset label > span { display: flex; flex-direction: column; gap: 2px; }
+.parent-participant-fieldset small { color: var(--parent-muted); font-size: 11px; font-weight: 400; }
 .parent-primary-button { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); padding: 11px var(--sp-4); border: 0; border-radius: var(--radius-sm); background: var(--parent-gold); color: var(--parent-navy); font-weight: 800; cursor: pointer; transition: background-color 100ms var(--ease-silk), transform 100ms var(--ease-silk); }
 .parent-primary-button:hover { background: var(--color-accent-hover); }
 .parent-primary-button:active { transform: translateY(1px); }
@@ -480,6 +489,7 @@
   .parent-appointment-list article { grid-template-columns: 1fr; }
   .parent-appointment-list dl { min-width: 0; }
   .parent-form-grid { grid-template-columns: 1fr; }
+  .parent-participant-fieldset > div { grid-template-columns: 1fr; }
   .parent-leave-list article,
   .parent-certificate-list article,
   .parent-calendar-list article { align-items: flex-start; flex-wrap: wrap; }

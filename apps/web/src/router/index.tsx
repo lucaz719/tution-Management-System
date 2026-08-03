@@ -38,6 +38,7 @@ const AcademicTeachers = lazy(() => import('../pages/AcademicRoster').then((modu
 const AcademicFees = lazy(() => import('../pages/AcademicFees').then((module) => ({ default: module.AcademicFees })));
 const AcademicGrades = lazy(() => import('../pages/AcademicGrades').then((module) => ({ default: module.AcademicGrades })));
 const BranchAdminDashboard = lazy(() => import('../pages/BranchAdminDashboard').then((module) => ({ default: module.BranchAdminDashboard })));
+const BranchAdminWorkspace = lazy(() => import('../pages/BranchAdminWorkspace').then((module) => ({ default: module.BranchAdminWorkspace })));
 const TeacherPortal = lazy(() => import('../pages/TeacherPortal').then((module) => ({ default: module.TeacherPortal })));
 const ParentStudentPortal = lazy(() => import('../pages/ParentStudentPortal').then((module) => ({ default: module.ParentStudentPortal })));
 const StudentPortal = lazy(() => import('../pages/StudentPortal').then((module) => ({ default: module.StudentPortal })));
@@ -268,7 +269,7 @@ const router = createBrowserRouter([
             children: [
               { path: '/branch/dashboard', element: <Suspense fallback={<FullPageSpinner />}><BranchAdminDashboard /></Suspense> },
               { path: '/branch/people', element: <Suspense fallback={<FullPageSpinner />}><PeopleDirectory /></Suspense> },
-              { path: '/branch/*', element: <RoleWorkspacePlaceholder role="branch-admin" /> },
+              { path: '/branch/*', element: <Suspense fallback={<FullPageSpinner />}><BranchAdminWorkspace /></Suspense> },
             ],
           },
           {

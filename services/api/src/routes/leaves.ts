@@ -34,7 +34,13 @@ router.post(
                 enrollments: { some: { class: { branchId }, status: { in: ['ACTIVE', 'BLOCKED'] } } },
                 studentParents: { some: { parent: { userId: requesterUserId } } },
               },
-              select: { userId: true },
+              select: {
+                userId: true,
+                enrollments: {
+                  where: { status: { in: ['ACTIVE', 'BLOCKED'] }, class: { branchId } },
+                  select: { class: { select: { teacherId: true } } },
+                },
+              },
             })
           : Promise.resolve(null),
       ]);
@@ -66,10 +72,28 @@ router.post(
 
       // Mocks parent/admin notification on request submission
       await MockPushNotificationService.sendPush(
-        leaveSubjectUserId,
+        requesterUserId,
         'Leave Request Submitted',
         `Your request for ${leaveType} leave starting ${startDate} is pending approval.`
       );
+      if (targetStudent) {
+        const branchAdmins = await prisma.user.findMany({
+          where: {
+            tenantId,
+            userRoles: { some: { branchId, role: { name: 'Branch Admin' } } },
+          },
+          select: { id: true },
+        });
+        const teacherIds = targetStudent.enrollments
+          .map((enrollment) => enrollment.class.teacherId)
+          .filter((id): id is string => Boolean(id));
+        const recipients = [...new Set([...branchAdmins.map((admin) => admin.id), ...teacherIds])];
+        await Promise.all(recipients.map((userId) => MockPushNotificationService.sendPush(
+          userId,
+          'Student leave requested',
+          `A linked parent requested ${leaveType} leave from ${startDate} to ${endDate}.`,
+        )));
+      }
 
       return res.status(201).json({ message: 'Leave request submitted successfully.', leave });
     } catch (error: any) {
@@ -159,9 +183,9 @@ router.post(
 router.post(
   '/emergency-out',
   authMiddleware,
-  hasPermission('manage_branches'),
+  hasPermission('manage_student_exceptions'),
   async (req: TenantRequest, res: Response) => {
-    const { studentId, reason, branchId } = req.body;
+    const { studentId, reason, branchId, collectedBy, departureTime } = req.body;
 
     if (!studentId || !reason || !branchId) {
       return res.status(400).json({ error: 'Missing required parameters: studentId, reason, branchId.' });
@@ -184,9 +208,9 @@ router.post(
             branchId,
             userId: student.userId,
             leaveType: 'EARLY_OUT',
-            startDate: new Date(),
-            endDate: new Date(),
-            reason: `Emergency Out: ${reason}`,
+            startDate: departureTime ? new Date(departureTime) : new Date(),
+            endDate: departureTime ? new Date(departureTime) : new Date(),
+            reason: `Emergency Out: ${reason}${collectedBy?.trim() ? ` | Collected by: ${collectedBy.trim()}` : ''}`,
             status: 'APPROVED_LEVEL2',
             approvedBy: req.user!.id,
           },

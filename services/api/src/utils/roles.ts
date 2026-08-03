@@ -25,6 +25,7 @@ export const ROLE_PERMISSIONS = {
     'issue_certificates',
     'manage_branch_calendar',
     'manage_resource_tasks',
+    'draft_social_media',
   ],
   Teacher: ['mark_geo_attendance', 'mark_attendance', 'manage_homework', 'view_own_schedule', 'submit_lesson_update'],
   Accountant: ['manage_billing', 'view_reports', 'manage_petty_cash'],

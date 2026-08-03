@@ -15,6 +15,7 @@ interface PersonRole {
 
 interface Person {
   id: string;
+  studentId?: string | null;
   name: string;
   email: string;
   status: string;
@@ -46,9 +47,10 @@ interface FormState {
   role: string;
   branchId: string;
   gradeId: string;
+  studentId: string;
 }
 
-const EMPTY_FORM: FormState = { firstName: '', lastName: '', email: '', phone: '', role: '', branchId: '', gradeId: '' };
+const EMPTY_FORM: FormState = { firstName: '', lastName: '', email: '', phone: '', role: '', branchId: '', gradeId: '', studentId: '' };
 
 // Categorize a role for the stat strip.
 const STAFF_ROLES = ['Teacher', 'Accountant', 'Receptionist', 'Janitor'];
@@ -168,6 +170,10 @@ export function PeopleDirectory() {
   }, [people]);
 
   const grouped = useMemo(() => groupPeople(filtered), [filtered]);
+  const linkableStudents = useMemo(() => people.filter((person) =>
+    person.studentId &&
+    person.roles.some((role) => role.role === 'Student' && (!form.branchId || role.branchId === form.branchId))
+  ), [people, form.branchId]);
 
   const openDrawer = () => {
     const branches = caps?.manageableBranches ?? [];
@@ -195,6 +201,10 @@ export function PeopleDirectory() {
       showToast('Select a branch.', 'error');
       return;
     }
+    if (form.role === 'Parent' && !form.studentId) {
+      showToast('Select the student linked to this parent.', 'error');
+      return;
+    }
 
     setIsSaving(true);
     try {
@@ -208,7 +218,7 @@ export function PeopleDirectory() {
       const result =
         form.role === 'Branch Admin'
           ? await api.people.createBranchAdmin(payload)
-          : await api.people.create({ ...payload, role: form.role, gradeId: form.role === 'Student' && form.gradeId ? form.gradeId : undefined });
+          : await api.people.create({ ...payload, role: form.role, gradeId: form.role === 'Student' && form.gradeId ? form.gradeId : undefined, studentId: form.role === 'Parent' ? form.studentId : undefined });
 
       const branchName = caps?.manageableBranches.find((b) => b.id === form.branchId)?.name ?? '';
       setCredentials({
@@ -409,7 +419,7 @@ export function PeopleDirectory() {
                         key={role}
                         type="button"
                         className={`people-role-chip${form.role === role ? ' people-role-chip--active' : ''}`}
-                        onClick={() => setField('role', role)}
+                        onClick={() => setForm((current) => ({ ...current, role, gradeId: '', studentId: '' }))}
                       >
                         {role}
                       </button>
@@ -465,6 +475,19 @@ export function PeopleDirectory() {
                         ))}
                       </select>
                     )}
+                  </div>
+                ) : null}
+
+                {form.role === 'Parent' ? (
+                  <div className="people-field">
+                    <label htmlFor="people-linked-student">Linked student</label>
+                    <select id="people-linked-student" value={form.studentId} onChange={(e) => setField('studentId', e.target.value)} required>
+                      <option value="">Select the parent’s child…</option>
+                      {linkableStudents.map((student) => (
+                        <option key={student.studentId!} value={student.studentId!}>{student.name} · {student.email}</option>
+                      ))}
+                    </select>
+                    {linkableStudents.length === 0 ? <small>No students are available in the selected branch.</small> : null}
                   </div>
                 ) : null}
               </div>

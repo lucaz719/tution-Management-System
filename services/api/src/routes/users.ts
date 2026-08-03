@@ -68,6 +68,7 @@ async function provisionUser(params: {
   roleName: CanonicalRoleName;
   branchId: string | null;
   gradeId?: string | null;
+  linkedStudentId?: string | null;
   status?: 'ACTIVE' | 'INACTIVE';
   admissionStatus?: 'PENDING_PAYMENT' | 'READY_FOR_LOGIN' | 'ACTIVE';
 }): Promise<CreateUserResult> {
@@ -123,7 +124,12 @@ async function provisionUser(params: {
         },
       });
     } else if (params.roleName === 'Parent') {
-      await tx.parent.create({ data: { userId: created.id } });
+      const parent = await tx.parent.create({ data: { userId: created.id } });
+      if (params.linkedStudentId) {
+        await tx.studentParent.create({
+          data: { studentId: params.linkedStudentId, parentId: parent.id },
+        });
+      }
     }
 
     return created;
@@ -373,7 +379,7 @@ router.get('/', authMiddleware, async (req: TenantRequest, res: Response) => {
       orderBy: { createdAt: 'desc' },
       include: {
         userRoles: { include: { role: true, branch: true } },
-        student: { select: { grade: { select: { id: true, name: true } } } },
+        student: { select: { id: true, grade: { select: { id: true, name: true } } } },
       },
     });
 
@@ -385,6 +391,7 @@ router.get('/', authMiddleware, async (req: TenantRequest, res: Response) => {
         status: u.status,
         gradeId: u.student?.grade?.id ?? null,
         gradeName: u.student?.grade?.name ?? null,
+        studentId: u.student?.id ?? null,
         roles: u.userRoles.map((ur) => ({
           role: ur.role.name,
           branchId: ur.branchId,
@@ -1223,6 +1230,24 @@ router.post('/', authMiddleware, async (req: TenantRequest, res: Response) => {
     gradeId = grade.id;
   }
 
+  let linkedStudentId: string | null = null;
+  if (roleName === 'Parent') {
+    linkedStudentId = typeof req.body?.studentId === 'string' ? req.body.studentId : '';
+    if (!linkedStudentId) {
+      return res.status(400).json({ error: 'studentId is required when creating a Parent.' });
+    }
+    const student = await prisma.student.findFirst({
+      where: {
+        id: linkedStudentId,
+        user: { tenantId: req.tenantId!, userRoles: { some: { branchId } } },
+      },
+      select: { id: true },
+    });
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found in the selected branch.' });
+    }
+  }
+
   try {
     const existing = await prisma.user.findUnique({ where: { email: fields.email } });
     if (existing) {
@@ -1235,6 +1260,7 @@ router.post('/', authMiddleware, async (req: TenantRequest, res: Response) => {
       roleName,
       branchId,
       gradeId,
+      linkedStudentId,
     });
 
     return res.status(201).json({

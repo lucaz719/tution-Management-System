@@ -67,6 +67,7 @@ export const DASHBOARD_NAVIGATION: Record<DashboardRole, DashboardNavItem[]> = {
     { section: 'Operations', label: 'Certificates', icon: 'workspace_premium', path: '/branch/certificates', phase: 2 },
     { section: 'Communication', label: 'Messages', icon: 'forum', path: '/branch/messages', phase: 2 },
     { section: 'Communication', label: 'Announcements', icon: 'campaign', path: '/branch/announcements', phase: 2 },
+    { section: 'Communication', label: 'Social Media', icon: 'share', path: '/branch/social-media', phase: 2 },
     { section: 'Calendar', label: 'Academic Calendar', icon: 'date_range', path: '/branch/academic-calendar', phase: 2 },
   ],
   teacher: [

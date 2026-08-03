@@ -257,8 +257,8 @@ model User {
 
   // Better Auth support
   name             String
-  emailVerified    Boolean   @default(false)
-  twoFactorEnabled Boolean   @default(false)
+  emailVerified    Boolean    @default(false)
+  twoFactorEnabled Boolean    @default(false)
   image            String?
   sessions         Session[]
   accounts         Account[]
@@ -839,6 +839,38 @@ model ExitClearance {
   status             String      @default("PENDING") // PENDING, CLEARANCE_COMPLETED, SETTLED
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
+}
+
+model FeeAccessOverride {
+  id            String   @id @default(uuid())
+  tenantId      String
+  branchId      String
+  studentId     String
+  scope         String
+  reason        String
+  grantedById   String
+  grantedByName String
+  startsAt      DateTime @default(now())
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([tenantId, branchId, studentId, createdAt])
+}
+
+model BranchSocialDraft {
+  id           String    @id @default(uuid())
+  tenantId     String
+  branchId     String
+  authorId     String
+  text         String
+  mediaUrls    Json?
+  platforms    Json
+  proposedTime DateTime?
+  status       String    @default("DRAFT")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([tenantId, branchId, authorId, status])
 }
 
 // 28. Canteen Management
