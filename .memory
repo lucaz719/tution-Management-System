@@ -461,11 +461,12 @@ Known non-blocking warnings:
 ## Remaining work, in priority order
 
 1. Continue rolling shared strict input schemas across remaining write endpoints.
-   Finance payment/petty-cash, user provisioning, all attendance mutations, and
-   tenant policy settings, and bounded bulk-student import records are complete.
-   Next prioritize course/enrollment, HR, leave, homework, resource, and calendar
-   write contracts. JSON body limits, browser-security headers, safe
-   400/413/5xx errors, and authentication endpoint rate limiting are in place.
+   Finance payment/petty-cash, user provisioning, all attendance mutations,
+   tenant policy settings, bounded bulk-student import records, course/class/
+   enrollment writes, and HR writes are complete. Next prioritize leave, homework,
+   resource, and calendar write contracts. JSON body limits, browser-security
+   headers, safe 400/413/5xx errors, and authentication endpoint rate limiting
+   are in place.
 2. Add the accepted tenant-scoped list/detail contracts documented in
    `TENANT_ADMIN_API_GAPS.md` for refunds, long-sick leaves, staff exits,
    certificate templates, and calendar lifecycle.

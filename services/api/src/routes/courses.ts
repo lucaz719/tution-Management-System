@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import { CourseType, Prisma } from '@prisma/client';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
@@ -6,6 +7,94 @@ import { canAccessBranch, hasBranchPermission, isTenantAdmin } from '../utils/ac
 import { parsePlainRecord, parseStrictKeys, readFiniteNumber, readTrimmedString, type ValidationResult } from '../utils/request-validation';
 
 const router = Router();
+const COURSE_TYPES = new Set<string>(['REGULAR', 'MUSIC', 'SHORT_TERM', 'LONG_TERM', 'PERSONALIZED']);
+const SCHEDULE_DAYS = new Set(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
+const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+interface BulkCourseInput {
+  name: string;
+  gradeId: string | null;
+  type: CourseType;
+  monthlyBase: number;
+  isTaxExempt: boolean;
+  description: string | null;
+}
+
+function parseOptionalBoolean(record: Record<string, unknown>, key: string, fallback: boolean): ValidationResult<boolean> {
+  const value = record[key];
+  return value === undefined
+    ? { success: true, data: fallback }
+    : typeof value === 'boolean'
+      ? { success: true, data: value }
+      : { success: false, error: `${key} must be a boolean.` };
+}
+
+function parseCourseType(record: Record<string, unknown>, key: string, required: boolean, fallback?: CourseType): ValidationResult<CourseType | undefined> {
+  const value = record[key];
+  if (value === undefined && !required) return { success: true, data: fallback };
+  if (typeof value !== 'string' || !COURSE_TYPES.has(value)) {
+    return { success: false, error: `${key} must be a valid course type.` };
+  }
+  return { success: true, data: value as CourseType };
+}
+
+function parseFeeStructure(value: unknown): ValidationResult<{ monthlyBase: number }> {
+  const shape = parseStrictKeys(value, ['monthlyBase']);
+  if (!shape.success) return shape;
+  const monthlyBase = readFiniteNumber(shape.data, 'monthlyBase', { min: 0, max: 100_000_000, message: 'feeStructure.monthlyBase must be a non-negative finite number.' });
+  return monthlyBase.success ? { success: true, data: { monthlyBase: monthlyBase.data } } : monthlyBase;
+}
+
+function parseSchedule(value: unknown): ValidationResult<Array<Record<string, string>>> {
+  if (!Array.isArray(value) || value.length > 14) return { success: false, error: 'schedule must be an array of at most 14 timetable slots.' };
+  const slots: Array<Record<string, string>> = [];
+  for (const [index, slot] of value.entries()) {
+    const shape = parseStrictKeys(slot, ['day', 'start', 'end', 'startTime', 'endTime']);
+    if (!shape.success) return { success: false, error: `Schedule slot ${index + 1}: ${shape.error}` };
+    const day = shape.data.day;
+    const hasLegacyTimes = shape.data.start !== undefined || shape.data.end !== undefined;
+    const hasModernTimes = shape.data.startTime !== undefined || shape.data.endTime !== undefined;
+    if (hasLegacyTimes === hasModernTimes) {
+      return { success: false, error: `Schedule slot ${index + 1} must use either start/end or startTime/endTime.` };
+    }
+    const start = hasModernTimes ? shape.data.startTime : shape.data.start;
+    const end = hasModernTimes ? shape.data.endTime : shape.data.end;
+    if (typeof day !== 'string' || !SCHEDULE_DAYS.has(day) || typeof start !== 'string' || !TIME_PATTERN.test(start) || typeof end !== 'string' || !TIME_PATTERN.test(end) || start >= end) {
+      return { success: false, error: `Schedule slot ${index + 1} must have a valid weekday and an increasing HH:mm time range.` };
+    }
+    slots.push(hasModernTimes ? { day, startTime: start, endTime: end } : { day, start, end });
+  }
+  return { success: true, data: slots };
+}
+
+function parseBulkCourses(body: unknown): ValidationResult<{ branchId: string; items: BulkCourseInput[] }> {
+  const request = parseStrictKeys(body, ['branchId', 'items']);
+  if (!request.success) return request;
+  const branchId = readTrimmedString(request.data, 'branchId', { required: true, maxLength: 128, message: 'A valid branchId is required.' });
+  if (!branchId.success) return branchId;
+  if (!Array.isArray(request.data.items) || request.data.items.length === 0 || request.data.items.length > 500) {
+    return { success: false, error: 'items must contain between 1 and 500 courses.' };
+  }
+  const items: BulkCourseInput[] = [];
+  for (const [index, item] of request.data.items.entries()) {
+    const shape = parseStrictKeys(item, ['name', 'gradeId', 'type', 'monthlyBase', 'isTaxExempt', 'description']);
+    if (!shape.success) return { success: false, error: `Item ${index + 1}: ${shape.error}` };
+    const name = readTrimmedString(shape.data, 'name', { maxLength: 160, message: 'Course name must be a string of 160 characters or fewer.' });
+    const type = parseCourseType(shape.data, 'type', false, CourseType.REGULAR);
+    const monthlyBase = readFiniteNumber(shape.data, 'monthlyBase', { min: 0, max: 100_000_000, message: 'monthlyBase must be a non-negative finite number.' });
+    const isTaxExempt = parseOptionalBoolean(shape.data, 'isTaxExempt', false);
+    const description = readTrimmedString(shape.data, 'description', { maxLength: 2_000, message: 'description must be 2000 characters or fewer.' });
+    const gradeId = shape.data.gradeId;
+    if (!name.success) return { success: false, error: `Item ${index + 1}: ${name.error}` };
+    if (!type.success) return { success: false, error: `Item ${index + 1}: ${type.error}` };
+    if (!monthlyBase.success) return { success: false, error: `Item ${index + 1}: ${monthlyBase.error}` };
+    if (!isTaxExempt.success) return { success: false, error: `Item ${index + 1}: ${isTaxExempt.error}` };
+    if (!description.success) return { success: false, error: `Item ${index + 1}: ${description.error}` };
+    if (gradeId !== undefined && gradeId !== null && (typeof gradeId !== 'string' || !gradeId.trim() || gradeId.length > 128)) return { success: false, error: `Item ${index + 1}: gradeId must be a valid ID or null.` };
+    items.push({ name: name.data, gradeId: typeof gradeId === 'string' ? gradeId.trim() : null, type: type.data!, monthlyBase: monthlyBase.data, isTaxExempt: isTaxExempt.data, description: description.data || null });
+  }
+  return { success: true, data: { branchId: branchId.data, items } };
+}
 
 function parseEnrollmentIds(body: unknown, additional: readonly string[] = []) {
   const shape = parseStrictKeys(body, ['studentId', 'courseId', ...additional]);
@@ -23,24 +112,43 @@ router.post(
   authMiddleware,
   hasPermission('manage_courses'),
   async (req: TenantRequest, res: Response) => {
-    const { branchId, gradeId, name, description, type, feeStructure, isTaxExempt, taxPercentage, isExtraActivity } = req.body;
-
-    if (!branchId || !name || !type || !feeStructure) {
-      return res.status(400).json({
-        error: 'Missing required course parameters: branchId, name, type, feeStructure.',
-      });
+    const shape = parseStrictKeys(req.body, ['branchId', 'gradeId', 'name', 'description', 'type', 'feeStructure', 'isTaxExempt', 'taxPercentage', 'isExtraActivity']);
+    if (!shape.success) return res.status(400).json({ error: shape.error });
+    const branchId = readTrimmedString(shape.data, 'branchId', { required: true, maxLength: 128, message: 'A valid branchId is required.' });
+    const name = readTrimmedString(shape.data, 'name', { required: true, maxLength: 160, message: 'A course name is required and must be 160 characters or fewer.' });
+    const type = parseCourseType(shape.data, 'type', true);
+    const feeStructure = parseFeeStructure(shape.data.feeStructure);
+    if (!branchId.success) return res.status(400).json({ error: branchId.error });
+    if (!name.success) return res.status(400).json({ error: name.error });
+    if (!type.success) return res.status(400).json({ error: type.error });
+    if (!feeStructure.success) return res.status(400).json({ error: feeStructure.error });
+    const gradeIdValue = shape.data.gradeId;
+    if (gradeIdValue !== undefined && gradeIdValue !== null && (typeof gradeIdValue !== 'string' || !gradeIdValue.trim() || gradeIdValue.length > 128)) {
+      return res.status(400).json({ error: 'gradeId must be a valid ID or null.' });
     }
+    const gradeId = typeof gradeIdValue === 'string' ? gradeIdValue.trim() : null;
+    const descriptionValue = shape.data.description;
+    if (descriptionValue !== undefined && descriptionValue !== null && (typeof descriptionValue !== 'string' || descriptionValue.trim().length > 2_000)) {
+      return res.status(400).json({ error: 'description must be a string of 2000 characters or fewer, or null.' });
+    }
+    const description = typeof descriptionValue === 'string' ? descriptionValue.trim() || null : null;
+    const isTaxExempt = parseOptionalBoolean(shape.data, 'isTaxExempt', false);
+    const isExtraActivity = parseOptionalBoolean(shape.data, 'isExtraActivity', false);
+    if (!isTaxExempt.success) return res.status(400).json({ error: isTaxExempt.error });
+    if (!isExtraActivity.success) return res.status(400).json({ error: isExtraActivity.error });
+    const taxPercentage = shape.data.taxPercentage === undefined ? 13 : readFiniteNumber(shape.data, 'taxPercentage', { min: 0, max: 100, message: 'taxPercentage must be between 0 and 100.' });
+    if (typeof taxPercentage !== 'number' && !taxPercentage.success) return res.status(400).json({ error: taxPercentage.error });
 
     try {
       // Branch must belong to the caller's tenant.
-      const branch = await prisma.branch.findUnique({ where: { id: branchId } });
+      const branch = await prisma.branch.findUnique({ where: { id: branchId.data } });
       if (!branch || branch.tenantId !== req.tenantId) {
         return res.status(404).json({ error: 'Branch not found in your institution.' });
       }
 
       // Optional grade must belong to the tenant.
       let resolvedGradeId: string | null = null;
-      if (typeof gradeId === 'string' && gradeId) {
+      if (gradeId) {
         const grade = await prisma.grade.findFirst({ where: { id: gradeId, tenantId: req.tenantId! } });
         if (!grade) {
           return res.status(404).json({ error: 'Grade not found in your institution.' });
@@ -50,16 +158,13 @@ router.post(
 
       const course = await prisma.course.create({
         data: {
-          tenantId: req.tenantId!,
-          branchId,
+          tenantId: req.tenantId!, branchId: branchId.data,
           gradeId: resolvedGradeId,
-          name,
+          name: name.data,
           description,
-          type,
-          feeStructure,
-          isExtraActivity: Boolean(isExtraActivity),
-          isTaxExempt: !!isTaxExempt,
-          taxPercentage: taxPercentage ? Number(taxPercentage) : 13.00,
+          type: type.data!, feeStructure: feeStructure.data,
+          isExtraActivity: isExtraActivity.data, isTaxExempt: isTaxExempt.data,
+          taxPercentage: typeof taxPercentage === 'number' ? taxPercentage : taxPercentage.data,
         },
       });
 
@@ -78,16 +183,9 @@ router.post(
   authMiddleware,
   hasPermission('manage_courses'),
   async (req: TenantRequest, res: Response) => {
-    const { branchId, items } = req.body as {
-      branchId?: string;
-      items?: Array<{ name?: string; gradeId?: string | null; type?: string; monthlyBase?: number; isTaxExempt?: boolean; description?: string }>;
-    };
-    if (!branchId || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: 'branchId and a non-empty items array are required.' });
-    }
-    if (items.length > 500) {
-      return res.status(400).json({ error: 'Too many courses in one request (maximum 500).' });
-    }
+    const input = parseBulkCourses(req.body);
+    if (!input.success) return res.status(400).json({ error: input.error });
+    const { branchId, items } = input.data;
 
     try {
       const branch = await prisma.branch.findUnique({ where: { id: branchId } });
@@ -107,10 +205,7 @@ router.post(
       const results: Array<{ index: number; name: string; status: 'created' | 'skipped' | 'error'; error?: string }> = [];
       let created = 0;
       for (const [index, item] of items.entries()) {
-        const name = typeof item.name === 'string' ? item.name.trim() : '';
-        const gradeId = typeof item.gradeId === 'string' && item.gradeId ? item.gradeId : null;
-        // Strict number check: JSON null/missing must not coerce to a 0 fee.
-        const fee = typeof item.monthlyBase === 'number' && Number.isFinite(item.monthlyBase) ? item.monthlyBase : NaN;
+        const { name, gradeId, monthlyBase: fee } = item;
         if (!name) {
           results.push({ index, name, status: 'error', error: 'Course name is required.' });
           continue;
@@ -135,10 +230,10 @@ router.post(
             branchId,
             gradeId,
             name,
-            description: typeof item.description === 'string' && item.description.trim() ? item.description.trim() : null,
-            type: (item.type as any) || 'REGULAR',
+            description: item.description,
+            type: item.type,
             feeStructure: { monthlyBase: fee },
-            isTaxExempt: !!item.isTaxExempt,
+            isTaxExempt: item.isTaxExempt,
           },
         });
         results.push({ index, name, status: 'created' });
@@ -331,24 +426,28 @@ router.post(
   authMiddleware,
   hasPermission('manage_courses'),
   async (req: TenantRequest, res: Response) => {
-    const { courseId, name, schedule } = req.body;
-    if (!courseId || !name || !schedule) {
-      return res.status(400).json({ error: 'Missing required parameters: courseId, name, schedule.' });
-    }
+    const shape = parseStrictKeys(req.body, ['courseId', 'name', 'schedule']);
+    if (!shape.success) return res.status(400).json({ error: shape.error });
+    const courseId = readTrimmedString(shape.data, 'courseId', { required: true, maxLength: 128, message: 'A valid courseId is required.' });
+    const name = readTrimmedString(shape.data, 'name', { required: true, maxLength: 160, message: 'A class name is required and must be 160 characters or fewer.' });
+    const schedule = parseSchedule(shape.data.schedule);
+    if (!courseId.success) return res.status(400).json({ error: courseId.error });
+    if (!name.success) return res.status(400).json({ error: name.error });
+    if (!schedule.success) return res.status(400).json({ error: schedule.error });
 
     try {
       // The class inherits the course's branch; verify both belong to the tenant.
-      const course = await prisma.course.findUnique({ where: { id: courseId } });
+      const course = await prisma.course.findUnique({ where: { id: courseId.data } });
       if (!course || course.tenantId !== req.tenantId) {
         return res.status(404).json({ error: 'Course not found in your institution.' });
       }
 
       const cls = await prisma.class.create({
         data: {
-          courseId,
+          courseId: courseId.data,
           branchId: course.branchId,
-          name,
-          schedule,
+          name: name.data,
+          schedule: schedule.data as Prisma.InputJsonValue,
         },
       });
       return res.status(201).json({ message: 'Class timetable created successfully.', class: cls });
@@ -387,7 +486,30 @@ router.put(
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
     const { id } = req.params;
-    const { name, schedule, teacherId } = req.body;
+    const shape = parseStrictKeys(req.body, ['name', 'schedule', 'teacherId']);
+    if (!shape.success) return res.status(400).json({ error: shape.error });
+
+    const data: Prisma.ClassUncheckedUpdateInput = {};
+    if (shape.data.name !== undefined) {
+      const name = readTrimmedString(shape.data, 'name', { required: true, maxLength: 160, message: 'name must be a non-empty string of 160 characters or fewer.' });
+      if (!name.success) return res.status(400).json({ error: name.error });
+      data.name = name.data;
+    }
+    if (shape.data.schedule !== undefined) {
+      const schedule = parseSchedule(shape.data.schedule);
+      if (!schedule.success) return res.status(400).json({ error: schedule.error });
+      data.schedule = schedule.data as Prisma.InputJsonValue;
+    }
+    const teacherIdValue = shape.data.teacherId;
+    if (teacherIdValue !== undefined) {
+      if (teacherIdValue !== null && (typeof teacherIdValue !== 'string' || !teacherIdValue.trim() || teacherIdValue.length > 128)) {
+        return res.status(400).json({ error: 'teacherId must be a valid ID or null.' });
+      }
+      data.teacherId = typeof teacherIdValue === 'string' ? teacherIdValue.trim() : null;
+    }
+    if (Object.keys(data).length === 0) {
+      return res.status(400).json({ error: 'At least one class field must be provided.' });
+    }
 
     try {
       const cls = await prisma.class.findUnique({ where: { id }, include: { course: true } });
@@ -398,17 +520,11 @@ router.put(
         return res.status(403).json({ error: 'You cannot update classes for this branch.' });
       }
 
-      const data: Record<string, unknown> = {};
-      if (typeof name === 'string' && name.trim()) data.name = name.trim();
-      if (Array.isArray(schedule)) data.schedule = schedule;
-
       // teacherId: string assigns, null unassigns.
-      if (teacherId === null) {
-        data.teacherId = null;
-      } else if (typeof teacherId === 'string' && teacherId) {
+      if (typeof data.teacherId === 'string') {
         const teacher = await prisma.user.findFirst({
           where: {
-            id: teacherId,
+            id: data.teacherId,
             tenantId: req.tenantId!,
             userRoles: { some: { role: { name: 'Teacher' } } },
           },
@@ -416,11 +532,6 @@ router.put(
         if (!teacher) {
           return res.status(400).json({ error: 'Selected teacher is not a teacher in your institution.' });
         }
-        data.teacherId = teacherId;
-      }
-
-      if (Object.keys(data).length === 0) {
-        return res.status(400).json({ error: 'No valid fields provided to update.' });
       }
 
       const updated = await prisma.class.update({ where: { id }, data });
@@ -903,7 +1014,57 @@ router.put(
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
     const { id } = req.params;
-    const { name, description, type, feeStructure, isTaxExempt, taxPercentage, gradeId, isExtraActivity } = req.body;
+    const shape = parseStrictKeys(req.body, ['name', 'description', 'type', 'feeStructure', 'isTaxExempt', 'taxPercentage', 'gradeId', 'isExtraActivity']);
+    if (!shape.success) return res.status(400).json({ error: shape.error });
+
+    const data: Prisma.CourseUncheckedUpdateInput = {};
+    if (shape.data.name !== undefined) {
+      const name = readTrimmedString(shape.data, 'name', { required: true, maxLength: 160, message: 'name must be a non-empty string of 160 characters or fewer.' });
+      if (!name.success) return res.status(400).json({ error: name.error });
+      data.name = name.data;
+    }
+    if (shape.data.description !== undefined) {
+      const description = shape.data.description;
+      if (description !== null && (typeof description !== 'string' || description.trim().length > 2_000)) {
+        return res.status(400).json({ error: 'description must be a string of 2000 characters or fewer, or null.' });
+      }
+      data.description = typeof description === 'string' ? description.trim() || null : null;
+    }
+    if (shape.data.type !== undefined) {
+      const type = parseCourseType(shape.data, 'type', true);
+      if (!type.success) return res.status(400).json({ error: type.error });
+      data.type = type.data!;
+    }
+    if (shape.data.feeStructure !== undefined) {
+      const feeStructure = parseFeeStructure(shape.data.feeStructure);
+      if (!feeStructure.success) return res.status(400).json({ error: feeStructure.error });
+      data.feeStructure = feeStructure.data;
+    }
+    if (shape.data.isTaxExempt !== undefined) {
+      const isTaxExempt = parseOptionalBoolean(shape.data, 'isTaxExempt', false);
+      if (!isTaxExempt.success) return res.status(400).json({ error: isTaxExempt.error });
+      data.isTaxExempt = isTaxExempt.data;
+    }
+    if (shape.data.isExtraActivity !== undefined) {
+      const isExtraActivity = parseOptionalBoolean(shape.data, 'isExtraActivity', false);
+      if (!isExtraActivity.success) return res.status(400).json({ error: isExtraActivity.error });
+      data.isExtraActivity = isExtraActivity.data;
+    }
+    if (shape.data.taxPercentage !== undefined) {
+      const taxPercentage = readFiniteNumber(shape.data, 'taxPercentage', { min: 0, max: 100, message: 'taxPercentage must be a finite number between 0 and 100.' });
+      if (!taxPercentage.success) return res.status(400).json({ error: taxPercentage.error });
+      data.taxPercentage = taxPercentage.data;
+    }
+    const gradeIdValue = shape.data.gradeId;
+    if (gradeIdValue !== undefined) {
+      if (gradeIdValue !== null && (typeof gradeIdValue !== 'string' || !gradeIdValue.trim() || gradeIdValue.length > 128)) {
+        return res.status(400).json({ error: 'gradeId must be a valid ID or null.' });
+      }
+      data.gradeId = typeof gradeIdValue === 'string' ? gradeIdValue.trim() : null;
+    }
+    if (Object.keys(data).length === 0) {
+      return res.status(400).json({ error: 'At least one course field must be provided.' });
+    }
 
     try {
       const course = await prisma.course.findUnique({ where: { id } });
@@ -914,28 +1075,12 @@ router.put(
         return res.status(403).json({ error: 'You cannot update courses for this branch.' });
       }
 
-      const data: Record<string, unknown> = {};
-      if (typeof name === 'string' && name.trim()) data.name = name.trim();
-      if (typeof description === 'string') data.description = description.trim() || null;
-      if (typeof type === 'string' && type) data.type = type;
-      if (feeStructure && typeof feeStructure === 'object') data.feeStructure = feeStructure;
-      if (typeof isTaxExempt === 'boolean') data.isTaxExempt = isTaxExempt;
-      if (typeof isExtraActivity === 'boolean') data.isExtraActivity = isExtraActivity;
-      if (taxPercentage !== undefined && Number.isFinite(Number(taxPercentage))) data.taxPercentage = Number(taxPercentage);
-
       // grade: string reassigns (validated), null clears.
-      if (gradeId === null) {
-        data.gradeId = null;
-      } else if (typeof gradeId === 'string' && gradeId) {
-        const grade = await prisma.grade.findFirst({ where: { id: gradeId, tenantId: req.tenantId! } });
+      if (typeof data.gradeId === 'string') {
+        const grade = await prisma.grade.findFirst({ where: { id: data.gradeId, tenantId: req.tenantId! } });
         if (!grade) {
           return res.status(404).json({ error: 'Grade not found in your institution.' });
         }
-        data.gradeId = gradeId;
-      }
-
-      if (Object.keys(data).length === 0) {
-        return res.status(400).json({ error: 'No valid fields provided to update.' });
       }
 
       const updated = await prisma.course.update({ where: { id }, data });

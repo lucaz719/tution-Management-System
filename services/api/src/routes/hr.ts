@@ -2,46 +2,89 @@ import { Router, Response } from 'express';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
-import { isTenantAdmin, managedBranchIds } from '../utils/access-control';
+import { hasBranchPermission, isTenantAdmin, managedBranchIds } from '../utils/access-control';
+import { parseStrictKeys, readFiniteNumber, readTrimmedString, type ValidationResult } from '../utils/request-validation';
 
 const router = Router();
+const STAFF_DOCUMENT_TYPES = new Set(['NID', 'CONTRACT', 'ACADEMIC', 'CERTIFICATION']);
+const CONTROL_CHARACTER_PATTERN = /^[^\u0000-\u001F\u007F]+$/;
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})?)?$/;
 
-// 1. Upload Staff Document (Admin/Staff)
+function parseOptionalDate(value: unknown, field: string): ValidationResult<Date | null> {
+  if (value === undefined || value === null) return { success: true, data: null };
+  if (typeof value !== 'string' || value.length > 40 || !ISO_DATE_PATTERN.test(value)) return { success: false, error: `${field} must be a valid ISO date or null.` };
+  const parsed = new Date(value);
+  const invalidDate = Number.isNaN(parsed.getTime());
+  const invalidCalendarDate = !invalidDate && value.length === 10 && parsed.toISOString().slice(0, 10) !== value;
+  return invalidDate || invalidCalendarDate
+    ? { success: false, error: `${field} must be a valid ISO date or null.` }
+    : { success: true, data: parsed };
+}
+
+function parseEmptyBody(body: unknown): ValidationResult<Record<string, never>> {
+  const shape = parseStrictKeys(body ?? {}, []);
+  return shape.success ? { success: true, data: {} } : shape;
+}
+
+function hrBranchIds(req: TenantRequest): string[] {
+  return managedBranchIds(req.user!).filter((branchId) => hasBranchPermission(req.user!, 'manage_staff', branchId));
+}
+
+function canManageStaffAssignments(req: TenantRequest, assignments: Array<{ branchId: string | null }>): boolean {
+  if (isTenantAdmin(req.user!)) return true;
+  const allowed = new Set(hrBranchIds(req));
+  return assignments.some((assignment) => assignment.branchId !== null && allowed.has(assignment.branchId));
+}
+
+// 1. Upload Staff Document (Tenant Admin or assigned Branch Admin)
 router.post(
   '/documents',
   authMiddleware,
-  hasPermission('manage_staff'),
   async (req: TenantRequest, res: Response) => {
-    const { staffRecordId, documentType, fileUrl, expiryDate } = req.body;
-
-    if (!staffRecordId || !documentType || !fileUrl) {
-      return res.status(400).json({
-        error: 'Missing required parameters: staffRecordId, documentType, fileUrl.',
-      });
+    const shape = parseStrictKeys(req.body, ['staffRecordId', 'documentType', 'fileUrl', 'expiryDate']);
+    if (!shape.success) return res.status(400).json({ error: shape.error });
+    const staffRecordId = readTrimmedString(shape.data, 'staffRecordId', { required: true, maxLength: 128, message: 'A valid staffRecordId is required.' });
+    const documentType = readTrimmedString(shape.data, 'documentType', { required: true, maxLength: 40, message: 'A valid documentType is required.' });
+    const fileUrl = readTrimmedString(shape.data, 'fileUrl', { required: true, maxLength: 2_048, message: 'A valid HTTPS fileUrl is required.' });
+    const expiryDate = parseOptionalDate(shape.data.expiryDate, 'expiryDate');
+    if (!staffRecordId.success) return res.status(400).json({ error: staffRecordId.error });
+    if (!documentType.success || !STAFF_DOCUMENT_TYPES.has(documentType.data)) {
+      return res.status(400).json({ error: 'documentType must be NID, CONTRACT, ACADEMIC, or CERTIFICATION.' });
     }
+    if (!fileUrl.success) return res.status(400).json({ error: fileUrl.error });
+    try {
+      const url = new URL(fileUrl.data);
+      if (url.protocol !== 'https:') return res.status(400).json({ error: 'fileUrl must use HTTPS.' });
+    } catch {
+      return res.status(400).json({ error: 'A valid HTTPS fileUrl is required.' });
+    }
+    if (!expiryDate.success) return res.status(400).json({ error: expiryDate.error });
 
     try {
       // Confirm the staff record belongs to the caller's tenant before writing.
       const staffRecord = await prisma.staffRecord.findUnique({
-        where: { id: staffRecordId },
-        include: { user: true },
+        where: { id: staffRecordId.data },
+        include: { user: { include: { userRoles: true } } },
       });
       if (!staffRecord || staffRecord.user.tenantId !== req.tenantId) {
         return res.status(404).json({ error: 'Staff record not found in your institution.' });
       }
+      if (!canManageStaffAssignments(req, staffRecord.user.userRoles)) {
+        return res.status(403).json({ error: 'You cannot manage staff documents outside your assigned branches.' });
+      }
 
       const doc = await prisma.staffDocument.create({
         data: {
-          staffRecordId,
-          documentType,
-          fileUrl,
-          expiryDate: expiryDate ? new Date(expiryDate) : null,
+          staffRecordId: staffRecordId.data,
+          documentType: documentType.data,
+          fileUrl: fileUrl.data,
+          expiryDate: expiryDate.data,
         },
       });
 
       return res.status(201).json({ message: 'Document uploaded successfully.', doc });
-    } catch (error: any) {
-      return res.status(500).json({ error: 'Failed to upload document.', details: error.message });
+    } catch {
+      return res.status(500).json({ error: 'Failed to upload document.' });
     }
   }
 );
@@ -50,9 +93,12 @@ router.post(
 router.get(
   '/documents/alerts',
   authMiddleware,
-  hasPermission('manage_staff'),
   async (req: TenantRequest, res: Response) => {
     try {
+      const branchIds = hrBranchIds(req);
+      if (!isTenantAdmin(req.user!) && branchIds.length === 0) {
+        return res.status(403).json({ error: 'Only Tenant Admins or assigned Branch Admins may view staff document alerts.' });
+      }
       const today = new Date();
       const next30Days = new Date();
       next30Days.setDate(today.getDate() + 30);
@@ -65,48 +111,65 @@ router.get(
           },
           // Scope to the caller's tenant — documents belong to staff whose user
           // record carries the tenantId.
-          staffRecord: { user: { tenantId: req.tenantId! } },
+          staffRecord: {
+            user: {
+              tenantId: req.tenantId!,
+              ...(isTenantAdmin(req.user!) ? {} : { userRoles: { some: { branchId: { in: branchIds } } } }),
+            },
+          },
         },
       });
 
       return res.status(200).json({ expiringDocs });
-    } catch (error: any) {
-      return res.status(500).json({ error: 'Failed to load document alerts.', details: error.message });
+    } catch {
+      return res.status(500).json({ error: 'Failed to load document alerts.' });
     }
   }
 );
 
-// 3. Initiate Exit Offboarding (Admin/Staff)
+// 3. Initiate Exit Offboarding (Tenant Admin or assigned Branch Admin)
 router.post(
   '/exit/initiate',
   authMiddleware,
-  hasPermission('manage_staff'),
   async (req: TenantRequest, res: Response) => {
-    const { staffRecordId, resignationDate, reason, noticePeriodDays } = req.body;
-
-    if (!staffRecordId || !resignationDate) {
-      return res.status(400).json({
-        error: 'Missing required parameters: staffRecordId, resignationDate.',
-      });
+    const shape = parseStrictKeys(req.body, ['staffRecordId', 'resignationDate', 'reason', 'noticePeriodDays']);
+    if (!shape.success) return res.status(400).json({ error: shape.error });
+    const staffRecordId = readTrimmedString(shape.data, 'staffRecordId', { required: true, maxLength: 128, message: 'A valid staffRecordId is required.' });
+    const resignationDate = parseOptionalDate(shape.data.resignationDate, 'resignationDate');
+    const reasonValue = shape.data.reason;
+    if (!staffRecordId.success) return res.status(400).json({ error: staffRecordId.error });
+    if (!resignationDate.success || resignationDate.data === null) return res.status(400).json({ error: 'A valid resignationDate is required.' });
+    if (reasonValue !== undefined && reasonValue !== null && (typeof reasonValue !== 'string' || reasonValue.trim().length > 2_000)) {
+      return res.status(400).json({ error: 'reason must be a string of 2000 characters or fewer, or null.' });
+    }
+    const reason = typeof reasonValue === 'string' ? reasonValue.trim() || null : null;
+    let noticePeriodDays = 30;
+    if (shape.data.noticePeriodDays !== undefined) {
+      const notice = readFiniteNumber(shape.data, 'noticePeriodDays', { min: 0, max: 365, message: 'noticePeriodDays must be an integer between 0 and 365.' });
+      if (!notice.success || !Number.isInteger(notice.data)) return res.status(400).json({ error: 'noticePeriodDays must be an integer between 0 and 365.' });
+      noticePeriodDays = notice.data;
     }
 
     try {
       const staff = await prisma.staffRecord.findFirst({
-        where: { id: staffRecordId, user: { tenantId: req.tenantId! } },
+        where: { id: staffRecordId.data, user: { tenantId: req.tenantId! } },
+        include: { user: { include: { userRoles: true } } },
       });
       if (!staff) return res.status(404).json({ error: 'Staff record not found.' });
-      const resignation = new Date(resignationDate);
-      if (Number.isNaN(resignation.getTime())) return res.status(400).json({ error: 'Invalid resignationDate.' });
+      if (!canManageStaffAssignments(req, staff.user.userRoles)) {
+        return res.status(403).json({ error: 'You cannot initiate exits for staff outside your assigned branches.' });
+      }
       const structure = (staff.salaryStructure ?? {}) as { basicSalary?: number };
       const salary = Number(structure.basicSalary ?? 0);
-      const proRatedSalary = Math.round((salary / 30) * Math.min(resignation.getDate(), 30) * 100) / 100;
+      const resignationDay = Number((shape.data.resignationDate as string).slice(8, 10));
+      const proRatedSalary = Math.round((salary / 30) * Math.min(resignationDay, 30) * 100) / 100;
 
       const exit = await prisma.exitClearance.create({
         data: {
-          staffRecordId,
-          resignationDate: resignation,
+          staffRecordId: staffRecordId.data,
+          resignationDate: resignationDate.data,
           reason,
-          noticePeriodDays: noticePeriodDays || 30,
+          noticePeriodDays,
           clearanceChecklist: [
             { item: 'Return of Tuition Keys & Access Card', cleared: false, signature: null },
             { item: 'Handover of Physical Textbooks & Curriculums', cleared: false, signature: null },
@@ -118,7 +181,7 @@ router.post(
       });
 
       return res.status(201).json({ message: 'Exit clearance initiated successfully.', exit });
-    } catch (error: any) {
+    } catch {
       return res.status(500).json({ error: 'Failed to initiate staff exit.' });
     }
   }
@@ -130,11 +193,10 @@ router.post(
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
     const { exitId } = req.params;
-    const { checklistItem } = req.body;
-
-    if (!checklistItem) {
-      return res.status(400).json({ error: 'Missing required parameter: checklistItem.' });
-    }
+    const shape = parseStrictKeys(req.body, ['checklistItem']);
+    if (!shape.success) return res.status(400).json({ error: shape.error });
+    const checklistItem = readTrimmedString(shape.data, 'checklistItem', { required: true, maxLength: 200, message: 'A valid checklistItem is required.' });
+    if (!checklistItem.success) return res.status(400).json({ error: checklistItem.error });
 
     try {
       const exit = await prisma.exitClearance.findFirst({
@@ -142,14 +204,17 @@ router.post(
         include: { staffRecord: { include: { user: { include: { userRoles: true } } } } },
       });
       if (!exit) return res.status(404).json({ error: 'Exit clearance not found.' });
+      if (isTenantAdmin(req.user!)) {
+        return res.status(403).json({ error: 'Tenant Admin cannot perform the Branch Admin clearance step.' });
+      }
       const branchIds = exit.staffRecord.user.userRoles
         .map((assignment) => assignment.branchId)
         .filter((branchId): branchId is string => Boolean(branchId));
-      if (!branchIds.some((branchId) => managedBranchIds(req.user!).includes(branchId))) {
+      if (!branchIds.some((branchId) => hrBranchIds(req).includes(branchId))) {
         return res.status(403).json({ error: 'Only the assigned Branch Admin may clear this checklist.' });
       }
       const checklist = Array.isArray(exit.clearanceChecklist) ? [...exit.clearanceChecklist as any[]] : [];
-      const index = checklist.findIndex((item) => item.item === checklistItem);
+      const index = checklist.findIndex((item) => item.item === checklistItem.data);
       if (index < 0) return res.status(404).json({ error: 'Checklist item not found.' });
       if (checklist[index]?.cleared === true) {
         return res.status(409).json({ error: 'This checklist item was already cleared.' });
@@ -165,7 +230,7 @@ router.post(
       }
       const updated = await prisma.exitClearance.findUniqueOrThrow({ where: { id: exit.id } });
       return res.status(200).json({ message: 'Checklist item cleared.', exit: updated });
-    } catch (error: any) {
+    } catch {
       return res.status(500).json({ error: 'Clearance sign-off failed.' });
     }
   }
@@ -180,6 +245,8 @@ router.post(
 
     try {
       if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may settle staff exits.' });
+      const body = parseEmptyBody(req.body);
+      if (!body.success) return res.status(400).json({ error: body.error });
       const exit = await prisma.exitClearance.findFirst({
         where: { id: exitId, staffRecord: { user: { tenantId: req.tenantId! } } },
         include: { staffRecord: true },
@@ -202,7 +269,7 @@ router.post(
         return res.status(409).json({ error: 'Exit was already settled or changed by another request.' });
       }
       return res.status(200).json({ message: 'Exit settled and staff account deactivated.', exitId, status: 'SETTLED' });
-    } catch (error: any) {
+    } catch {
       return res.status(500).json({ error: 'Final settlement failed.' });
     }
   }
@@ -214,12 +281,14 @@ router.post(
   authMiddleware,
   hasPermission('manage_staff'),
   async (req: TenantRequest, res: Response) => {
-    const { month, year } = req.body;
+    if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may calculate payroll.' });
+    const shape = parseStrictKeys(req.body, ['month', 'year']);
+    if (!shape.success) return res.status(400).json({ error: shape.error });
+    const month = readFiniteNumber(shape.data, 'month', { min: 1, max: 12, message: 'month must be an integer between 1 and 12.' });
+    const year = readFiniteNumber(shape.data, 'year', { min: 2_000, max: 2_100, message: 'year must be an integer between 2000 and 2100.' });
+    if (!month.success || !Number.isInteger(month.data)) return res.status(400).json({ error: 'month must be an integer between 1 and 12.' });
+    if (!year.success || !Number.isInteger(year.data)) return res.status(400).json({ error: 'year must be an integer between 2000 and 2100.' });
     const tenantId = req.tenantId!;
-
-    if (!month || !year) {
-      return res.status(400).json({ error: 'Missing required parameters: month, year.' });
-    }
 
     try {
       const staffRecords = await prisma.staffRecord.findMany({
@@ -248,8 +317,8 @@ router.post(
                 teacherId: record.userId,
                 status: 'PRESENT_CONFIRMED',
                 date: {
-                  gte: new Date(year, month - 1, 1),
-                  lt: new Date(year, month, 1),
+                  gte: new Date(year.data, month.data - 1, 1),
+                  lt: new Date(year.data, month.data, 1),
                 },
               },
             });
@@ -266,8 +335,8 @@ router.post(
             data: {
               tenantId,
               staffRecordId: record.id,
-              month: Number(month),
-              year: Number(year),
+              month: month.data,
+              year: year.data,
               baseSalary,
               attendanceDeductions: deductions,
               bonuses,
@@ -282,8 +351,8 @@ router.post(
         message: 'Payroll calculated successfully.',
         payrolls,
       });
-    } catch (error: any) {
-      return res.status(500).json({ error: 'Payroll calculation failed.', details: error.message });
+    } catch {
+      return res.status(500).json({ error: 'Payroll calculation failed.' });
     }
   }
 );
@@ -295,12 +364,13 @@ router.get(
   hasPermission('manage_staff'),
   async (req: TenantRequest, res: Response) => {
     try {
+      if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may view payroll.' });
       const list = await prisma.payroll.findMany({
           where: { tenantId: req.tenantId! },
           include: { staffRecord: { include: { user: true } } },
         });
       return res.status(200).json({ payrolls: list });
-    } catch (error: any) {
+    } catch {
       return res.status(500).json({ error: 'Failed to retrieve payrolls.' });
     }
   }
@@ -317,6 +387,8 @@ router.post(
       const payroll = await prisma.payroll.findFirst({ where: { id, tenantId: req.tenantId! } });
       if (!payroll) return res.status(404).json({ error: 'Payroll record not found.' });
       if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may approve payroll.' });
+      const body = parseEmptyBody(req.body);
+      if (!body.success) return res.status(400).json({ error: body.error });
       if (payroll.status !== 'PENDING') return res.status(409).json({ error: 'Payroll is not pending.' });
       const transition = await prisma.payroll.updateMany({
           where: { id: payroll.id, tenantId: req.tenantId!, status: 'PENDING' },
@@ -335,35 +407,47 @@ router.post(
         message: 'Payroll approved for manual payment. No salary funds were transferred by TMS.',
         payroll: approved,
       });
-    } catch (error: any) {
-      return res.status(500).json({ error: 'Failed to process payroll payment.', details: error.message });
+    } catch {
+      return res.status(500).json({ error: 'Failed to process payroll payment.' });
     }
   }
 );
 
 router.post('/payroll/reconcile/:id', authMiddleware, async (req: TenantRequest, res: Response) => {
   if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may reconcile payroll.' });
-  const reference = typeof req.body?.reference === 'string' ? req.body.reference.trim() : '';
-  if (!reference) return res.status(400).json({ error: 'External payment reference is required.' });
-  const payroll = await prisma.payroll.findFirst({ where: { id: req.params.id, tenantId: req.tenantId! } });
-  if (!payroll) return res.status(404).json({ error: 'Payroll record not found.' });
-  if (payroll.status !== 'APPROVED_FOR_MANUAL_PAYMENT') {
-    return res.status(409).json({ error: 'Payroll must be approved before reconciliation.' });
-  }
-  const transition = await prisma.payroll.updateMany({
-    where: { id: payroll.id, tenantId: req.tenantId!, status: 'APPROVED_FOR_MANUAL_PAYMENT' },
-    data: {
-      status: 'MANUALLY_PAID',
-      settlementReference: reference,
-      reconciledBy: req.user!.id,
-      paymentDate: new Date(),
-    },
+  const shape = parseStrictKeys(req.body, ['reference']);
+  if (!shape.success) return res.status(400).json({ error: shape.error });
+  const reference = readTrimmedString(shape.data, 'reference', {
+    required: true,
+    maxLength: 160,
+    pattern: CONTROL_CHARACTER_PATTERN,
+    message: 'External payment reference must be a non-empty string of 160 characters or fewer.',
   });
-  if (transition.count !== 1) {
-    return res.status(409).json({ error: 'Payroll was reconciled by another request.' });
+  if (!reference.success) return res.status(400).json({ error: reference.error });
+
+  try {
+    const payroll = await prisma.payroll.findFirst({ where: { id: req.params.id, tenantId: req.tenantId! } });
+    if (!payroll) return res.status(404).json({ error: 'Payroll record not found.' });
+    if (payroll.status !== 'APPROVED_FOR_MANUAL_PAYMENT') {
+      return res.status(409).json({ error: 'Payroll must be approved before reconciliation.' });
+    }
+    const transition = await prisma.payroll.updateMany({
+      where: { id: payroll.id, tenantId: req.tenantId!, status: 'APPROVED_FOR_MANUAL_PAYMENT' },
+      data: {
+        status: 'MANUALLY_PAID',
+        settlementReference: reference.data,
+        reconciledBy: req.user!.id,
+        paymentDate: new Date(),
+      },
+    });
+    if (transition.count !== 1) {
+      return res.status(409).json({ error: 'Payroll was reconciled by another request.' });
+    }
+    const reconciled = await prisma.payroll.findUniqueOrThrow({ where: { id: payroll.id } });
+    return res.json({ message: 'Manual salary payment reconciled. TMS did not transfer funds.', payroll: reconciled });
+  } catch {
+    return res.status(500).json({ error: 'Payroll reconciliation failed.' });
   }
-  const reconciled = await prisma.payroll.findUniqueOrThrow({ where: { id: payroll.id } });
-  return res.json({ message: 'Manual salary payment reconciled. TMS did not transfer funds.', payroll: reconciled });
 });
 
 export default router;

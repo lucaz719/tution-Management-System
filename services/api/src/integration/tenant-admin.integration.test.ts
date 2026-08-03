@@ -672,6 +672,19 @@ async function main(): Promise<void> {
         salaryStructure: { basicMonthly: 40000 },
       },
     });
+    response = await request('POST', '/api/hr/payroll/calculate', branchAdminCookie, {
+      month: 6,
+      year: 2026,
+    });
+    assert.equal(response.status, 403, 'Branch Admin cannot calculate tenant-wide payroll');
+    response = await request('GET', '/api/hr/payroll', branchAdminCookie);
+    assert.equal(response.status, 403, 'Branch Admin cannot view tenant-wide payroll');
+    response = await request('POST', '/api/hr/payroll/calculate', adminACookie, {
+      month: 6,
+      year: 2026,
+      unexpected: true,
+    });
+    assert.equal(response.status, 400, 'payroll calculation rejects unknown input fields');
     response = await request('POST', '/api/hr/payroll/calculate', adminACookie, {
       month: 6,
       year: 2026,
@@ -1206,6 +1219,18 @@ async function main(): Promise<void> {
       expiryDate: new Date(Date.now() + 10 * 86400000).toISOString(),
     });
     assert.equal(response.status, 201);
+    response = await request('POST', '/api/hr/documents', branchAdminCookie, {
+      staffRecordId: staffRecord.id,
+      documentType: 'CERTIFICATION',
+      fileUrl: 'https://example.invalid/certification.pdf',
+    });
+    assert.equal(response.status, 201, 'assigned Branch Admin may manage documents for branch staff');
+    response = await request('POST', '/api/hr/documents', adminACookie, {
+      staffRecordId: staffRecord.id,
+      documentType: 'EXECUTABLE',
+      fileUrl: 'http://example.invalid/unsafe.exe',
+    });
+    assert.equal(response.status, 400, 'staff documents reject unsupported types and non-HTTPS URLs');
     response = await request('POST', '/api/hr/documents', adminBCookie, {
       staffRecordId: staffRecord.id,
       documentType: 'CONTRACT',
@@ -1215,6 +1240,12 @@ async function main(): Promise<void> {
     response = await request('GET', '/api/hr/documents/alerts', adminACookie);
     assert.equal(response.status, 200);
     assert(response.body.expiringDocs.some((doc: any) => doc.staffRecordId === staffRecord.id));
+    response = await request('POST', '/api/hr/exit/initiate', adminACookie, {
+      staffRecordId: staffRecord.id,
+      resignationDate: '2026-08-15',
+      unexpected: true,
+    });
+    assert.equal(response.status, 400, 'exit initiation rejects unknown input fields');
     response = await request('POST', '/api/hr/exit/initiate', adminACookie, {
       staffRecordId: staffRecord.id,
       resignationDate: '2026-08-15',

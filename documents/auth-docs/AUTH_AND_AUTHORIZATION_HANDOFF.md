@@ -1,7 +1,7 @@
 # TMS Authentication and Authorization Handoff
 
 **Document status:** Active implementation runbook for authentication and authorization
-**Last reconciled:** 2026-08-02
+**Last reconciled:** 2026-08-03
 **Audience:** API, web, mobile, database, security, and release engineers
 
 > **Authority boundary:** `.memory` is the repository-wide operational source
@@ -233,6 +233,11 @@ Use database fixtures with at least two branches and two users in different scop
 | Tenant-wide settings/templates | Yes | No | No | No |
 | Branch calendar/resources | Yes | Assigned branches | Assigned tasks | No |
 | Cross-branch reports | Yes | No | No | No |
+| Staff documents and expiry alerts | Tenant-wide | Assigned branch staff only | No | No |
+| Initiate staff exit | Tenant-wide | Assigned branch staff only | No | No |
+| Sign exit-clearance checklist | No | Assigned branch staff only | No | No |
+| Finalize staff exit/deactivate account | Yes | No | No | No |
+| Calculate, view, approve, or reconcile payroll | Yes | No | No | No |
 
 ## 7.0 CI and release gates
 
@@ -262,6 +267,9 @@ Production requires protected branch approval, a migration backup, an explicit r
 
 ## 8.0 Security rules for future work
 
+- Every JSON write endpoint must use an exact-key schema before business logic:
+  reject unknown keys and wrong scalar types, bound strings/arrays/numbers, and
+  validate nested objects, enums, nullable values, dates, and URLs explicitly.
 - Never accept tenant, branch, actor, manager, or staff authority from request data alone.
 - Derive identity and scope from the verified session.
 - Keep tenant ownership in every Prisma query.
