@@ -1090,6 +1090,46 @@ async function main(): Promise<void> {
     response = await request('GET', '/api/certificates/verify/DOES-NOT-EXIST');
     assert.equal(response.status, 404);
 
+    // Persisted broadcasts are tenant-scoped and staff performance reports do
+    // not disclose staff outside the caller's institution.
+    response = await request('POST', '/api/communication/broadcast', branchAdminCookie, {
+      title: 'Forbidden broadcast',
+      message: 'Only tenant administrators may publish this.',
+    });
+    assert.equal(response.status, 403);
+    response = await request('POST', '/api/communication/broadcast', adminACookie, {
+      title: 'Term opening',
+      message: 'Classes resume on Sunday.',
+      audienceRoles: ['Parent', 'Teacher'],
+    });
+    assert.equal(response.status, 201);
+    response = await request('GET', '/api/communication/broadcasts', adminBCookie);
+    assert.equal(response.status, 200);
+    assert.equal(response.body.broadcasts.length, 0, 'foreign-tenant broadcasts must not be visible');
+
+    const branchAdminStaff = await prisma.staffRecord.upsert({
+      where: { userId: branchAdminA.id },
+      update: {},
+      create: {
+        userId: branchAdminA.id,
+        joiningDate: new Date('2026-01-01T00:00:00.000Z'),
+        designation: 'Branch Admin',
+        contractType: 'FIXED',
+        salaryStructure: {},
+      },
+    });
+    await prisma.staffPerformanceScore.upsert({
+      where: { staffRecordId: branchAdminStaff.id },
+      update: { overallScore: 92 },
+      create: { staffRecordId: branchAdminStaff.id, overallScore: 92 },
+    });
+    response = await request('GET', '/api/performance/staff/scores', adminACookie);
+    assert.equal(response.status, 200);
+    assert(response.body.scores.some((score: any) => score.staffRecordId === branchAdminStaff.id && score.score.overall === 92));
+    response = await request('GET', '/api/performance/staff/scores', adminBCookie);
+    assert.equal(response.status, 200);
+    assert.equal(response.body.scores.some((score: any) => score.staffRecordId === branchAdminStaff.id), false);
+
     // Resource logging and maintenance task ownership.
     const janitorA = await createTenantAdmin(
       tenantA.id,

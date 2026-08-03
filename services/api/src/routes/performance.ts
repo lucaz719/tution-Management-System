@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
-import { canAccessBranch, isTenantAdmin } from '../utils/access-control';
+import { canAccessBranch, isTenantAdmin, managedBranchIds } from '../utils/access-control';
 
 const router = Router();
 
@@ -106,8 +106,40 @@ router.get('/student/:studentId', authMiddleware, async (req: TenantRequest, res
   }
 });
 
-router.get('/staff/scores', authMiddleware, hasPermission('view_reports'), async (_req: TenantRequest, res: Response) => {
-  return res.status(501).json({ error: 'Staff performance scoring is outside the student performance workflow.' });
+router.get('/staff/scores', authMiddleware, hasPermission('view_reports'), async (req: TenantRequest, res: Response) => {
+  try {
+    const tenantWide = isTenantAdmin(req.user!);
+    const branchIds = managedBranchIds(req.user!);
+    const staff = await prisma.staffRecord.findMany({
+      where: { user: { tenantId: req.tenantId! } },
+      include: {
+        user: { select: { id: true, firstName: true, lastName: true, userRoles: { select: { branchId: true } } } },
+        performanceScore: true,
+      },
+      orderBy: { user: { firstName: 'asc' } },
+    });
+    const scores = staff
+      .filter((record) => tenantWide || record.user.userRoles.some((role) => role.branchId && branchIds.includes(role.branchId)))
+      .map((record) => ({
+        staffRecordId: record.id,
+        userId: record.user.id,
+        name: `${record.user.firstName} ${record.user.lastName}`.trim(),
+        branchIds: record.user.userRoles.map((role) => role.branchId).filter((branchId): branchId is string => Boolean(branchId)),
+        score: record.performanceScore ? {
+          overall: record.performanceScore.overallScore,
+          attendanceRate: record.performanceScore.attendanceRate,
+          classUpdateRate: record.performanceScore.classUpdateRate,
+          studentFeedback: record.performanceScore.studentFeedbackScore,
+          parentFeedback: record.performanceScore.parentFeedbackScore,
+          leaveComplianceRate: record.performanceScore.leaveComplianceRate,
+          history: record.performanceScore.scoreHistory,
+          updatedAt: record.performanceScore.updatedAt,
+        } : null,
+      }));
+    return res.json({ scores });
+  } catch {
+    return res.status(500).json({ error: 'Failed to load staff performance reports.' });
+  }
 });
 
 export default router;

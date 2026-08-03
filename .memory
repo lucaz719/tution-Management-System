@@ -91,6 +91,13 @@ Docker database volume.
   settings contract (including enum values, scalar ranges, and performance
   weight keys). Flexible leave-policy content remains constrained to a JSON
   object so policy evolution does not require client-side hacks.
+- Appointment requests/responses, certificate templates/issuance/downloads,
+  parent-teacher messages, and student performance scores/remarks were already
+  backed by persisted Prisma models and active routes. Broadcast persistence is
+  now provided by migration `20260803090000_broadcast_persistence` and scoped
+  `POST /api/communication/broadcast` / `GET /api/communication/broadcasts`
+  endpoints. `GET /api/performance/staff/scores` now returns the existing
+  `StaffPerformanceScore` records, scoped to the caller's tenant and branches.
 - Docker Compose stack for PostgreSQL, migration runner, API, and web.
 - Prisma/OpenSSL support in the API Docker build and runtime images.
 - API workspace dependencies, including Better Auth, copied into the runtime image.
@@ -101,7 +108,7 @@ Docker database volume.
 - Branch-scoped middleware is default-deny when no explicit branch is proven.
 - Webhook signature, amount, replay, tenant, and invoice protections.
 - Cron restricted to tenant-wide Tenant Admin and tenant-scoped mutations.
-- Simulation/fail-open route behavior removed; unfinished modules return 501.
+- Simulation/fail-open route behavior removed; there are no remaining API 501 routes.
 - Tenant policy versions and historical policy snapshots added.
 - Petty-cash final decisions now support Tenant Admin release, rejection, and
   send-back-for-revision with remarks and atomic status transitions. Migration
@@ -459,23 +466,20 @@ Known non-blocking warnings:
    import records, then course/enrollment, HR, leave, homework, resource, and
    calendar write contracts. JSON body limits, browser-security headers, safe
    400/413/5xx errors, and authentication endpoint rate limiting are in place.
-2. Implement the modules that intentionally return 501:
-   appointments, parent-teacher communication persistence, broadcast persistence,
-   student performance, and staff performance reports.
-3. Add the accepted tenant-scoped list/detail contracts documented in
+2. Add the accepted tenant-scoped list/detail contracts documented in
    `TENANT_ADMIN_API_GAPS.md` for refunds, long-sick leaves, staff exits,
    certificate templates, and calendar lifecycle.
-4. Enforce calendar immutability/update/delete policy from the Tenant Admin PRD.
-5. Complete monthly petty-cash cap reservation/balance behavior and expose
+3. Enforce calendar immutability/update/delete policy from the Tenant Admin PRD.
+4. Complete monthly petty-cash cap reservation/balance behavior and expose
    receipt upload details needed by the Tenant Admin history screen.
-6. Complete connectIPS browser return/status polling UX and validate with real
+5. Complete connectIPS browser return/status polling UX and validate with real
    NCHL UAT credentials.
-7. Add invoice/refund detail queues, NepalPay QR UI, and audit-history screens
+6. Add invoice/refund detail queues, NepalPay QR UI, and audit-history screens
    once their discovery/detail contracts are available.
-8. Replace remaining Tenant Admin-facing `any` contracts in legacy pages and
+7. Replace remaining Tenant Admin-facing `any` contracts in legacy pages and
    split the remaining monolithic `services/api.ts` domains.
-9. Resolve production dependency advisories and Node engine compatibility.
-10. Run final role-by-role, cross-tenant, cross-branch, backup/restore, HTTPS,
+8. Resolve production dependency advisories and Node engine compatibility.
+9. Run final role-by-role, cross-tenant, cross-branch, backup/restore, HTTPS,
     cookie, CORS, and rollback testing before production.
 
 ## connectIPS and finance constraints
