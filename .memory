@@ -73,6 +73,24 @@ Docker database volume.
 
 ## Completed backend work
 
+- Global JSON request limits now cap general API bodies at 256 KiB and legacy
+  password-reset bodies at 16 KiB. Malformed JSON returns a safe 400 response,
+  oversized payloads return 413, and both include the existing correlation ID.
+- Added a dependency-free strict input-schema boundary for legacy password-reset
+  requests. It rejects non-object payloads, unknown fields, invalid email/OTP/
+  token values, and oversized password values before route business logic runs.
+  `npm run test:request-validation --workspace @tms/api` covers this boundary.
+- The first high-risk rollout now also validates manual invoice-payment
+  references, admission and staff/student account provisioning payloads, and
+  teacher GPS IN/OUT attendance payloads. GPS coordinates must be finite and
+  in geographic bounds; these endpoints reject unknown fields before any
+  authorization or database mutation.
+- The next rollout validates NepalPay webhook identifiers/status/amounts,
+  petty-cash requests, decisions, approval remarks and receipt URLs, bounded
+  student attendance sheets, daily session updates, and the full tenant-policy
+  settings contract (including enum values, scalar ranges, and performance
+  weight keys). Flexible leave-policy content remains constrained to a JSON
+  object so policy evolution does not require client-side hacks.
 - Docker Compose stack for PostgreSQL, migration runner, API, and web.
 - Prisma/OpenSSL support in the API Docker build and runtime images.
 - API workspace dependencies, including Better Auth, copied into the runtime image.
@@ -435,8 +453,12 @@ Known non-blocking warnings:
 
 ## Remaining work, in priority order
 
-1. Add strict shared input schemas, request body limits, Helmet/security headers,
-   standardized errors, and endpoint-specific rate limiting.
+1. Continue rolling shared strict input schemas across remaining write endpoints.
+   Finance payment/petty-cash, user provisioning, all attendance mutations, and
+   tenant policy settings are complete. Next prioritize the bounded bulk-student
+   import records, then course/enrollment, HR, leave, homework, resource, and
+   calendar write contracts. JSON body limits, browser-security headers, safe
+   400/413/5xx errors, and authentication endpoint rate limiting are in place.
 2. Implement the modules that intentionally return 501:
    appointments, parent-teacher communication persistence, broadcast persistence,
    student performance, and staff performance reports.
@@ -464,7 +486,7 @@ Known non-blocking warnings:
 - Refunds are approved and reconciled manually using an external reference.
 - Payroll is calculated/approved/reconciled in TMS; salary funds are paid outside TMS.
 
-## Active uncommitted work
+## Recently incorporated security work
 
 - Server-enforced email OTP two-factor authentication now uses the Better Auth
   two-factor plugin. A password sign-in for a `twoFactorEnabled` user creates

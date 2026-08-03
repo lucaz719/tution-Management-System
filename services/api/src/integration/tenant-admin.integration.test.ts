@@ -111,6 +111,31 @@ async function main(): Promise<void> {
     assert(unexpectedFailure.body.requestId, 'unexpected failures must return a correlation ID');
     assert.equal(unexpectedFailure.body.message, undefined, 'unexpected failures must not disclose internal error messages');
 
+    const malformedJson = await fetch(`${baseUrl}/api/auth/forgot-password`, {
+      method: 'POST',
+      headers: {
+        origin: process.env.WEB_ORIGIN!,
+        'content-type': 'application/json',
+      },
+      body: '{',
+    });
+    assert.equal(malformedJson.status, 400, 'malformed JSON must be rejected as a client error');
+    assert.equal((await malformedJson.json()).error, 'Malformed JSON request body.');
+
+    const oversizedResetRequest = await request('POST', '/api/auth/forgot-password', undefined, {
+      email: 'oversized@integration.tms.local',
+      padding: 'x'.repeat(20 * 1024),
+    });
+    assert.equal(oversizedResetRequest.status, 413, 'legacy auth JSON must enforce its small body limit');
+    assert.equal(oversizedResetRequest.body.error, 'Request payload is too large.');
+
+    const unexpectedResetField = await request('POST', '/api/auth/forgot-password', undefined, {
+      email: 'tenant-a-admin@integration.tms.local',
+      role: 'Tenant Admin',
+    });
+    assert.equal(unexpectedResetField.status, 400, 'sensitive auth payloads must reject unknown fields');
+    assert.equal(unexpectedResetField.body.error, 'Unexpected field: role.');
+
     const createTenantAdmin = async (
       tenantId: string,
       email: string,

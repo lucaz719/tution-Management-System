@@ -13,6 +13,7 @@ import {
 } from '../utils/roles';
 import { UserPayload } from '@tms/types';
 import { canReleaseAdmissionLogins } from '../utils/billing-rules';
+import { parseStrictKeys, parseStrictObject } from '../utils/request-validation';
 
 const router = Router();
 
@@ -133,15 +134,21 @@ async function provisionUser(params: {
 }
 
 function validateNewUserBody(body: any): { firstName: string; lastName: string; email: string; phone: string } | null {
-  const firstName = typeof body?.firstName === 'string' ? body.firstName.trim() : '';
-  const lastName = typeof body?.lastName === 'string' ? body.lastName.trim() : '';
-  const email = normalizeEmail(body?.email);
-  const phone = typeof body?.phone === 'string' ? body.phone.trim() : '';
-
-  if (!firstName || !lastName || !email) {
-    return null;
-  }
-  return { firstName, lastName, email, phone };
+  const parsed = parseStrictObject<{ firstName: string; lastName: string; email: string; phone: string }>(body, {
+    fields: {
+      firstName: { required: true, maxLength: 100, normalize: (value) => value.trim(), message: 'A valid first name is required.' },
+      lastName: { required: true, maxLength: 100, normalize: (value) => value.trim(), message: 'A valid last name is required.' },
+      email: { required: true, maxLength: 254, pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, normalize: (value) => normalizeEmail(value), message: 'A valid email address is required.' },
+      phone: { required: false, maxLength: 30, pattern: /^[0-9+()\-\s]*$/, normalize: (value) => value.trim(), message: 'Phone must contain only digits and phone punctuation.' },
+    },
+  });
+  if (!parsed.success) return null;
+  return {
+    firstName: parsed.data.firstName,
+    lastName: parsed.data.lastName,
+    email: parsed.data.email,
+    phone: parsed.data.phone ?? '',
+  };
 }
 
 // --- Caller capabilities: drives what the People UI can do ---
@@ -175,17 +182,19 @@ router.get('/me', authMiddleware, async (req: TenantRequest, res: Response) => {
 // Admission creates inactive Student/Parent accounts and an admission invoice.
 // Credentials are released only through the activation endpoint after payment.
 router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const admissionShape = parseStrictKeys(req.body, ['branchId', 'gradeId', 'student', 'parent']);
+  if (!admissionShape.success) return res.status(400).json({ error: admissionShape.error });
   const caller = req.user as UserPayload;
   const tenantAdmin = isTenantAdmin(caller);
   const scopes = branchAdminScopes(caller);
-  const branchId = typeof req.body?.branchId === 'string' ? req.body.branchId : '';
-  const gradeId = typeof req.body?.gradeId === 'string' ? req.body.gradeId : '';
+  const branchId = typeof admissionShape.data.branchId === 'string' ? admissionShape.data.branchId.trim() : '';
+  const gradeId = typeof admissionShape.data.gradeId === 'string' ? admissionShape.data.gradeId.trim() : '';
   if (!tenantAdmin && !scopes.includes(branchId)) {
     return res.status(403).json({ error: 'Only the Tenant Admin or assigned Branch Admin may create admissions.' });
   }
 
-  const studentFields = validateNewUserBody(req.body?.student);
-  const parentFields = validateNewUserBody(req.body?.parent);
+  const studentFields = validateNewUserBody(admissionShape.data.student);
+  const parentFields = validateNewUserBody(admissionShape.data.parent);
   if (!branchId || !gradeId || !studentFields || !parentFields) {
     return res.status(400).json({
       error: 'branchId, gradeId, and complete student and parent identity details are required.',
@@ -1126,12 +1135,19 @@ router.post('/branch-admin', authMiddleware, async (req: TenantRequest, res: Res
     return res.status(403).json({ error: 'Only a Tenant Admin can create branch managers.' });
   }
 
-  const fields = validateNewUserBody(req.body);
+  const requestShape = parseStrictKeys(req.body, ['firstName', 'lastName', 'email', 'phone', 'branchId']);
+  if (!requestShape.success) return res.status(400).json({ error: requestShape.error });
+  const fields = validateNewUserBody({
+    firstName: requestShape.data.firstName,
+    lastName: requestShape.data.lastName,
+    email: requestShape.data.email,
+    phone: requestShape.data.phone,
+  });
   if (!fields) {
     return res.status(400).json({ error: 'firstName, lastName, and email are required.' });
   }
 
-  const branchId = typeof req.body?.branchId === 'string' ? req.body.branchId : '';
+  const branchId = typeof requestShape.data.branchId === 'string' ? requestShape.data.branchId.trim() : '';
   if (!branchId) {
     return res.status(400).json({ error: 'branchId is required for a branch manager.' });
   }
@@ -1179,12 +1195,19 @@ router.post('/', authMiddleware, async (req: TenantRequest, res: Response) => {
     return res.status(403).json({ error: 'You do not have permission to create users.' });
   }
 
-  const fields = validateNewUserBody(req.body);
+  const requestShape = parseStrictKeys(req.body, ['firstName', 'lastName', 'email', 'phone', 'role', 'branchId', 'gradeId']);
+  if (!requestShape.success) return res.status(400).json({ error: requestShape.error });
+  const fields = validateNewUserBody({
+    firstName: requestShape.data.firstName,
+    lastName: requestShape.data.lastName,
+    email: requestShape.data.email,
+    phone: requestShape.data.phone,
+  });
   if (!fields) {
     return res.status(400).json({ error: 'firstName, lastName, and email are required.' });
   }
 
-  const roleName = typeof req.body?.role === 'string' ? req.body.role : '';
+  const roleName = typeof requestShape.data.role === 'string' ? requestShape.data.role.trim() : '';
   if (!isCanonicalRole(roleName)) {
     return res.status(400).json({ error: 'Unknown role.' });
   }
@@ -1198,7 +1221,7 @@ router.post('/', authMiddleware, async (req: TenantRequest, res: Response) => {
     return res.status(400).json({ error: 'Use the branch-manager endpoint to create Branch Admins.' });
   }
 
-  const branchId = typeof req.body?.branchId === 'string' ? req.body.branchId : '';
+  const branchId = typeof requestShape.data.branchId === 'string' ? requestShape.data.branchId.trim() : '';
   if (!branchId) {
     return res.status(400).json({ error: 'branchId is required.' });
   }
@@ -1215,8 +1238,8 @@ router.post('/', authMiddleware, async (req: TenantRequest, res: Response) => {
 
   // Optional grade for students — must belong to the tenant.
   let gradeId: string | null = null;
-  if (roleName === 'Student' && typeof req.body?.gradeId === 'string' && req.body.gradeId) {
-    const grade = await prisma.grade.findFirst({ where: { id: req.body.gradeId, tenantId: req.tenantId! } });
+  if (roleName === 'Student' && typeof requestShape.data.gradeId === 'string' && requestShape.data.gradeId.trim()) {
+    const grade = await prisma.grade.findFirst({ where: { id: requestShape.data.gradeId.trim(), tenantId: req.tenantId! } });
     if (!grade) {
       return res.status(404).json({ error: 'Grade not found in your institution.' });
     }

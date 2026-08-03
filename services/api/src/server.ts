@@ -35,7 +35,7 @@ import { monitorCredentialSignIn } from './middleware/auth-security-monitor';
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
 const runtimeConfig = validateRuntimeConfig();
-const parseLegacyAuthJson = express.json();
+const parseLegacyAuthJson = express.json({ limit: '16kb' });
 const legacyAuthPaths = new Set([
   '/forgot-password',
   '/verify-reset-otp',
@@ -105,7 +105,7 @@ app.use('/api/auth', (req, res, next) => {
 // parser and cookie/session handling remain intact.
 app.all('/api/auth/*', monitorCredentialSignIn, toNodeHandler(auth));
 
-app.use(express.json());
+app.use(express.json({ limit: '256kb' }));
 
 // Global tenant middleware; authenticated scope comes from the verified session.
 app.use(tenantMiddleware);
@@ -148,6 +148,12 @@ if (process.env.NODE_ENV === 'test') {
 // Centralized error handling middleware
 app.use((err: any, req: TenantRequest, res: Response, next: express.NextFunction) => {
   const requestId = res.locals.requestId || crypto.randomUUID();
+  if (err?.type === 'entity.too.large' || err?.status === 413) {
+    return res.status(413).json({ error: 'Request payload is too large.', requestId });
+  }
+  if (err instanceof SyntaxError && 'body' in err) {
+    return res.status(400).json({ error: 'Malformed JSON request body.', requestId });
+  }
   console.error(JSON.stringify({
     event: 'API_UNEXPECTED_ERROR',
     requestId,
