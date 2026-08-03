@@ -19,6 +19,7 @@ export interface TeacherClass {
 }
 
 export interface TeacherDashboard {
+  demoMode?: boolean;
   generatedAt: string;
   teacher: { id: string; name: string; email: string; designation: string; joiningDate: string | null; contractType: string | null; branches: Array<{ id: string; name: string }> };
   statistics: { attendanceRate: number; presentDays: number; approvedLeaveDays: number; totalSessions: number; updateCompliance: number; assignedClasses: number };
