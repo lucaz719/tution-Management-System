@@ -111,6 +111,31 @@ async function main(): Promise<void> {
     assert(unexpectedFailure.body.requestId, 'unexpected failures must return a correlation ID');
     assert.equal(unexpectedFailure.body.message, undefined, 'unexpected failures must not disclose internal error messages');
 
+    const malformedJson = await fetch(`${baseUrl}/api/auth/forgot-password`, {
+      method: 'POST',
+      headers: {
+        origin: process.env.WEB_ORIGIN!,
+        'content-type': 'application/json',
+      },
+      body: '{',
+    });
+    assert.equal(malformedJson.status, 400, 'malformed JSON must be rejected as a client error');
+    assert.equal((await malformedJson.json()).error, 'Malformed JSON request body.');
+
+    const oversizedResetRequest = await request('POST', '/api/auth/forgot-password', undefined, {
+      email: 'oversized@integration.tms.local',
+      padding: 'x'.repeat(20 * 1024),
+    });
+    assert.equal(oversizedResetRequest.status, 413, 'legacy auth JSON must enforce its small body limit');
+    assert.equal(oversizedResetRequest.body.error, 'Request payload is too large.');
+
+    const unexpectedResetField = await request('POST', '/api/auth/forgot-password', undefined, {
+      email: 'tenant-a-admin@integration.tms.local',
+      role: 'Tenant Admin',
+    });
+    assert.equal(unexpectedResetField.status, 400, 'sensitive auth payloads must reject unknown fields');
+    assert.equal(unexpectedResetField.body.error, 'Unexpected field: role.');
+
     const createTenantAdmin = async (
       tenantId: string,
       email: string,
@@ -647,6 +672,19 @@ async function main(): Promise<void> {
         salaryStructure: { basicMonthly: 40000 },
       },
     });
+    response = await request('POST', '/api/hr/payroll/calculate', branchAdminCookie, {
+      month: 6,
+      year: 2026,
+    });
+    assert.equal(response.status, 403, 'Branch Admin cannot calculate tenant-wide payroll');
+    response = await request('GET', '/api/hr/payroll', branchAdminCookie);
+    assert.equal(response.status, 403, 'Branch Admin cannot view tenant-wide payroll');
+    response = await request('POST', '/api/hr/payroll/calculate', adminACookie, {
+      month: 6,
+      year: 2026,
+      unexpected: true,
+    });
+    assert.equal(response.status, 400, 'payroll calculation rejects unknown input fields');
     response = await request('POST', '/api/hr/payroll/calculate', adminACookie, {
       month: 6,
       year: 2026,
@@ -1065,6 +1103,46 @@ async function main(): Promise<void> {
     response = await request('GET', '/api/certificates/verify/DOES-NOT-EXIST');
     assert.equal(response.status, 404);
 
+    // Persisted broadcasts are tenant-scoped and staff performance reports do
+    // not disclose staff outside the caller's institution.
+    response = await request('POST', '/api/communication/broadcast', branchAdminCookie, {
+      title: 'Forbidden broadcast',
+      message: 'Only tenant administrators may publish this.',
+    });
+    assert.equal(response.status, 403);
+    response = await request('POST', '/api/communication/broadcast', adminACookie, {
+      title: 'Term opening',
+      message: 'Classes resume on Sunday.',
+      audienceRoles: ['Parent', 'Teacher'],
+    });
+    assert.equal(response.status, 201);
+    response = await request('GET', '/api/communication/broadcasts', adminBCookie);
+    assert.equal(response.status, 200);
+    assert.equal(response.body.broadcasts.length, 0, 'foreign-tenant broadcasts must not be visible');
+
+    const branchAdminStaff = await prisma.staffRecord.upsert({
+      where: { userId: branchAdminA.id },
+      update: {},
+      create: {
+        userId: branchAdminA.id,
+        joiningDate: new Date('2026-01-01T00:00:00.000Z'),
+        designation: 'Branch Admin',
+        contractType: 'FIXED',
+        salaryStructure: {},
+      },
+    });
+    await prisma.staffPerformanceScore.upsert({
+      where: { staffRecordId: branchAdminStaff.id },
+      update: { overallScore: 92 },
+      create: { staffRecordId: branchAdminStaff.id, overallScore: 92 },
+    });
+    response = await request('GET', '/api/performance/staff/scores', adminACookie);
+    assert.equal(response.status, 200);
+    assert(response.body.scores.some((score: any) => score.staffRecordId === branchAdminStaff.id && score.score.overall === 92));
+    response = await request('GET', '/api/performance/staff/scores', adminBCookie);
+    assert.equal(response.status, 200);
+    assert.equal(response.body.scores.some((score: any) => score.staffRecordId === branchAdminStaff.id), false);
+
     // Resource logging and maintenance task ownership.
     const janitorA = await createTenantAdmin(
       tenantA.id,
@@ -1141,6 +1219,18 @@ async function main(): Promise<void> {
       expiryDate: new Date(Date.now() + 10 * 86400000).toISOString(),
     });
     assert.equal(response.status, 201);
+    response = await request('POST', '/api/hr/documents', branchAdminCookie, {
+      staffRecordId: staffRecord.id,
+      documentType: 'CERTIFICATION',
+      fileUrl: 'https://example.invalid/certification.pdf',
+    });
+    assert.equal(response.status, 201, 'assigned Branch Admin may manage documents for branch staff');
+    response = await request('POST', '/api/hr/documents', adminACookie, {
+      staffRecordId: staffRecord.id,
+      documentType: 'EXECUTABLE',
+      fileUrl: 'http://example.invalid/unsafe.exe',
+    });
+    assert.equal(response.status, 400, 'staff documents reject unsupported types and non-HTTPS URLs');
     response = await request('POST', '/api/hr/documents', adminBCookie, {
       staffRecordId: staffRecord.id,
       documentType: 'CONTRACT',
@@ -1150,6 +1240,12 @@ async function main(): Promise<void> {
     response = await request('GET', '/api/hr/documents/alerts', adminACookie);
     assert.equal(response.status, 200);
     assert(response.body.expiringDocs.some((doc: any) => doc.staffRecordId === staffRecord.id));
+    response = await request('POST', '/api/hr/exit/initiate', adminACookie, {
+      staffRecordId: staffRecord.id,
+      resignationDate: '2026-08-15',
+      unexpected: true,
+    });
+    assert.equal(response.status, 400, 'exit initiation rejects unknown input fields');
     response = await request('POST', '/api/hr/exit/initiate', adminACookie, {
       staffRecordId: staffRecord.id,
       resignationDate: '2026-08-15',

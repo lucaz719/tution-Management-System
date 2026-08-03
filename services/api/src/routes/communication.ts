@@ -4,6 +4,7 @@ import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware } from '../middleware/auth';
 import { MockPushNotificationService } from '../utils/notifications';
 import { isTenantAdmin } from '../utils/access-control';
+import { parseStrictKeys, readTrimmedString } from '../utils/request-validation';
 
 const router = Router();
 
@@ -78,7 +79,52 @@ router.get('/messages/thread/:studentId', authMiddleware, async (req: TenantRequ
 
 router.post('/broadcast', authMiddleware, async (req: TenantRequest, res: Response) => {
   if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may broadcast.' });
-  return res.status(501).json({ error: 'Institutional broadcasts are outside the parent-teacher thread workflow.' });
+  const shape = parseStrictKeys(req.body, ['title', 'message', 'audienceRoles']);
+  if (!shape.success) return res.status(400).json({ error: shape.error });
+  const title = readTrimmedString(shape.data, 'title', { required: true, maxLength: 160, message: 'A broadcast title is required and must be 160 characters or fewer.' });
+  const message = readTrimmedString(shape.data, 'message', { required: true, maxLength: 4_000, message: 'A broadcast message is required and must be 4000 characters or fewer.' });
+  if (!title.success) return res.status(400).json({ error: title.error });
+  if (!message.success) return res.status(400).json({ error: message.error });
+  const audienceRoles = shape.data.audienceRoles;
+  if (audienceRoles !== undefined && (!Array.isArray(audienceRoles) || audienceRoles.length > 8 || audienceRoles.some((role) => typeof role !== 'string' || role.trim().length === 0 || role.length > 64))) {
+    return res.status(400).json({ error: 'audienceRoles must be an array of up to eight role names.' });
+  }
+  const normalizedAudienceRoles = audienceRoles === undefined
+    ? undefined
+    : [...new Set((audienceRoles as string[]).map((role: string) => role.trim()))];
+  try {
+    const record = await prisma.broadcast.create({
+      data: {
+        tenantId: req.tenantId!,
+        authorId: req.user!.id,
+        title: title.data,
+        message: message.data,
+        audienceRoles: normalizedAudienceRoles,
+      },
+    });
+    return res.status(201).json({ message: 'Broadcast published.', broadcast: record });
+  } catch {
+    return res.status(500).json({ error: 'Failed to publish broadcast.' });
+  }
+});
+
+router.get('/broadcasts', authMiddleware, async (req: TenantRequest, res: Response) => {
+  try {
+    const roleNames = new Set(req.user!.roles.map((role: { roleName: string }) => role.roleName));
+    const records = await prisma.broadcast.findMany({
+      where: { tenantId: req.tenantId! },
+      include: { author: { select: { firstName: true, lastName: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    const broadcasts = records.filter((record) => {
+      const audience = Array.isArray(record.audienceRoles) ? record.audienceRoles.filter((role: unknown): role is string => typeof role === 'string') : [];
+      return audience.length === 0 || audience.some((role) => roleNames.has(role));
+    });
+    return res.json({ broadcasts });
+  } catch {
+    return res.status(500).json({ error: 'Failed to load broadcasts.' });
+  }
 });
 
 export default router;

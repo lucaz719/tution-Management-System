@@ -13,6 +13,7 @@ import {
 } from '../utils/roles';
 import { UserPayload } from '@tms/types';
 import { canReleaseAdmissionLogins } from '../utils/billing-rules';
+import { parseStrictKeys, parseStrictObject, readTrimmedString } from '../utils/request-validation';
 
 const router = Router();
 
@@ -139,15 +140,21 @@ async function provisionUser(params: {
 }
 
 function validateNewUserBody(body: any): { firstName: string; lastName: string; email: string; phone: string } | null {
-  const firstName = typeof body?.firstName === 'string' ? body.firstName.trim() : '';
-  const lastName = typeof body?.lastName === 'string' ? body.lastName.trim() : '';
-  const email = normalizeEmail(body?.email);
-  const phone = typeof body?.phone === 'string' ? body.phone.trim() : '';
-
-  if (!firstName || !lastName || !email) {
-    return null;
-  }
-  return { firstName, lastName, email, phone };
+  const parsed = parseStrictObject<{ firstName: string; lastName: string; email: string; phone: string }>(body, {
+    fields: {
+      firstName: { required: true, maxLength: 100, normalize: (value) => value.trim(), message: 'A valid first name is required.' },
+      lastName: { required: true, maxLength: 100, normalize: (value) => value.trim(), message: 'A valid last name is required.' },
+      email: { required: true, maxLength: 254, pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, normalize: (value) => normalizeEmail(value), message: 'A valid email address is required.' },
+      phone: { required: false, maxLength: 30, pattern: /^[0-9+()\-\s]*$/, normalize: (value) => value.trim(), message: 'Phone must contain only digits and phone punctuation.' },
+    },
+  });
+  if (!parsed.success) return null;
+  return {
+    firstName: parsed.data.firstName,
+    lastName: parsed.data.lastName,
+    email: parsed.data.email,
+    phone: parsed.data.phone ?? '',
+  };
 }
 
 // --- Caller capabilities: drives what the People UI can do ---
@@ -181,17 +188,19 @@ router.get('/me', authMiddleware, async (req: TenantRequest, res: Response) => {
 // Admission creates inactive Student/Parent accounts and an admission invoice.
 // Credentials are released only through the activation endpoint after payment.
 router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const admissionShape = parseStrictKeys(req.body, ['branchId', 'gradeId', 'student', 'parent']);
+  if (!admissionShape.success) return res.status(400).json({ error: admissionShape.error });
   const caller = req.user as UserPayload;
   const tenantAdmin = isTenantAdmin(caller);
   const scopes = branchAdminScopes(caller);
-  const branchId = typeof req.body?.branchId === 'string' ? req.body.branchId : '';
-  const gradeId = typeof req.body?.gradeId === 'string' ? req.body.gradeId : '';
+  const branchId = typeof admissionShape.data.branchId === 'string' ? admissionShape.data.branchId.trim() : '';
+  const gradeId = typeof admissionShape.data.gradeId === 'string' ? admissionShape.data.gradeId.trim() : '';
   if (!tenantAdmin && !scopes.includes(branchId)) {
     return res.status(403).json({ error: 'Only the Tenant Admin or assigned Branch Admin may create admissions.' });
   }
 
-  const studentFields = validateNewUserBody(req.body?.student);
-  const parentFields = validateNewUserBody(req.body?.parent);
+  const studentFields = validateNewUserBody(admissionShape.data.student);
+  const parentFields = validateNewUserBody(admissionShape.data.parent);
   if (!branchId || !gradeId || !studentFields || !parentFields) {
     return res.status(400).json({
       error: 'branchId, gradeId, and complete student and parent identity details are required.',
@@ -1133,12 +1142,19 @@ router.post('/branch-admin', authMiddleware, async (req: TenantRequest, res: Res
     return res.status(403).json({ error: 'Only a Tenant Admin can create branch managers.' });
   }
 
-  const fields = validateNewUserBody(req.body);
+  const requestShape = parseStrictKeys(req.body, ['firstName', 'lastName', 'email', 'phone', 'branchId']);
+  if (!requestShape.success) return res.status(400).json({ error: requestShape.error });
+  const fields = validateNewUserBody({
+    firstName: requestShape.data.firstName,
+    lastName: requestShape.data.lastName,
+    email: requestShape.data.email,
+    phone: requestShape.data.phone,
+  });
   if (!fields) {
     return res.status(400).json({ error: 'firstName, lastName, and email are required.' });
   }
 
-  const branchId = typeof req.body?.branchId === 'string' ? req.body.branchId : '';
+  const branchId = typeof requestShape.data.branchId === 'string' ? requestShape.data.branchId.trim() : '';
   if (!branchId) {
     return res.status(400).json({ error: 'branchId is required for a branch manager.' });
   }
@@ -1186,12 +1202,19 @@ router.post('/', authMiddleware, async (req: TenantRequest, res: Response) => {
     return res.status(403).json({ error: 'You do not have permission to create users.' });
   }
 
-  const fields = validateNewUserBody(req.body);
+  const requestShape = parseStrictKeys(req.body, ['firstName', 'lastName', 'email', 'phone', 'role', 'branchId', 'gradeId']);
+  if (!requestShape.success) return res.status(400).json({ error: requestShape.error });
+  const fields = validateNewUserBody({
+    firstName: requestShape.data.firstName,
+    lastName: requestShape.data.lastName,
+    email: requestShape.data.email,
+    phone: requestShape.data.phone,
+  });
   if (!fields) {
     return res.status(400).json({ error: 'firstName, lastName, and email are required.' });
   }
 
-  const roleName = typeof req.body?.role === 'string' ? req.body.role : '';
+  const roleName = typeof requestShape.data.role === 'string' ? requestShape.data.role.trim() : '';
   if (!isCanonicalRole(roleName)) {
     return res.status(400).json({ error: 'Unknown role.' });
   }
@@ -1205,7 +1228,7 @@ router.post('/', authMiddleware, async (req: TenantRequest, res: Response) => {
     return res.status(400).json({ error: 'Use the branch-manager endpoint to create Branch Admins.' });
   }
 
-  const branchId = typeof req.body?.branchId === 'string' ? req.body.branchId : '';
+  const branchId = typeof requestShape.data.branchId === 'string' ? requestShape.data.branchId.trim() : '';
   if (!branchId) {
     return res.status(400).json({ error: 'branchId is required.' });
   }
@@ -1222,8 +1245,8 @@ router.post('/', authMiddleware, async (req: TenantRequest, res: Response) => {
 
   // Optional grade for students — must belong to the tenant.
   let gradeId: string | null = null;
-  if (roleName === 'Student' && typeof req.body?.gradeId === 'string' && req.body.gradeId) {
-    const grade = await prisma.grade.findFirst({ where: { id: req.body.gradeId, tenantId: req.tenantId! } });
+  if (roleName === 'Student' && typeof requestShape.data.gradeId === 'string' && requestShape.data.gradeId.trim()) {
+    const grade = await prisma.grade.findFirst({ where: { id: requestShape.data.gradeId.trim(), tenantId: req.tenantId! } });
     if (!grade) {
       return res.status(404).json({ error: 'Grade not found in your institution.' });
     }
@@ -1291,6 +1314,67 @@ interface BulkStudentRow {
   parentPhone?: string;
 }
 
+function parseBulkStudentImport(body: unknown): { success: true; data: BulkStudentRow[] } | { success: false; error: string } {
+  const request = parseStrictKeys(body, ['students']);
+  if (!request.success) return request;
+  if (!Array.isArray(request.data.students) || request.data.students.length === 0 || request.data.students.length > 500) {
+    return { success: false, error: 'students must contain between 1 and 500 rows.' };
+  }
+
+  const fields = ['firstName', 'lastName', 'email', 'phone', 'branchName', 'grade', 'emergencyContact', 'parentFirstName', 'parentLastName', 'parentEmail', 'parentPhone'] as const;
+  const normalized: BulkStudentRow[] = [];
+  for (const [index, row] of request.data.students.entries()) {
+    const shape = parseStrictKeys(row, fields);
+    if (!shape.success) return { success: false, error: `Row ${index + 1}: ${shape.error}` };
+    const value = (key: typeof fields[number], required = false, email = false) => readBulkField(shape.data, key, required, email);
+    const firstName = value('firstName', true);
+    const lastName = value('lastName', true);
+    const email = value('email', true, true);
+    const phone = value('phone');
+    const branchName = value('branchName');
+    const grade = value('grade');
+    const emergencyContact = value('emergencyContact');
+    const parentFirstName = value('parentFirstName');
+    const parentLastName = value('parentLastName');
+    const parentEmail = value('parentEmail', false, true);
+    const parentPhone = value('parentPhone');
+    if (!firstName.success) return { success: false, error: `Row ${index + 1}: ${firstName.error}` };
+    if (!lastName.success) return { success: false, error: `Row ${index + 1}: ${lastName.error}` };
+    if (!email.success) return { success: false, error: `Row ${index + 1}: ${email.error}` };
+    if (!phone.success) return { success: false, error: `Row ${index + 1}: ${phone.error}` };
+    if (!branchName.success) return { success: false, error: `Row ${index + 1}: ${branchName.error}` };
+    if (!grade.success) return { success: false, error: `Row ${index + 1}: ${grade.error}` };
+    if (!emergencyContact.success) return { success: false, error: `Row ${index + 1}: ${emergencyContact.error}` };
+    if (!parentFirstName.success) return { success: false, error: `Row ${index + 1}: ${parentFirstName.error}` };
+    if (!parentLastName.success) return { success: false, error: `Row ${index + 1}: ${parentLastName.error}` };
+    if (!parentEmail.success) return { success: false, error: `Row ${index + 1}: ${parentEmail.error}` };
+    if (!parentPhone.success) return { success: false, error: `Row ${index + 1}: ${parentPhone.error}` };
+    normalized.push({
+      firstName: firstName.data,
+      lastName: lastName.data,
+      email: email.data.toLowerCase(),
+      phone: phone.data,
+      branchName: branchName.data,
+      grade: grade.data,
+      emergencyContact: emergencyContact.data,
+      parentFirstName: parentFirstName.data,
+      parentLastName: parentLastName.data,
+      parentEmail: parentEmail.data.toLowerCase(),
+      parentPhone: parentPhone.data,
+    });
+  }
+  return { success: true, data: normalized };
+}
+
+function readBulkField(body: Record<string, unknown>, key: string, required = false, email = false) {
+  return readTrimmedString(body, key, {
+    required,
+    maxLength: email ? 254 : key.includes('Phone') || key === 'phone' || key === 'emergencyContact' ? 30 : 120,
+    pattern: email ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/ : key.includes('Phone') || key === 'phone' || key === 'emergencyContact' ? /^[0-9+()\-\s]*$/ : undefined,
+    message: email ? `${key} must be a valid email address.` : `${key} must be valid text.`,
+  });
+}
+
 router.post('/bulk-students', authMiddleware, async (req: TenantRequest, res: Response) => {
   const caller = req.user as UserPayload;
   const tenantAdmin = isTenantAdmin(caller);
@@ -1299,13 +1383,9 @@ router.post('/bulk-students', authMiddleware, async (req: TenantRequest, res: Re
     return res.status(403).json({ error: 'You do not have permission to import students.' });
   }
 
-  const rows: BulkStudentRow[] = Array.isArray(req.body?.students) ? req.body.students : [];
-  if (rows.length === 0) {
-    return res.status(400).json({ error: 'No rows provided.' });
-  }
-  if (rows.length > 500) {
-    return res.status(400).json({ error: 'Too many rows in one import (max 500). Split the file.' });
-  }
+  const input = parseBulkStudentImport(req.body);
+  if (!input.success) return res.status(400).json({ error: input.error });
+  const rows = input.data;
 
   // Resolve the tenant's branches once, scoped for branch admins.
   const branches = await prisma.branch.findMany({

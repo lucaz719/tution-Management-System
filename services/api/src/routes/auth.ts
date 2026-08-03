@@ -13,12 +13,9 @@ import {
   type VerificationPurpose,
 } from '../utils/otp';
 import { consumePersistentRateLimit } from '../utils/persistent-rate-limit';
+import { authInputSchemas, parseStrictObject } from '../utils/request-validation';
 
 const router = Router();
-
-function normalizeEmail(value: unknown): string {
-  return typeof value === 'string' ? value.trim().toLowerCase() : '';
-}
 
 function rateKey(req: TenantRequest, scope: string, email: string): string {
   return `${scope}:${email}:${req.ip ?? 'unknown'}`;
@@ -113,11 +110,9 @@ async function consumeCode(
 }
 
 router.post('/forgot-password', async (req: TenantRequest, res: Response) => {
-  const email = normalizeEmail(req.body?.email);
-
-  if (!email) {
-    return res.status(400).json({ error: 'Email is required.' });
-  }
+  const input = parseStrictObject(req.body, authInputSchemas.forgotPassword);
+  if (!input.success) return res.status(400).json({ error: input.error });
+  const { email } = input.data;
 
   const limit = await consumePersistentRateLimit(rateKey(req, 'forgot', email), 15 * 60 * 1000, 5);
   if (!limit.allowed) {
@@ -146,12 +141,9 @@ router.post('/forgot-password', async (req: TenantRequest, res: Response) => {
 });
 
 router.post('/verify-reset-otp', async (req: TenantRequest, res: Response) => {
-  const email = normalizeEmail(req.body?.email);
-  const otp = typeof req.body?.otp === 'string' ? req.body.otp.trim() : '';
-
-  if (!email || !otp) {
-    return res.status(400).json({ error: 'Email and OTP are required.' });
-  }
+  const input = parseStrictObject(req.body, authInputSchemas.verifyResetOtp);
+  if (!input.success) return res.status(400).json({ error: input.error });
+  const { email, otp } = input.data;
 
   const limit = await consumePersistentRateLimit(rateKey(req, 'verify-reset', email), 15 * 60 * 1000, 5);
   if (!limit.allowed) {
@@ -185,12 +177,9 @@ router.post('/verify-reset-otp', async (req: TenantRequest, res: Response) => {
 });
 
 router.post('/reset-password', async (req: TenantRequest, res: Response) => {
-  const resetToken = typeof req.body?.resetToken === 'string' ? req.body.resetToken : '';
-  const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
-
-  if (!resetToken || !newPassword) {
-    return res.status(400).json({ error: 'Reset token and new password are required.' });
-  }
+  const input = parseStrictObject(req.body, authInputSchemas.resetPassword);
+  if (!input.success) return res.status(400).json({ error: input.error });
+  const { resetToken, newPassword } = input.data;
 
   if (!isPasswordStrongEnough(newPassword)) {
     return res.status(400).json({

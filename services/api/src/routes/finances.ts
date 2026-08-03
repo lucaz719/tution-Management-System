@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import { LateFeeMode, Prisma, RefundPolicy } from '@prisma/client';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
@@ -8,6 +9,7 @@ import { canApprovePettyCashL1, canReleasePettyCash, hasBranchPermission, isTena
 import crypto from 'node:crypto';
 import { recurringInvoiceType } from '../utils/billing-rules';
 import { createConnectIpsForm, validateAndConfirmConnectIps } from '../utils/connectips';
+import { parsePlainRecord, parseStrictKeys, parseStrictObject, readBoolean, readFiniteNumber, readTrimmedString } from '../utils/request-validation';
 
 const router = Router();
 
@@ -305,9 +307,19 @@ router.post(
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
     const { id } = req.params;
-    const transactionId = typeof req.body?.transactionId === 'string' && req.body.transactionId.trim()
-      ? req.body.transactionId.trim()
-      : 'CASH';
+    const input = parseStrictObject(req.body, {
+      fields: {
+        transactionId: {
+          required: false,
+          maxLength: 128,
+          pattern: /^(?:[A-Za-z0-9._/-]+)?$/,
+          normalize: (value) => value.trim(),
+          message: 'transactionId must be a valid payment reference.',
+        },
+      },
+    });
+    if (!input.success) return res.status(400).json({ error: input.error });
+    const transactionId = input.data.transactionId || 'CASH';
     try {
       const invoice = await prisma.invoice.findUnique({
         where: { id },
@@ -610,11 +622,16 @@ router.get(
 router.post(
   '/nepalpay/webhook',
   async (req: TenantRequest, res: Response) => {
-    const { invoiceId, transactionId, status, paymentAmount } = req.body;
-
-    if (!invoiceId || !transactionId || !status || !paymentAmount) {
-      return res.status(400).json({ error: 'Missing required parameters: invoiceId, transactionId, status, paymentAmount.' });
-    }
+    const shape = parseStrictKeys(req.body, ['invoiceId', 'transactionId', 'status', 'paymentAmount']);
+    if (!shape.success) return res.status(400).json({ error: shape.error });
+    const invoiceId = readTrimmedString(shape.data, 'invoiceId', { required: true, maxLength: 128, message: 'A valid invoiceId is required.' });
+    const transactionId = readTrimmedString(shape.data, 'transactionId', { required: true, maxLength: 128, pattern: /^[A-Za-z0-9._/-]+$/, message: 'A valid transactionId is required.' });
+    const status = readTrimmedString(shape.data, 'status', { required: true, maxLength: 20, pattern: /^SUCCESS$/, message: 'Payment status must be SUCCESS.' });
+    const paymentAmount = readFiniteNumber(shape.data, 'paymentAmount', { min: 0.01, max: 100_000_000, message: 'paymentAmount must be a positive finite number.' });
+    if (!invoiceId.success) return res.status(400).json({ error: invoiceId.error });
+    if (!transactionId.success) return res.status(400).json({ error: transactionId.error });
+    if (!status.success) return res.status(400).json({ error: status.error });
+    if (!paymentAmount.success) return res.status(400).json({ error: paymentAmount.error });
     const webhookSecret = process.env.NEPALPAY_WEBHOOK_SECRET;
     const suppliedSignature = req.header('x-nepalpay-signature') || '';
     if (!webhookSecret) {
@@ -632,32 +649,32 @@ router.post(
     }
 
     try {
-      if (status === 'SUCCESS') {
-        const duplicate = await prisma.invoice.findFirst({ where: { transactionId } });
-        if (duplicate && duplicate.id !== invoiceId) {
+      if (status.data === 'SUCCESS') {
+        const duplicate = await prisma.invoice.findFirst({ where: { transactionId: transactionId.data } });
+        if (duplicate && duplicate.id !== invoiceId.data) {
           return res.status(409).json({ error: 'Transaction has already been used.' });
         }
-        const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } });
+        const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId.data } });
 
         if (!invoice) {
           return res.status(404).json({ error: 'Invoice not found.' });
         }
         if (invoice.status === 'PAID') {
-          return res.status(200).json({ message: 'Payment was already recorded.', invoiceId });
+          return res.status(200).json({ message: 'Payment was already recorded.', invoiceId: invoiceId.data });
         }
-        if (Number(invoice.netPayable) !== Number(paymentAmount)) {
+        if (Number(invoice.netPayable) !== paymentAmount.data) {
           return res.status(422).json({ error: 'Payment amount does not match the invoice.' });
         }
 
         const confirmed = await prisma.$transaction(async (tx) => {
           const transition = await tx.invoice.updateMany({
             where: {
-              id: invoiceId,
+              id: invoiceId.data,
               status: { in: ['UNPAID', 'OVERDUE', 'BLOCKED_OVERRIDE'] },
             },
             data: {
               status: 'PAID',
-              transactionId,
+              transactionId: transactionId.data,
               paymentDate: new Date(),
             },
           });
@@ -676,20 +693,20 @@ router.post(
           return true;
         });
         if (!confirmed) {
-          return res.status(200).json({ message: 'Payment was already recorded.', invoiceId });
+          return res.status(200).json({ message: 'Payment was already recorded.', invoiceId: invoiceId.data });
         }
 
         const smsSender = new MockSmsSender();
         await smsSender.sendSms(
           '98510XXXXX',
-          `Dear Parent, fee payment of NPR ${paymentAmount} received successfully. Ref ID: ${transactionId}.`
+          `Dear Parent, fee payment of NPR ${paymentAmount.data} received successfully. Ref ID: ${transactionId.data}.`
         );
 
         return res.status(200).json({
           message: 'Payment confirmed and enrollment unblocked.',
           payment: {
-            invoiceId,
-            transactionId,
+            invoiceId: invoiceId.data,
+            transactionId: transactionId.data,
             status: 'PAID',
             paymentDate: new Date(),
           },
@@ -764,30 +781,30 @@ router.post(
   '/petty-cash/request',
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
-    const { amount, purpose, branchId } = req.body;
+    const shape = parseStrictKeys(req.body, ['amount', 'purpose', 'branchId']);
+    if (!shape.success) return res.status(400).json({ error: shape.error });
+    const amount = readFiniteNumber(shape.data, 'amount', { min: 0.01, max: 10_000_000, message: 'Petty cash amount must be a positive finite number.' });
+    const purpose = readTrimmedString(shape.data, 'purpose', { required: true, maxLength: 1_000, message: 'A petty cash purpose is required.' });
+    const branchId = readTrimmedString(shape.data, 'branchId', { required: true, maxLength: 128, message: 'A valid branchId is required.' });
+    if (!amount.success) return res.status(400).json({ error: amount.error });
+    if (!purpose.success) return res.status(400).json({ error: purpose.error });
+    if (!branchId.success) return res.status(400).json({ error: branchId.error });
     const accountantId = req.user!.id;
 
-    if (!amount || !purpose || !branchId) {
-      return res.status(400).json({ error: 'Missing required parameters: amount, purpose, branchId.' });
-    }
-
     try {
-      if (!hasBranchPermission(req.user!, 'manage_petty_cash', branchId)) {
+      if (!hasBranchPermission(req.user!, 'manage_petty_cash', branchId.data)) {
         return res.status(403).json({ error: 'Only the assigned branch Accountant may request petty cash.' });
       }
-      const requestedAmount = Number(amount);
-      if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
-        return res.status(400).json({ error: 'Petty cash amount must be positive.' });
-      }
-      const branch = await prisma.branch.findFirst({ where: { id: branchId, tenantId: req.tenantId! } });
+      const requestedAmount = amount.data;
+      const branch = await prisma.branch.findFirst({ where: { id: branchId.data, tenantId: req.tenantId! } });
       if (!branch) return res.status(404).json({ error: 'Branch not found.' });
       const tenantPolicy = await prisma.tenant.findUniqueOrThrow({ where: { id: req.tenantId! } });
       const pc = await prisma.pettyCash.create({
           data: {
             tenantId: req.tenantId!,
-            branchId,
+            branchId: branchId.data,
             accountantId,
-            purpose,
+            purpose: purpose.data,
             amount: requestedAmount,
             remainingBalance: requestedAmount,
             approvalChain: [
@@ -835,7 +852,9 @@ router.post(
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
     const { id } = req.params;
-    const { remarks } = req.body;
+    const input = parseStrictObject(req.body, { fields: { remarks: { required: false, maxLength: 2_000, normalize: (value) => value.trim(), message: 'Remarks must be text no longer than 2000 characters.' } } });
+    if (!input.success) return res.status(400).json({ error: input.error });
+    const remarks = input.data.remarks ?? '';
     try {
       const pc = await prisma.pettyCash.findUnique({ where: { id } });
 
@@ -878,7 +897,9 @@ router.post(
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
     const { id } = req.params;
-    const { remarks } = req.body;
+    const input = parseStrictObject(req.body, { fields: { remarks: { required: false, maxLength: 2_000, normalize: (value) => value.trim(), message: 'Remarks must be text no longer than 2000 characters.' } } });
+    if (!input.success) return res.status(400).json({ error: input.error });
+    const remarks = input.data.remarks ?? '';
     try {
       const pc = await prisma.pettyCash.findUnique({ where: { id } });
 
@@ -920,11 +941,13 @@ router.post(
   '/petty-cash/decide/:id',
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
-    const action = req.body?.action;
-    const remarks = typeof req.body?.remarks === 'string' ? req.body.remarks.trim() : '';
+    const input = parseStrictObject(req.body, { fields: {
+      action: { required: true, maxLength: 20, pattern: /^(REJECT|REVISION)$/, message: 'Action must be REJECT or REVISION.' },
+      remarks: { required: true, maxLength: 2_000, normalize: (value) => value.trim(), message: 'Decision remarks are required.' },
+    } });
+    if (!input.success) return res.status(400).json({ error: input.error });
+    const { action, remarks } = input.data;
     if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may make the final decision.' });
-    if (!['REJECT', 'REVISION'].includes(action)) return res.status(400).json({ error: 'Action must be REJECT or REVISION.' });
-    if (!remarks) return res.status(400).json({ error: 'Decision remarks are required.' });
     const pc = await prisma.pettyCash.findFirst({ where: { id: req.params.id, tenantId: req.tenantId! } });
     if (!pc) return res.status(404).json({ error: 'Petty cash request not found.' });
     if (pc.status !== 'APPROVED_LEVEL1') return res.status(409).json({ error: 'Only Level-1-approved requests can receive a final decision.' });
@@ -949,11 +972,9 @@ router.post(
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
     const { id } = req.params;
-    const { receiptProofUrl } = req.body;
-
-    if (!receiptProofUrl) {
-      return res.status(400).json({ error: 'Missing receiptProofUrl parameter.' });
-    }
+    const input = parseStrictObject(req.body, { fields: { receiptProofUrl: { required: true, maxLength: 2_000, pattern: /^https?:\/\/\S+$/i, normalize: (value) => value.trim(), message: 'A valid receiptProofUrl is required.' } } });
+    if (!input.success) return res.status(400).json({ error: input.error });
+    const { receiptProofUrl } = input.data;
 
     try {
       const pc = await prisma.pettyCash.findFirst({ where: { id, tenantId: req.tenantId! } });
@@ -1125,42 +1146,52 @@ router.put(
     if (!isTenantAdmin(req.user!)) {
       return res.status(403).json({ error: 'Only the Tenant Admin may change institution policies.' });
     }
-    const {
-      vatRate, gracePeriod, pettyCashCap, refundPolicy, lateFeeEnabled,
-      lateFeeMode, lateFeeValue, lateFeeGraceDays, appointmentWindowHours,
-      maintenanceEscalationDays, leavePolicy, performanceWeights,
-    } = req.body;
-
-    const nextVatRate = Number(vatRate);
-    const nextGracePeriod = Number(gracePeriod);
-    const nextPettyCashCap = Number(pettyCashCap);
-
-    if (!Number.isFinite(nextVatRate) || nextVatRate < 0 || nextVatRate > 100) {
-      return res.status(400).json({ error: 'VAT rate must be between 0 and 100.' });
-    }
-    if (!Number.isInteger(nextGracePeriod) || nextGracePeriod < 0 || nextGracePeriod > 240) {
-      return res.status(400).json({ error: 'Grace period must be between 0 and 240 minutes.' });
-    }
-    if (!Number.isInteger(nextPettyCashCap) || nextPettyCashCap < 0) {
-      return res.status(400).json({ error: 'Petty cash cap must be a non-negative amount.' });
-    }
-    if (!['PRO_RATA', 'FIXED_DEDUCTION', 'NO_REFUND'].includes(refundPolicy)) {
-      return res.status(400).json({ error: 'Invalid refund policy.' });
-    }
-    const nextLateFeeValue = lateFeeEnabled ? Number(lateFeeValue) : null;
-    if (lateFeeEnabled && (!['FLAT', 'PERCENTAGE'].includes(lateFeeMode) || !Number.isFinite(nextLateFeeValue) || nextLateFeeValue! <= 0)) {
+    const shape = parseStrictKeys(req.body, [
+      'vatRate', 'gracePeriod', 'pettyCashCap', 'refundPolicy', 'lateFeeEnabled',
+      'lateFeeMode', 'lateFeeValue', 'lateFeeGraceDays', 'appointmentWindowHours',
+      'maintenanceEscalationDays', 'leavePolicy', 'performanceWeights',
+    ]);
+    if (!shape.success) return res.status(400).json({ error: shape.error });
+    const vatRate = readFiniteNumber(shape.data, 'vatRate', { min: 0, max: 100, message: 'VAT rate must be between 0 and 100.' });
+    const gracePeriod = readFiniteNumber(shape.data, 'gracePeriod', { min: 0, max: 240, message: 'Grace period must be between 0 and 240 minutes.' });
+    const pettyCashCap = readFiniteNumber(shape.data, 'pettyCashCap', { min: 0, max: 100_000_000, message: 'Petty cash cap must be a non-negative amount.' });
+    const refundPolicy = readTrimmedString(shape.data, 'refundPolicy', { required: true, maxLength: 32, pattern: /^(PRO_RATA|FIXED_DEDUCTION|NO_REFUND)$/, message: 'Invalid refund policy.' });
+    const lateFeeEnabled = readBoolean(shape.data, 'lateFeeEnabled', 'lateFeeEnabled must be a boolean.');
+    const lateFeeMode = lateFeeEnabled.success && lateFeeEnabled.data
+      ? readTrimmedString(shape.data, 'lateFeeMode', { required: true, maxLength: 20, pattern: /^(FLAT|PERCENTAGE)$/, message: 'Invalid late fee mode.' })
+      : { success: true as const, data: '' };
+    const lateFeeValue = lateFeeEnabled.success && lateFeeEnabled.data
+      ? readFiniteNumber(shape.data, 'lateFeeValue', { min: 0, max: 100_000_000, message: 'lateFeeValue must be a non-negative finite number.' })
+      : { success: true as const, data: 0 };
+    const lateFeeGraceDays = readFiniteNumber(shape.data, 'lateFeeGraceDays', { min: 0, max: 365, message: 'lateFeeGraceDays must be a non-negative number.' });
+    const appointmentWindowHours = readFiniteNumber(shape.data, 'appointmentWindowHours', { min: 1, max: 720, message: 'appointmentWindowHours must be at least 1.' });
+    const maintenanceEscalationDays = readFiniteNumber(shape.data, 'maintenanceEscalationDays', { min: 1, max: 365, message: 'maintenanceEscalationDays must be at least 1.' });
+    const leavePolicy = shape.data.leavePolicy === undefined ? { success: true as const, data: {} } : parsePlainRecord(shape.data.leavePolicy);
+    const weights = parseStrictKeys(shape.data.performanceWeights, ['attendance', 'updateCompliance', 'feedback', 'leaveCompliance', 'taskCompletion']);
+    if (!vatRate.success) return res.status(400).json({ error: vatRate.error });
+    if (!gracePeriod.success || !Number.isInteger(gracePeriod.data)) return res.status(400).json({ error: 'Grace period must be between 0 and 240 minutes.' });
+    if (!pettyCashCap.success || !Number.isInteger(pettyCashCap.data)) return res.status(400).json({ error: 'Petty cash cap must be a non-negative amount.' });
+    if (!refundPolicy.success) return res.status(400).json({ error: refundPolicy.error });
+    if (!lateFeeEnabled.success) return res.status(400).json({ error: lateFeeEnabled.error });
+    if (!lateFeeMode.success) return res.status(400).json({ error: lateFeeMode.error });
+    if (!lateFeeValue.success) return res.status(400).json({ error: lateFeeValue.error });
+    if (!lateFeeGraceDays.success || !Number.isInteger(lateFeeGraceDays.data)) return res.status(400).json({ error: 'lateFeeGraceDays must be a non-negative integer.' });
+    if (!appointmentWindowHours.success || !Number.isInteger(appointmentWindowHours.data)) return res.status(400).json({ error: 'appointmentWindowHours must be a positive integer.' });
+    if (!maintenanceEscalationDays.success || !Number.isInteger(maintenanceEscalationDays.data)) return res.status(400).json({ error: 'maintenanceEscalationDays must be a positive integer.' });
+    if (!leavePolicy.success) return res.status(400).json({ error: 'leavePolicy must be a JSON object.' });
+    if (!weights.success) return res.status(400).json({ error: weights.error });
+    const nextVatRate = vatRate.data;
+    const nextGracePeriod = gracePeriod.data;
+    const nextPettyCashCap = pettyCashCap.data;
+    const nextLateFeeValue = lateFeeEnabled.data ? lateFeeValue.data : null;
+    if (lateFeeEnabled.data && (!lateFeeMode.data || nextLateFeeValue === null || nextLateFeeValue <= 0)) {
       return res.status(400).json({ error: 'Enabled late fees require a valid mode and positive value.' });
     }
-    const nextLateGrace = Number(lateFeeGraceDays);
-    const nextAppointmentWindow = Number(appointmentWindowHours);
-    const nextEscalationDays = Number(maintenanceEscalationDays);
-    if (![nextLateGrace, nextAppointmentWindow, nextEscalationDays].every(Number.isInteger) ||
-        nextLateGrace < 0 || nextAppointmentWindow < 1 || nextEscalationDays < 1) {
-      return res.status(400).json({ error: 'Policy thresholds must be valid non-negative integers.' });
-    }
-    const weights = performanceWeights as Record<string, unknown>;
+    const nextLateGrace = lateFeeGraceDays.data;
+    const nextAppointmentWindow = appointmentWindowHours.data;
+    const nextEscalationDays = maintenanceEscalationDays.data;
     const weightKeys = ['attendance', 'updateCompliance', 'feedback', 'leaveCompliance', 'taskCompletion'];
-    const weightValues = weightKeys.map((key) => Number(weights?.[key]));
+    const weightValues = weightKeys.map((key) => Number(weights.data[key]));
     if (weightValues.some((value) => !Number.isFinite(value) || value < 0) ||
         Math.abs(weightValues.reduce((sum, value) => sum + value, 0) - 100) > 0.0001) {
       return res.status(400).json({ error: 'Performance weights must be non-negative and sum to exactly 100.' });
@@ -1171,14 +1202,14 @@ router.put(
           vatRate: nextVatRate,
           gracePeriodMinutes: nextGracePeriod,
           pettyCashCapNpr: nextPettyCashCap,
-          refundPolicy,
-          lateFeeEnabled: Boolean(lateFeeEnabled),
-          lateFeeMode: lateFeeEnabled ? lateFeeMode : null,
+          refundPolicy: refundPolicy.data as RefundPolicy,
+          lateFeeEnabled: lateFeeEnabled.data,
+          lateFeeMode: lateFeeEnabled.data ? lateFeeMode.data as LateFeeMode : null,
           lateFeeValue: nextLateFeeValue,
           lateFeeGraceDays: nextLateGrace,
           appointmentWindowHours: nextAppointmentWindow,
           maintenanceEscalationDays: nextEscalationDays,
-          leavePolicy: leavePolicy ?? {},
+          leavePolicy: leavePolicy.data as Prisma.InputJsonObject,
           performanceWeights: Object.fromEntries(weightKeys.map((key, index) => [key, weightValues[index]])),
       };
       const latest = await prisma.tenantPolicyVersion.aggregate({

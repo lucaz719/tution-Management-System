@@ -3,11 +3,67 @@ import prisma from '../utils/db';
 import { calculateDistanceInMeters } from '../utils/geo';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
+import { parseStrictKeys, readFiniteNumber, readTrimmedString } from '../utils/request-validation';
 
 const router = Router();
 
 // Constant GPS accuracy threshold in meters
 const MAX_GPS_ACCURACY_METERS = 20.0;
+
+function parseGeoAttendanceInput(body: unknown) {
+  const shape = parseStrictKeys(body, ['branchId', 'latitude', 'longitude', 'gpsAccuracy']);
+  if (!shape.success) return shape;
+  const branchId = readTrimmedString(shape.data, 'branchId', { required: true, maxLength: 128, message: 'A valid branchId is required.' });
+  const latitude = readFiniteNumber(shape.data, 'latitude', { min: -90, max: 90, message: 'Latitude must be between -90 and 90.' });
+  const longitude = readFiniteNumber(shape.data, 'longitude', { min: -180, max: 180, message: 'Longitude must be between -180 and 180.' });
+  const gpsAccuracy = readFiniteNumber(shape.data, 'gpsAccuracy', { min: 0, max: 10_000, message: 'GPS accuracy must be a valid non-negative number.' });
+  if (!branchId.success) return branchId;
+  if (!latitude.success) return latitude;
+  if (!longitude.success) return longitude;
+  if (!gpsAccuracy.success) return gpsAccuracy;
+  return { success: true as const, data: { branchId: branchId.data, latitude: latitude.data, longitude: longitude.data, gpsAccuracy: gpsAccuracy.data } };
+}
+
+function parseAttendanceDate(value: string): Date | null {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function parseStudentAttendanceInput(body: unknown) {
+  const shape = parseStrictKeys(body, ['classId', 'sessionId', 'date', 'students']);
+  if (!shape.success) return shape;
+  const classId = readTrimmedString(shape.data, 'classId', { required: true, maxLength: 128, message: 'A valid classId is required.' });
+  const sessionId = readTrimmedString(shape.data, 'sessionId', { required: true, maxLength: 128, message: 'A valid sessionId is required.' });
+  const date = readTrimmedString(shape.data, 'date', { required: true, maxLength: 40, message: 'A valid attendance date is required.' });
+  const students = shape.data.students;
+  if (!classId.success) return classId;
+  if (!sessionId.success) return sessionId;
+  if (!date.success || !parseAttendanceDate(date.data)) return { success: false as const, error: 'A valid attendance date is required.' };
+  if (!Array.isArray(students) || students.length === 0 || students.length > 200) return { success: false as const, error: 'students must contain between 1 and 200 attendance records.' };
+  const normalized = [] as Array<{ studentId: string; status: 'PRESENT' | 'ABSENT' | 'EXCUSED' }>;
+  for (const entry of students) {
+    const entryShape = parseStrictKeys(entry, ['studentId', 'status']);
+    if (!entryShape.success) return entryShape;
+    const studentId = readTrimmedString(entryShape.data, 'studentId', { required: true, maxLength: 128, message: 'A valid studentId is required.' });
+    const status = readTrimmedString(entryShape.data, 'status', { required: true, maxLength: 20, pattern: /^(PRESENT|ABSENT|EXCUSED)$/, message: 'Attendance status must be PRESENT, ABSENT, or EXCUSED.' });
+    if (!studentId.success) return studentId;
+    if (!status.success) return status;
+    normalized.push({ studentId: studentId.data, status: status.data as 'PRESENT' | 'ABSENT' | 'EXCUSED' });
+  }
+  return { success: true as const, data: { classId: classId.data, sessionId: sessionId.data, date: date.data, queryDate: parseAttendanceDate(date.data)!, students: normalized } };
+}
+
+function parseSessionUpdateInput(body: unknown) {
+  const shape = parseStrictKeys(body, ['classId', 'date', 'updateContent']);
+  if (!shape.success) return shape;
+  const classId = readTrimmedString(shape.data, 'classId', { required: true, maxLength: 128, message: 'A valid classId is required.' });
+  const date = readTrimmedString(shape.data, 'date', { required: true, maxLength: 40, message: 'A valid session date is required.' });
+  const updateContent = readTrimmedString(shape.data, 'updateContent', { required: true, maxLength: 5_000, message: 'Daily update content is required and must be no longer than 5000 characters.' });
+  if (!classId.success) return classId;
+  if (!date.success || !parseAttendanceDate(date.data)) return { success: false as const, error: 'A valid session date is required.' };
+  if (!updateContent.success) return updateContent;
+  return { success: true as const, data: { classId: classId.data, date: date.data, updateContent: updateContent.data } };
+}
 
 // 1. Mark IN (Teacher only)
 router.post(
@@ -15,14 +71,10 @@ router.post(
   authMiddleware,
   hasPermission('mark_geo_attendance'),
   async (req: TenantRequest, res: Response) => {
-    const { branchId, latitude, longitude, gpsAccuracy } = req.body;
+    const input = parseGeoAttendanceInput(req.body);
+    if (!input.success) return res.status(400).json({ error: input.error });
+    const { branchId, latitude, longitude, gpsAccuracy } = input.data;
     const teacherId = req.user!.id;
-
-    if (!branchId || latitude === undefined || longitude === undefined || gpsAccuracy === undefined) {
-      return res.status(400).json({
-        error: 'Missing coordinates, gpsAccuracy, or branchId context.',
-      });
-    }
 
     // Mandatory Daily Gate / Update Check
     try {
@@ -107,14 +159,10 @@ router.post(
   authMiddleware,
   hasPermission('mark_geo_attendance'),
   async (req: TenantRequest, res: Response) => {
-    const { branchId, latitude, longitude, gpsAccuracy } = req.body;
+    const input = parseGeoAttendanceInput(req.body);
+    if (!input.success) return res.status(400).json({ error: input.error });
+    const { branchId, latitude, longitude, gpsAccuracy } = input.data;
     const teacherId = req.user!.id;
-
-    if (!branchId || latitude === undefined || longitude === undefined || gpsAccuracy === undefined) {
-      return res.status(400).json({
-        error: 'Missing coordinates, gpsAccuracy, or branchId context.',
-      });
-    }
 
     if (Number(gpsAccuracy) > MAX_GPS_ACCURACY_METERS) {
       return res.status(422).json({
@@ -169,12 +217,10 @@ router.post(
   '/student',
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
-    const { classId, date, students, sessionId } = req.body;
+    const input = parseStudentAttendanceInput(req.body);
+    if (!input.success) return res.status(400).json({ error: input.error });
+    const { classId, date, students, sessionId, queryDate } = input.data;
     const teacherId = req.user!.id;
-
-    if (!classId || !sessionId || !date || !students || !Array.isArray(students)) {
-      return res.status(400).json({ error: 'Missing required parameters: classId, sessionId, date, students.' });
-    }
 
     try {
       const klass = await prisma.class.findFirst({
@@ -184,8 +230,6 @@ router.post(
       const session = await prisma.teacherSession.findFirst({ where: { id: sessionId, classId, teacherId } });
       if (!session) return res.status(404).json({ error: 'Teacher session not found.' });
       const records = [];
-      const queryDate = new Date(date);
-
       for (const entry of students) {
         const { studentId, status } = entry;
 
@@ -246,12 +290,10 @@ router.post(
   '/session/update',
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
-    const { classId, date, updateContent } = req.body;
+    const input = parseSessionUpdateInput(req.body);
+    if (!input.success) return res.status(400).json({ error: input.error });
+    const { classId, date, updateContent } = input.data;
     const teacherId = req.user!.id;
-
-    if (!classId || !date || !updateContent) {
-      return res.status(400).json({ error: 'Missing required parameters: classId, date, updateContent.' });
-    }
 
     try {
       const assignedSession = await prisma.teacherSession.findFirst({
