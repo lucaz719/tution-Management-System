@@ -275,8 +275,8 @@ const router = createBrowserRouter([
           {
             element: <RequireRole allowedRoles={['TEACHER']} />,
             children: [
-              { path: '/teacher/dashboard', element: <Suspense fallback={<FullPageSpinner />}><TeacherPortal /></Suspense> },
-              { path: '/teacher/*', element: <RoleWorkspacePlaceholder role="teacher" /> },
+              { path: '/teacher', element: <Navigate to="/teacher/dashboard" replace /> },
+              { path: '/teacher/*', element: <Suspense fallback={<FullPageSpinner />}><TeacherPortal /></Suspense> },
             ],
           },
           {

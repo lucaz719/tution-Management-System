@@ -1,4 +1,4 @@
-export type TeacherView = 'dashboard' | 'timetable' | 'attendance' | 'syllabus' | 'daily-update-log' | 'homework' | 'results' | 'profile' | 'leave-requests' | 'salary-slips';
+export type TeacherView = 'dashboard' | 'timetable' | 'geo-attendance' | 'attendance' | 'syllabus' | 'daily-update-log' | 'homework' | 'results' | 'profile' | 'leave-requests' | 'salary-slips';
 export type ChapterStatus = 'IN_PROGRESS' | 'COMPLETED' | 'LEFT';
 
 export interface TeacherClass {
