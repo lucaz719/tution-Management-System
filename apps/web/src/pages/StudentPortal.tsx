@@ -262,7 +262,7 @@ function ResultsView() {
 function SyllabusView() {
   const { syllabi } = useStudentData();
   const tone = (status: string) => status === 'COMPLETED' ? 'success' : status === 'IN_PROGRESS' ? 'warning' : 'error';
-  return <div className="student-view"><div className="student-live-note" role="status">{icon('sync')}<span>Teacher syllabus updates appear here on your next automatic refresh.</span></div>{syllabi.length ? syllabi.map((syllabus) => <section className="student-card" key={syllabus.id}><SectionHeader title={syllabus.subject} description={`${syllabus.className} · ${syllabus.chapters.length} chapters`} /><div className="student-syllabus-list">{syllabus.chapters.map((chapter) => { const latest = syllabus.dailyLogs.find((log) => log.chapterId === chapter.id); return <article key={chapter.id} className={`is-${tone(chapter.status)}`}><span>{chapter.position}</span><div><h3>{chapter.title}</h3><p>{latest?.notes || (chapter.status === 'COMPLETED' ? 'Chapter completed' : chapter.status === 'IN_PROGRESS' ? 'Currently being taught' : 'Not covered / left')}</p>{latest ? <small>Updated {latest.logDate}</small> : null}</div><StatusPill label={chapter.status === 'COMPLETED' ? 'Completed' : chapter.status === 'IN_PROGRESS' ? 'In progress' : 'Left'} iconName={chapter.status === 'COMPLETED' ? 'check_circle' : chapter.status === 'IN_PROGRESS' ? 'pending' : 'cancel'} tone={tone(chapter.status)} /></article>; })}</div></section>) : <section className="student-card"><EmptyState title="No syllabus shared" message="Teacher-created chapter plans will appear here." iconName="menu_book" /></section>}</div>;
+  return <div className="student-view"><div className="student-live-note" role="status">{icon('sync')}<span>Live view · teacher syllabus and daily chapter updates refresh automatically.</span></div>{syllabi.length ? syllabi.map((syllabus) => <section className="student-card" key={syllabus.id}><SectionHeader title={syllabus.subject} description={`${syllabus.className} · ${syllabus.chapters.length} chapters`} /><div className="student-syllabus-list">{syllabus.chapters.map((chapter) => { const latest = syllabus.dailyLogs.find((log) => log.chapterId === chapter.id); return <article key={chapter.id} className={`is-${tone(chapter.status)}`}><span>{chapter.position}</span><div><h3>{chapter.title}</h3><p>{latest?.notes || (chapter.status === 'COMPLETED' ? 'Chapter completed' : chapter.status === 'IN_PROGRESS' ? 'Currently being taught' : 'Not taught yet')}</p>{latest ? <small>Updated {latest.logDate}</small> : null}</div><StatusPill label={chapter.status === 'COMPLETED' ? 'Completed' : chapter.status === 'IN_PROGRESS' ? 'In progress' : 'Untouched'} iconName={chapter.status === 'COMPLETED' ? 'check_circle' : chapter.status === 'IN_PROGRESS' ? 'pending' : 'radio_button_unchecked'} tone={tone(chapter.status)} /></article>; })}</div></section>) : <section className="student-card"><EmptyState title="No syllabus shared" message="Teacher-created chapter plans will appear here." iconName="menu_book" /></section>}</div>;
 }
 
 function attendanceTone(state: AttendanceState) {
@@ -462,6 +462,14 @@ export function StudentPortal() {
       cancelled = true;
     };
   }, [location.pathname, reloadKey]);
+
+  useEffect(() => {
+    if (view !== 'syllabus') return;
+    const interval = window.setInterval(() => setReloadKey((value) => value + 1), 10_000);
+    const refreshOnFocus = () => { if (document.visibilityState === 'visible') setReloadKey((value) => value + 1); };
+    document.addEventListener('visibilitychange', refreshOnFocus);
+    return () => { window.clearInterval(interval); document.removeEventListener('visibilitychange', refreshOnFocus); };
+  }, [view]);
 
   useEffect(() => {
     if (!enrollmentId) return;
