@@ -5,6 +5,7 @@ import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { KPICard } from '../components/ui/KPICard';
 import { StatusBadge } from '../components/ui/StatusBadge';
+import { tenantDashboardMock, tenantProfitLossMock, type TenantDashboardData } from '../features/tenant/tenantPortalData';
 import { api } from '../services/api';
 
 interface ProfitLossData {
@@ -27,21 +28,6 @@ interface FinanceConfig {
   maintenanceEscalationDays: number;
   leavePolicy: Record<string, unknown> | null;
   performanceWeights: Record<string, number> | null;
-}
-
-interface BranchSummaryItem {
-  branchId: string;
-  branchName: string;
-  activeStudents: number;
-  staffRoles: number;
-}
-
-interface TenantDashboardData {
-  activeStudentsCount: number;
-  activeTeachersCount: number;
-  totalOverdueAmountNpr: number;
-  pendingLeaveRequestsCount: number;
-  branchSummary: BranchSummaryItem[];
 }
 
 function buildAlerts(dashboard: TenantDashboardData | null): AlertFeedItem[] {
@@ -99,6 +85,7 @@ export function TenantAdminDashboard() {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [billingPeriod, setBillingPeriod] = useState('');
   const [policyConfig, setPolicyConfig] = useState<FinanceConfig | null>(null);
+  const [isDemoData, setIsDemoData] = useState(false);
 
   const alerts = buildAlerts(dashboard);
 
@@ -107,22 +94,29 @@ export function TenantAdminDashboard() {
     setErrorMsg('');
 
     try {
-      const [plData, config, summary, period] = await Promise.all([
+      const [plResult, configResult, summaryResult, periodResult] = await Promise.allSettled([
         api.finances.getPL() as Promise<ProfitLossData>,
         api.finances.getConfig() as Promise<FinanceConfig>,
-        api.tenant.getDashboard(),
-        api.finances.getBillingPeriod().catch(() => null),
+        api.tenant.getDashboard() as Promise<TenantDashboardData>,
+        api.finances.getBillingPeriod(),
       ]);
+      const usingDemo = plResult.status === 'rejected' || summaryResult.status === 'rejected';
+      const plData = plResult.status === 'fulfilled' && plResult.value.revenue > 0 ? plResult.value : tenantProfitLossMock;
+      const summary = summaryResult.status === 'fulfilled' && summaryResult.value.branchSummary.length > 0
+        ? summaryResult.value
+        : tenantDashboardMock;
 
       setPl(plData);
-      setVatRate(config.vatRate);
-      setGracePeriod(config.gracePeriod);
-      setPettyCashCap(config.pettyCashCap);
-      setPolicyConfig(config);
       setDashboard(summary);
-      if (period) setBillingPeriod(period.label);
-    } catch (error: unknown) {
-      setErrorMsg(error instanceof Error ? error.message : 'Failed to load dashboard data.');
+      setIsDemoData(usingDemo || summary === tenantDashboardMock || plData === tenantProfitLossMock);
+      if (configResult.status === 'fulfilled') {
+        const config = configResult.value;
+        setVatRate(config.vatRate);
+        setGracePeriod(config.gracePeriod);
+        setPettyCashCap(config.pettyCashCap);
+        setPolicyConfig(config);
+      }
+      setBillingPeriod(periodResult.status === 'fulfilled' ? periodResult.value.label : 'Shrawan 2083');
     } finally {
       setIsLoading(false);
     }
@@ -173,6 +167,12 @@ export function TenantAdminDashboard() {
       </div>
 
       {errorMsg ? <StatusBadge variant="error">{errorMsg}</StatusBadge> : null}
+      {isDemoData && !errorMsg ? (
+        <div role="status" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px', border: '1px solid color-mix(in srgb, var(--color-primary) 20%, transparent)', borderRadius: '10px', background: 'color-mix(in srgb, var(--color-primary) 6%, transparent)', color: 'var(--color-text)', fontSize: '13px' }}>
+          <span className="material-symbols-outlined" aria-hidden="true" style={{ color: 'var(--color-primary)', fontSize: '18px' }}>database</span>
+          Showing demonstration data while live institution reporting is being connected.
+        </div>
+      ) : null}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
         <KPICard

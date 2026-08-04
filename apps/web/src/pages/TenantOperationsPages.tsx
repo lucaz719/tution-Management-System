@@ -4,6 +4,18 @@ import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { useToast } from '../components/ui/Toast';
+import {
+  tenantAcademicEventsMock,
+  tenantExpensesMock,
+  tenantForecastMock,
+  tenantProfitLossMock,
+  tenantSuggestionsMock,
+  withMockWhenEmpty,
+  type FinancialForecast,
+  type FinancialSignal,
+  type FinancialSuggestions,
+} from '../features/tenant/tenantPortalData';
+import { TenantAcademicCalendar } from '../features/tenant/TenantAcademicCalendar';
 import { academicEventsApi, type AcademicEvent, type EventType } from '../services/api/academicEvents';
 import { ApiError, errorMessage, request } from '../services/api/client';
 import { financeApi, type Expense, type PettyCashRecord } from '../services/api/finance';
@@ -66,8 +78,24 @@ export function TenantPettyCashPage() {
 export function TenantReportsPage() {
   const { showToast } = useToast();
   const loader = useCallback(async () => {
-    const [pl, expenses, forecast, suggestions] = await Promise.all([financeApi.pl(), financeApi.expenses(), financeApi.forecast(), financeApi.suggestions()]);
-    return { pl, expenses: expenses.expenses, forecast, suggestions };
+    const [plResult, expensesResult, forecastResult, suggestionsResult] = await Promise.allSettled([
+      financeApi.pl(), financeApi.expenses(), financeApi.forecast(), financeApi.suggestions(),
+    ]);
+    const liveExpenses = expensesResult.status === 'fulfilled' ? expensesResult.value.expenses : [];
+    const pl = plResult.status === 'fulfilled' && plResult.value.revenue > 0 ? plResult.value : tenantProfitLossMock;
+    const forecast = forecastResult.status === 'fulfilled'
+      ? forecastResult.value as unknown as FinancialForecast
+      : tenantForecastMock;
+    const suggestions = suggestionsResult.status === 'fulfilled'
+      ? suggestionsResult.value as unknown as FinancialSuggestions
+      : tenantSuggestionsMock;
+    return {
+      pl,
+      expenses: withMockWhenEmpty(liveExpenses, tenantExpensesMock),
+      forecast: forecast.metrics ? forecast : tenantForecastMock,
+      suggestions: Array.isArray(suggestions.alerts) ? suggestions : tenantSuggestionsMock,
+      isDemo: pl === tenantProfitLossMock || liveExpenses.length === 0 || forecast === tenantForecastMock || suggestions === tenantSuggestionsMock,
+    };
   }, []);
   const { data, loading, error, reload } = useRemote(loader);
   const download = async () => {
@@ -80,10 +108,38 @@ export function TenantReportsPage() {
   };
   if (loading) return <RemoteState kind="loading" />; if (error || !data) return <RemoteState kind="error" message={errorMessage(error)} onRetry={() => void reload()} />;
   const cards: Array<[string, number, string]> = [['Revenue', data.pl.revenue, 'var(--color-success)'], ['Operating costs', data.pl.operatingCosts, 'var(--color-error)'], ['Net margin', data.pl.netMargin, 'var(--color-primary)']];
-  return <div style={{ display: 'grid', gap: 18 }}><Header title="P&L and Ledger" description="Consolidated institution reporting from recorded financial transactions."/><div style={grid}>{cards.map(([name, value, color]) => <Card key={name} hoverable={false}><p style={{ color: 'var(--text-muted)' }}>{name}</p><strong style={{ fontSize: 25, color }}>NPR {value.toLocaleString()}</strong><p>{data.pl.month}</p></Card>)}</div>
-    <div style={grid}><Card hoverable={false}><h3>Expenses</h3>{data.expenses.length ? data.expenses.map((expense: Expense) => <div key={expense.id} style={row}><span>{expense.category} · {expense.description}</span><strong>NPR {Number(expense.amount).toLocaleString()}</strong></div>) : <p style={{ marginTop: 15, color: 'var(--text-muted)' }}>No expenses recorded.</p>}</Card>
-    <Card hoverable={false}><h3>Forecast</h3><pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: 12 }}>{JSON.stringify(data.forecast, null, 2)}</pre></Card>
-    <Card hoverable={false}><h3>Rule-based signals</h3><pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: 12 }}>{JSON.stringify(data.suggestions, null, 2)}</pre></Card></div><Button onClick={() => void download()}>Download authenticated CSV ledger</Button></div>;
+  const forecastMetrics = data.forecast.metrics;
+  const forecastProgress = forecastMetrics.netForecastNpr > 0
+    ? Math.min(100, Math.round((forecastMetrics.actualCollectedNpr / forecastMetrics.netForecastNpr) * 100))
+    : 0;
+  const signalVariant = (signal: FinancialSignal): 'error' | 'warning' | 'info' => signal.severity === 'HIGH' ? 'error' : signal.severity === 'INFO' ? 'info' : 'warning';
+  return <div style={{ display: 'grid', gap: 18 }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
+      <Header title="P&L and Ledger" description="Consolidated institution reporting from recorded financial transactions."/>
+      <Button onClick={() => void download()}><span className="material-symbols-outlined" aria-hidden="true" style={{ fontSize: 18 }}>download</span>Download ledger</Button>
+    </div>
+    {data.isDemo ? <div role="status" style={{ padding: '10px 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-muted)', fontSize: 13 }}>Demonstration figures are filling gaps until live financial records are available.</div> : null}
+    <div style={grid}>{cards.map(([name, value, color]) => <Card key={name} hoverable={false}><p style={{ color: 'var(--text-muted)', fontSize: 13, fontWeight: 700 }}>{name}</p><strong style={{ display: 'block', marginTop: 8, fontSize: 25, color, fontVariantNumeric: 'tabular-nums' }}>NPR {value.toLocaleString()}</strong><p style={{ marginTop: 6, color: 'var(--text-muted)', fontSize: 12 }}>{data.pl.month}</p></Card>)}</div>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.15fr) minmax(300px, 0.85fr)', gap: 18 }}>
+      <Card hoverable={false}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}><div><h3>Monthly forecast</h3><p style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 13 }}>{data.forecast.billingCycle}</p></div><StatusBadge variant={forecastMetrics.varianceNpr >= 0 ? 'success' : 'warning'}>{forecastProgress}% collected</StatusBadge></div>
+        <div style={{ height: 8, margin: '18px 0', overflow: 'hidden', borderRadius: 999, background: 'var(--border)' }}><div style={{ width: `${forecastProgress}%`, height: '100%', borderRadius: 'inherit', background: 'var(--color-primary)' }}/></div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: 12 }}>
+          {[['Expected tuition', forecastMetrics.baseForecastNpr], ['Net forecast', forecastMetrics.netForecastNpr], ['Collected', forecastMetrics.actualCollectedNpr], ['Forecast variance', forecastMetrics.varianceNpr]].map(([label, value]) => <div key={String(label)} style={{ padding: 14, borderRadius: 10, background: 'var(--color-surface)', border: '1px solid var(--border)' }}><p style={{ color: 'var(--text-muted)', fontSize: 12 }}>{label}</p><strong style={{ display: 'block', marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>NPR {Number(value).toLocaleString()}</strong></div>)}
+        </div>
+        <p style={{ marginTop: 14, color: 'var(--text-muted)', fontSize: 13 }}>{forecastMetrics.activeEnrollments} active enrollments · Estimated attrition {forecastMetrics.attritionPercentage}</p>
+      </Card>
+      <Card hoverable={false}>
+        <h3>Budget outlook</h3><p style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 13 }}>Projected operational surplus</p>
+        <strong style={{ display: 'block', marginTop: 14, color: 'var(--color-success)', fontSize: 26, fontVariantNumeric: 'tabular-nums' }}>NPR {data.suggestions.budgetAnalysis.projectedSurplusNpr.toLocaleString()}</strong>
+        <p style={{ marginTop: 14, lineHeight: 1.6, color: 'var(--text-muted)', fontSize: 13 }}>{data.suggestions.budgetAnalysis.promptText}</p>
+      </Card>
+    </div>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(320px, 1fr)', gap: 18 }}>
+      <Card hoverable={false}><h3>Recorded expenses</h3><p style={{ marginTop: 4, marginBottom: 8, color: 'var(--text-muted)', fontSize: 13 }}>Latest operating costs by category</p>{data.expenses.map((expense: Expense) => <div key={expense.id} style={row}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}><div><strong>{expense.category}</strong><p style={{ marginTop: 3, color: 'var(--text-muted)', fontSize: 12 }}>{expense.description}</p></div><strong style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>NPR {Number(expense.amount).toLocaleString()}</strong></div></div>)}</Card>
+      <Card hoverable={false}><h3>Financial signals</h3><p style={{ marginTop: 4, marginBottom: 8, color: 'var(--text-muted)', fontSize: 13 }}>Items that may need review</p>{data.suggestions.alerts.map((signal: FinancialSignal, index: number) => <div key={`${signal.type}-${index}`} style={row}><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}><strong style={{ fontSize: 13 }}>{signal.type.replaceAll('_', ' ')}</strong><StatusBadge variant={signalVariant(signal)}>{signal.severity}</StatusBadge></div><p style={{ color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.55 }}>{signal.message}</p></div>)}</Card>
+    </div>
+  </div>;
 }
 
 export function TenantPayrollPage() {
@@ -119,8 +175,20 @@ export function TenantCalendarPage() {
   const { showToast } = useToast(); const loader = useCallback(() => academicEventsApi.list(), []); const { data, loading, error, reload } = useRemote(loader);
   const [busy, setBusy] = useState(false); const [form, setForm] = useState({ title: '', description: '', eventType: 'EVENT' as EventType, startDate: '', endDate: '' });
   const submit = async (event: FormEvent) => { event.preventDefault(); setBusy(true); try { await academicEventsApi.createTenantWide({ ...form, startDate: new Date(form.startDate).toISOString(), endDate: new Date(form.endDate).toISOString() }); showToast('Institution-wide event published.', 'success'); setForm({ title: '', description: '', eventType: 'EVENT', startDate: '', endDate: '' }); await reload(); } catch (next) { showToast(errorMessage(next), 'error'); } finally { setBusy(false); } };
-  return <div style={{ display: 'grid', gap: 18 }}><Header title="Academic Calendar" description="Publish institution-wide events that branches consume as read-only."/><div style={grid}><Card hoverable={false}><h3>New institution event</h3><form onSubmit={(e) => void submit(e)} style={{ display: 'grid', gap: 10, marginTop: 14 }}><input style={input} aria-label="Event title" placeholder="Event title" value={form.title} onChange={(e) => setForm((old) => ({ ...old, title: e.target.value }))} required/><select style={input} value={form.eventType} onChange={(e) => setForm((old) => ({ ...old, eventType: e.target.value as EventType }))}><option value="EVENT">Event</option><option value="HOLIDAY">Holiday</option><option value="EXAM">Exam</option><option value="FEE_DUE">Fee due</option></select><input style={input} aria-label="Start" type="datetime-local" value={form.startDate} onChange={(e) => setForm((old) => ({ ...old, startDate: e.target.value }))} required/><input style={input} aria-label="End" type="datetime-local" value={form.endDate} onChange={(e) => setForm((old) => ({ ...old, endDate: e.target.value }))} required/><textarea style={input} aria-label="Description" placeholder="Description" value={form.description} onChange={(e) => setForm((old) => ({ ...old, description: e.target.value }))}/><Button disabled={busy} type="submit">Publish to all branches</Button></form></Card>
-  <Card hoverable={false}><h3>Published events</h3>{loading ? <p>Loading…</p> : error ? <RemoteState kind="error" message={errorMessage(error)} onRetry={() => void reload()}/> : !(data?.events.length) ? <p style={{ marginTop: 14, color: 'var(--text-muted)' }}>No events published.</p> : data.events.map((item: AcademicEvent) => <div key={item.id} style={row}><div><strong>{item.title}</strong> <StatusBadge variant={item.branchId ? 'info' : 'success'}>{item.branchId ? 'Branch' : 'Institution-wide'}</StatusBadge></div><p style={{ fontSize: 12 }}>{new Date(item.startDate).toLocaleString()} · {item.eventType}</p></div>)}</Card></div></div>;
+  const events = data?.events.length ? data.events : tenantAcademicEventsMock;
+  return <div style={{ display: 'grid', gap: 18 }}><Header title="Academic Calendar" description="Plan institution-wide events and review the complete academic month."/>
+    {error ? <div role="status" style={{ padding: '10px 14px', borderRadius: 10, border: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: 13 }}>Live events could not be loaded. Demonstration events are shown on the calendar. <button type="button" onClick={() => void reload()} style={{ marginLeft: 8, border: 0, background: 'transparent', color: 'var(--color-primary)', font: 'inherit', fontWeight: 700, cursor: 'pointer' }}>Try again</button></div> : null}
+    <TenantAcademicCalendar events={events} loading={loading} />
+    <div className="tenant-calendar-page__lower"><Card hoverable={false}><h3>New institution event</h3><form onSubmit={(e) => void submit(e)} style={{ display: 'grid', gap: 14, marginTop: 14 }}>
+      <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700 }}>Event title<input style={input} placeholder="Parent orientation" value={form.title} onChange={(e) => setForm((old) => ({ ...old, title: e.target.value }))} required/></label>
+      <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700 }}>Event type<select style={input} value={form.eventType} onChange={(e) => setForm((old) => ({ ...old, eventType: e.target.value as EventType }))}><option value="EVENT">Event</option><option value="HOLIDAY">Holiday</option><option value="EXAM">Exam</option><option value="FEE_DUE">Fee due</option></select></label>
+      <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700 }}>Starts<input style={input} type="datetime-local" value={form.startDate} onChange={(e) => setForm((old) => ({ ...old, startDate: e.target.value }))} required/></label>
+      <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700 }}>Ends<input style={input} type="datetime-local" value={form.endDate} onChange={(e) => setForm((old) => ({ ...old, endDate: e.target.value }))} required/></label>
+      <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700 }}>Description<textarea style={{ ...input, minHeight: 92, resize: 'vertical' }} placeholder="What should branches know about this event?" value={form.description} onChange={(e) => setForm((old) => ({ ...old, description: e.target.value }))}/></label>
+      <Button disabled={busy} aria-busy={busy} type="submit">{busy ? 'Publishing…' : 'Publish to all branches'}</Button></form></Card>
+      <Card hoverable={false}><h3>Published events</h3><p style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 13 }}>Institution and branch events currently visible on the calendar.</p>{events.map((item: AcademicEvent) => <div key={item.id} style={row}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}><div><strong>{item.title}</strong><p style={{ marginTop: 4, fontSize: 12, color: 'var(--text-muted)' }}>{new Date(item.startDate).toLocaleString()} · {item.eventType.replace('_', ' ')}</p></div><StatusBadge variant={item.branchId ? 'info' : 'success'}>{item.branchId ? 'Branch' : 'Institution-wide'}</StatusBadge></div></div>)}</Card>
+    </div>
+  </div>;
 }
 
 export function TenantHrPage() {

@@ -1,3 +1,5 @@
+import { tenantMockResponse } from '../../features/tenant/tenantMockApi';
+
 declare const __TMS_API_BASE_URL__: string;
 
 export interface ApiFieldError {
@@ -41,7 +43,15 @@ export const API_BASE_URL = safeBaseUrl(__TMS_API_BASE_URL__);
 export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
   if (options.body != null && !(options.body instanceof FormData)) headers.set('Content-Type', 'application/json');
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers, credentials: 'include' });
+  const method = (options.method ?? 'GET').toUpperCase();
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers, credentials: 'include' });
+  } catch (error) {
+    const mock = method === 'GET' ? tenantMockResponse(path) : undefined;
+    if (mock !== undefined) return mock as T;
+    throw error;
+  }
   if (!response.ok) {
     const body = await response.json().catch(() => ({})) as {
       error?: string; message?: string; fieldErrors?: ApiFieldError[];
@@ -52,10 +62,13 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
       sessionStorage.removeItem('tms_user');
       window.location.assign('/login');
     }
+    const mock = method === 'GET' && response.status !== 401 && response.status !== 403 ? tenantMockResponse(path) : undefined;
+    if (mock !== undefined) return mock as T;
     throw error;
   }
   if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+  const value = await response.json() as T;
+  return (method === 'GET' ? tenantMockResponse(path, value) ?? value : value) as T;
 }
 
 export function errorMessage(error: unknown): string {
