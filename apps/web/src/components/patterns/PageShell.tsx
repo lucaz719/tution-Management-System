@@ -70,6 +70,10 @@ export function PageShell({
     setIsMobileOpen(false);
   };
 
+  const isNavItemActive = (path: string) => path.includes('#')
+    ? `${location.pathname}${location.hash}` === path
+    : location.pathname.startsWith(path);
+
   // Group nav items by section
   const groupedItems = React.useMemo(() => {
     const groups: Record<string, NavItem[]> = {};
@@ -259,7 +263,7 @@ export function PageShell({
                 <span className="sidebar-section-title">{section}</span>
                 <ul className="sidebar-menu">
                   {items.map((item, idx) => {
-                    const isActive = location.pathname.startsWith(item.path);
+                    const isActive = isNavItemActive(item.path);
                     return (
                       <li key={idx}>
                         <button
@@ -307,7 +311,7 @@ export function PageShell({
                 <span className="sidebar-section-title">{section}</span>
                 <ul className="sidebar-menu">
                   {items.map((item, idx) => {
-                    const isActive = location.pathname.startsWith(item.path);
+                    const isActive = isNavItemActive(item.path);
                     return (
                       <li key={idx}>
                         <button
