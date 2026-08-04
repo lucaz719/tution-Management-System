@@ -406,6 +406,15 @@
 .student-progress { height: 7px; margin: 13px 0; overflow: hidden; border-radius: 20px; background: var(--student-border); }
 .student-progress span { display: block; height: 100%; border-radius: inherit; background: var(--student-blue); }
 .student-result__foot { justify-content: space-between; gap: 10px; }
+.student-result-file { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--student-border); display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.student-result-file > div { min-width: 0; display: flex; align-items: center; gap: 9px; }
+.student-result-file > div > .material-symbols-outlined { color: var(--student-blue); }
+.student-result-file > div span { display: grid; gap: 2px; }
+.student-result-file strong { font-size: 12px; }
+.student-result-file small { color: var(--student-muted); font-size: 10.5px; }
+.student-result-file > a { flex: 0 0 auto; padding: 8px 11px; border: 1px solid var(--student-border); border-radius: 7px; color: var(--student-blue); display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 800; text-decoration: none; }
+.student-result-file > a .material-symbols-outlined { font-size: 18px; }
+.student-result-file .is-unavailable { flex: 0 0 auto; color: var(--student-muted); font-size: 11px; font-weight: 700; }
 .student-trends { display: flex; flex-direction: column; gap: 17px; }
 .student-trends article > div:first-child { display: flex; justify-content: space-between; font-size: 13px; }
 .student-sparkline { width: 100%; height: 42px; margin: 8px 0 5px; overflow: visible; }
@@ -511,11 +520,41 @@
 .student-certificate-list button:disabled { color: var(--student-muted); cursor: not-allowed; opacity: .65; }
 
 .student-calendar-list { display: flex; flex-direction: column; }
-.student-calendar-list article { gap: 16px; padding: 17px 4px; border-bottom: 1px solid var(--student-border); }
-.student-calendar-list article:last-child { border-bottom: 0; }
-.student-calendar-list article > div:nth-child(2) { flex: 1; }
+.student-calendar-list article, .student-calendar-list > button { gap: 16px; padding: 17px 4px; border: 0; border-bottom: 1px solid var(--student-border); background: transparent; color: var(--student-text); display: flex; align-items: center; text-align: left; }
+.student-calendar-list > button { width: 100%; cursor: pointer; }
+.student-calendar-list article:last-child, .student-calendar-list > button:last-child { border-bottom: 0; }
+.student-calendar-list article > div:nth-child(2), .student-calendar-list > button > div:nth-child(2) { flex: 1; }
 .student-calendar-list h3 { margin: 7px 0 3px; font-size: 15px; }
 .student-calendar-list p, .student-calendar-list time { color: var(--student-muted); font-size: 12px; }
+.student-calendar-list > button > .material-symbols-outlined { color: var(--student-muted); }
+.student-calendar-layout { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, .75fr); gap: 18px; align-items: start; }
+.student-digital-calendar { padding: 0; overflow: hidden; }
+.student-digital-calendar > header { min-height: 80px; padding: 18px 20px; border-bottom: 1px solid var(--student-border); display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.student-digital-calendar > header h2 { margin-top: 3px; color: var(--student-navy); font-family: Fraunces, var(--font-display); font-size: 22px; }
+.student-digital-calendar > header > div:last-child { display: flex; align-items: center; gap: 6px; }
+.student-digital-calendar > header button { min-width: 42px; padding: 8px 10px; border: 1px solid var(--student-border); border-radius: 7px; background: transparent; color: var(--student-blue); cursor: pointer; font-weight: 800; }
+.student-calendar-weekdays, .student-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.student-calendar-weekdays { padding: 10px 12px; border-bottom: 1px solid var(--student-border); background: rgba(21,96,189,.035); }
+.student-calendar-weekdays span { text-align: center; color: var(--student-muted); font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.student-calendar-grid { padding: 12px; gap: 4px; }
+.student-calendar-grid > button { min-width: 0; min-height: 68px; padding: 8px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--student-text); cursor: pointer; display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; }
+.student-calendar-grid > button:hover { background: rgba(21,96,189,.055); }
+.student-calendar-grid > button.is-outside { color: var(--student-muted); opacity: .48; }
+.student-calendar-grid > button.is-today > span { display: grid; place-items: center; width: 26px; height: 26px; margin: -4px; border-radius: 50%; background: var(--student-blue); color: #fff; }
+.student-calendar-grid > button.is-selected { border-color: var(--student-blue); background: rgba(21,96,189,.075); }
+.student-calendar-grid > button > span { font-size: 12px; font-weight: 800; }
+.student-calendar-grid > button > i { min-height: 8px; display: flex; gap: 3px; }
+.student-calendar-grid > button b { width: 6px; height: 6px; border-radius: 50%; background: var(--student-blue); }
+.student-calendar-grid > button b.is-success { background: var(--student-success); }
+.student-calendar-grid > button b.is-error { background: var(--student-error); }
+.student-calendar-grid > button b.is-warning { background: var(--student-warning); }
+.student-selected-events { padding: 16px 20px 20px; border-top: 1px solid var(--student-border); }
+.student-selected-events > h3 { margin-bottom: 10px; color: var(--student-navy); font-size: 15px; }
+.student-selected-events > p { color: var(--student-muted); font-size: 12px; }
+.student-selected-events article { padding: 10px 0; display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 10px; }
+.student-selected-events article strong { display: block; font-size: 13px; }
+.student-selected-events article p { margin-top: 3px; color: var(--student-muted); font-size: 12px; }
+.student-upcoming-panel { max-height: 720px; overflow-y: auto; }
 .student-date-block { width: 54px; height: 58px; display: grid; place-content: center; border-radius: 7px; text-align: center; }
 .student-date-block strong, .student-date-block span { display: block; }
 .student-date-block strong { font-size: 20px; line-height: 1; }
@@ -565,6 +604,8 @@
 [data-theme="dark"] .student-date-block.is-success { color: #55d89f; }
 [data-theme="dark"] .student-date-block.is-error { color: #ff8c96; }
 [data-theme="dark"] .student-date-block.is-warning { color: #ffd071; }
+[data-theme="dark"] .student-calendar-weekdays { background: rgba(138,184,232,.055); }
+[data-theme="dark"] .student-calendar-grid > button:hover, [data-theme="dark"] .student-calendar-grid > button.is-selected { background: rgba(138,184,232,.1); }
 [data-theme="dark"] .student-invoice-lines .is-discount { color: #55d89f; }
 [data-theme="dark"] .student-page-header h1,
 [data-theme="dark"] .student-section-head h2,
@@ -592,6 +633,8 @@
   .student-id-layout { grid-template-columns: 1fr; }
   .student-metrics { grid-template-columns: repeat(2, 1fr); }
   .student-event-strip, .student-payment-calendar { grid-template-columns: 1fr; }
+  .student-calendar-layout { grid-template-columns: 1fr; }
+  .student-upcoming-panel { max-height: none; }
 }
 
 @media (max-width: 640px) {
@@ -617,11 +660,21 @@
   .student-digital-id footer { align-items: flex-start; flex-direction: column; }
   .student-calendar-list article { align-items: flex-start; }
   .student-calendar-list time { display: none; }
+  .student-digital-calendar > header { align-items: flex-start; flex-direction: column; }
+  .student-digital-calendar > header > div:last-child { width: 100%; }
+  .student-digital-calendar > header > div:last-child button:nth-child(2) { flex: 1; }
+  .student-calendar-grid { padding: 6px; gap: 2px; }
+  .student-calendar-grid > button { min-height: 52px; padding: 6px; }
+  .student-calendar-weekdays { padding-inline: 6px; }
+  .student-calendar-weekdays span { font-size: 9px; }
+  .student-calendar-list > button { align-items: flex-start; }
   .student-notification-actions { align-items: flex-start; flex-direction: column; }
   .student-notification-list > button { grid-template-columns: 8px 36px 1fr; padding: 14px; }
   .student-notification-list > button > .material-symbols-outlined:last-child { display: none; }
   .student-syllabus-list article { grid-template-columns: 36px 1fr; }
   .student-syllabus-list .student-status { grid-column: 2; }
+  .student-result-file { align-items: stretch; flex-direction: column; }
+  .student-result-file > a { width: 100%; justify-content: center; }
 }
 
 @media (prefers-reduced-motion: reduce) {

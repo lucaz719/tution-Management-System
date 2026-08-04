@@ -614,6 +614,7 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
     ];
     const syllabi = student.enrollments.flatMap((enrollment) => enrollment.class.syllabi.map((syllabus) => ({
       id: syllabus.id, className: enrollment.class.name, subject: syllabus.subject,
+      teacherName: enrollment.class.assignedTeacher ? `${enrollment.class.assignedTeacher.firstName} ${enrollment.class.assignedTeacher.lastName}`.trim() : undefined,
       chapters: syllabus.chapters.map((chapter) => ({ id: chapter.id, title: chapter.title, position: chapter.position, status: chapter.status })),
       dailyLogs: syllabus.dailyLogs.map((log) => ({ id: log.id, chapterId: log.chapterId, status: log.status, notes: log.notes, logDate: formatDate(log.logDate) })),
     })));

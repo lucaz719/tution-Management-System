@@ -1,8 +1,8 @@
 import { API_BASE_URL, request } from '../../services/api/client';
-import type { NepalPayPayload, StudentPortalDataset } from './studentPortalData';
+import { withStudentDemoData, type NepalPayPayload, type StudentPortalDataset } from './studentPortalData';
 
-export function loadStudentPortal(): Promise<StudentPortalDataset> {
-  return request<StudentPortalDataset>('/users/me/student-portal');
+export async function loadStudentPortal(): Promise<StudentPortalDataset> {
+  return withStudentDemoData(await request<StudentPortalDataset>('/users/me/student-portal'));
 }
 
 export function loadNepalPayPayload(invoiceId: string): Promise<NepalPayPayload> {
