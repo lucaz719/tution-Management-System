@@ -68,12 +68,27 @@ router.get('/today', authMiddleware, async (req: TenantRequest, res: Response) =
     if (!branch) return res.status(404).json({ error: 'Assigned branch was not found.' });
 
     const checkedByStudent = new Map(checkIns.map((item) => [item.studentId, item.checkedInAt]));
-    const roster = enrollments.map((item) => ({
-      id: item.student.id,
-      name: `${item.student.user.firstName} ${item.student.user.lastName}`.trim(),
-      className: item.class.name,
-      schedule: item.class.schedule,
-      checkedInAt: checkedByStudent.get(item.student.id) ?? null,
+    const rosterByStudent = new Map<string, {
+      id: string; name: string; classNames: string[]; schedules: unknown[]; checkedInAt: Date | null;
+    }>();
+    for (const item of enrollments) {
+      const current = rosterByStudent.get(item.student.id) ?? {
+        id: item.student.id,
+        name: `${item.student.user.firstName} ${item.student.user.lastName}`.trim(),
+        classNames: [],
+        schedules: [],
+        checkedInAt: checkedByStudent.get(item.student.id) ?? null,
+      };
+      if (!current.classNames.includes(item.class.name)) current.classNames.push(item.class.name);
+      current.schedules.push(item.class.schedule);
+      rosterByStudent.set(item.student.id, current);
+    }
+    const roster = Array.from(rosterByStudent.values()).map((item) => ({
+      id: item.id,
+      name: item.name,
+      className: item.classNames.join(' · '),
+      schedule: item.schedules,
+      checkedInAt: item.checkedInAt,
     }));
 
     return res.json({

@@ -1,4 +1,9 @@
 .reception-page { display: grid; gap: var(--sp-5); max-width: 1440px; margin: 0 auto; }
+.reception-demo-note { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); color: var(--color-primary); background: color-mix(in srgb, var(--color-primary) 6%, var(--bg-card)); border: 1px solid color-mix(in srgb, var(--color-primary) 18%, transparent); border-radius: var(--radius-md); }
+.reception-demo-note > span { font-size: 20px; }
+.reception-demo-note div { display: grid; gap: 2px; }
+.reception-demo-note strong { font-size: 13px; }
+.reception-demo-note div span { color: var(--text-muted); font-size: 12px; }
 .reception-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-4); }
 .reception-heading h2 { font-size: 28px; line-height: 1.2; margin: var(--sp-1) 0; letter-spacing: 0; }
 .reception-heading > div > p:last-child, .reception-toolbar p { color: var(--text-muted); font-size: 14px; }

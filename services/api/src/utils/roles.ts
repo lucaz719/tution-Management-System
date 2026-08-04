@@ -29,7 +29,7 @@ export const ROLE_PERMISSIONS = {
   ],
   Teacher: ['mark_geo_attendance', 'mark_attendance', 'manage_homework', 'view_own_schedule', 'submit_lesson_update'],
   Accountant: ['manage_billing', 'view_reports', 'manage_petty_cash'],
-  Receptionist: ['manage_enquiries', 'view_schedules', 'manage_appointments'],
+  Receptionist: ['manage_enquiries', 'view_schedules'],
   Janitor: ['view_tasks', 'update_task_status'],
   Student: ['view_own_attendance', 'view_own_homework', 'view_own_invoices'],
   Parent: ['view_child_attendance', 'view_child_homework', 'view_child_invoices', 'chat_with_teacher'],
