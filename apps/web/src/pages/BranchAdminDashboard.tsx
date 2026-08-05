@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { KPICard } from '../components/ui/KPICard';
@@ -87,6 +88,18 @@ export function BranchAdminDashboard() {
     }
   };
 
+  const navigate = useNavigate();
+
+  const QuickAccessItem = ({ icon, label, path }: { icon: string, label: string, path: string }) => (
+    <div 
+      onClick={() => navigate(path)}
+      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', cursor: 'pointer', padding: '16px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.1)', background: '#F8FAFC' }}
+    >
+      <span className="material-symbols-outlined" style={{ fontSize: '28px', color: 'var(--color-primary)' }}>{icon}</span>
+      <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text)', textAlign: 'center' }}>{label}</span>
+    </div>
+  );
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       <Card hoverable={false} style={{ padding: '18px 20px' }}>
@@ -101,6 +114,18 @@ export function BranchAdminDashboard() {
           </Button>
         </div>
       </Card>
+
+      <div style={{ marginBottom: '8px' }}>
+        <h3 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '16px' }}>Quick Access</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '16px' }}>
+          <QuickAccessItem icon="groups" label="Students" path="/branch/students" />
+          <QuickAccessItem icon="badge" label="Teachers" path="/branch/teachers" />
+          <QuickAccessItem icon="event_available" label="Attendance" path="/branch/attendance" />
+          <QuickAccessItem icon="assignment" label="Homework" path="/branch/homework" />
+          <QuickAccessItem icon="analytics" label="Results" path="/branch/results" />
+          <QuickAccessItem icon="payments" label="Fee & Billing" path="/branch/fees" />
+        </div>
+      </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '18px' }}>
         <Card hoverable={false} style={{ padding: '22px', minHeight: '166px' }}>
@@ -117,17 +142,27 @@ export function BranchAdminDashboard() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '18px' }}>
         <Card hoverable={false}>
-          <div style={{ marginBottom: '18px' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Today's Timetable</h3>
-            <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Time-ordered classroom activity across the branch.</p>
+          <div style={{ marginBottom: '18px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Today's Timetable</h3>
+              <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Time-ordered classroom activity across the branch.</p>
+            </div>
+            <Button variant="ghost" onClick={() => navigate('/branch/timetables')} style={{ padding: '8px', minHeight: 'unset' }}>
+              <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>open_in_new</span>
+            </Button>
           </div>
           <TimetableList items={todaysTimetable} />
         </Card>
 
         <Card hoverable={false}>
-          <div style={{ marginBottom: '18px' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Resource Log Status</h3>
-            <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Daily operational checklist with log health indicators.</p>
+          <div style={{ marginBottom: '18px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Resource Log Status</h3>
+              <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Daily operational checklist with log health indicators.</p>
+            </div>
+            <Button variant="ghost" onClick={() => navigate('/branch/resource-logs')} style={{ padding: '8px', minHeight: 'unset' }}>
+              <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>open_in_new</span>
+            </Button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {resourceLogItems.map((item) => (
@@ -156,7 +191,12 @@ export function BranchAdminDashboard() {
             <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Petty Cash Level 1 Approvals Queue</h3>
             <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Existing finance workflow preserved.</p>
           </div>
-          <StatusBadge variant="info">{pettyCashRequests.length} requests</StatusBadge>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <StatusBadge variant="info">{pettyCashRequests.length} requests</StatusBadge>
+            <Button variant="ghost" onClick={() => navigate('/branch/petty-cash')} style={{ padding: '8px', minHeight: 'unset' }}>
+              <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>open_in_new</span>
+            </Button>
+          </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {pettyCashRequests.length === 0 ? (

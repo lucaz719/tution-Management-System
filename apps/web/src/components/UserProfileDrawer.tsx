@@ -28,18 +28,20 @@ interface Profile {
       grade: string | null;
       gradeTuition: number;
       monthlyFee: number;
-      enrollments: Array<{ id: string; courseName: string; className: string; status: string }>;
+      enrollments: Array<{ id: string; courseName: string; className: string; status: string; extraFee?: number; billingHistory?: { paid: number; due: number } }>;
       fees: { totalBilled: number; totalPaid: number; totalDue: number; overdueCount: number; invoices: Array<{ id: string; netPayable: number; status: string; dueDate: string }> };
+      futureBilling?: { projectedAnnualFee: number; nextInvoiceDate: string };
       attendance: Record<string, number>;
     };
     parent?: {
       children: Array<{ studentId: string; name: string; activeEnrollments: number; totalPaid: number; totalDue: number; overdueCount: number }>;
     };
     teacher?: {
-      assignedClasses: Array<{ className: string; courseName: string; branchName: string; gradeName: string | null; enrollmentCount: number }>;
+      assignedClasses: Array<{ className: string; courseName: string; branchName: string; gradeName: string | null; enrollmentCount: number; syllabusProgress?: number }>;
       gradesTaught: string[];
       totalSessions: number;
       pendingUpdates: number;
+      payroll?: { totalPaid: number; lastMonthPaid: number; nextMonthProjected: number; extraClassesPayroll?: number; history: Array<{ month: string; amount: number; status: string }> };
     };
     staff?: { designation: string; contractType: string; joiningDate: string };
   };
@@ -328,6 +330,24 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                       <FeeStat label="Paid" value={money(profile.detail.student.fees.totalPaid)} tone="paid" />
                       <FeeStat label="Due" value={money(profile.detail.student.fees.totalDue)} tone="due" />
                     </div>
+
+                    {profile.detail.student.futureBilling ? (
+                      <div style={{ ...rowCard, marginTop: '10px', background: 'rgba(21, 96, 189, 0.04)' }}>
+                        <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 600 }}>1-Year Future Billing Projection</div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+                          <span style={{ fontSize: '16px', fontWeight: 700, color: 'var(--color-primary)' }}>{money(profile.detail.student.futureBilling.projectedAnnualFee)}</span>
+                          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Next Invoice: {profile.detail.student.futureBilling.nextInvoiceDate}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ ...rowCard, marginTop: '10px', background: 'rgba(21, 96, 189, 0.04)' }}>
+                        <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 600 }}>1-Year Future Billing Projection</div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+                          <span style={{ fontSize: '16px', fontWeight: 700, color: 'var(--color-primary)' }}>{money(profile.detail.student.monthlyFee * 12)}</span>
+                          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Calculated automatically</span>
+                        </div>
+                      </div>
+                    )}
                     {profile.detail.student.fees.invoices.length > 0 ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
                         {profile.detail.student.fees.invoices.map((inv) => (
@@ -382,6 +402,11 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                             <div>
                               <div style={{ fontSize: '13.5px', fontWeight: 700 }}>{e.courseName}</div>
                               <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{e.className}</div>
+                              {e.billingHistory ? (
+                                <div style={{ fontSize: '11px', color: 'var(--color-success)', marginTop: '2px' }}>
+                                  Paid: {money(e.billingHistory.paid)} {e.billingHistory.due > 0 ? <span style={{ color: 'var(--color-error)' }}>· Due: {money(e.billingHistory.due)}</span> : ''}
+                                </div>
+                              ) : null}
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                               <StatusBadge variant={e.status === 'ACTIVE' ? 'success' : e.status === 'BLOCKED' ? 'error' : 'info'}>{e.status}</StatusBadge>
@@ -422,11 +447,35 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                           <div>
                             <div style={{ fontSize: '13.5px', fontWeight: 700 }}>{c.className}</div>
                             <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{c.courseName} · {c.branchName}</div>
+                            {c.syllabusProgress !== undefined ? (
+                              <div style={{ fontSize: '11px', color: 'var(--color-primary)', marginTop: '2px', fontWeight: 600 }}>
+                                Syllabus Progress: {c.syllabusProgress}%
+                              </div>
+                            ) : null}
                           </div>
                           <StatusBadge variant="info">{c.enrollmentCount} enrolled</StatusBadge>
                         </div>
                       ))
                     )}
+                  </div>
+
+                  {/* Teacher Payroll & Billing */}
+                  <div style={{ marginTop: '16px' }}>
+                    <div style={sectionTitle}>Payroll & Billing</div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <FeeStat label="Total Paid" value={money(profile.detail.teacher.payroll?.totalPaid ?? 0)} tone="paid" />
+                      <FeeStat label="Last Month" value={money(profile.detail.teacher.payroll?.lastMonthPaid ?? 0)} />
+                    </div>
+                    
+                    <div style={{ ...rowCard, marginTop: '10px', background: 'rgba(21, 96, 189, 0.04)' }}>
+                      <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 600 }}>Next Month Projected Payroll</div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+                        <span style={{ fontSize: '16px', fontWeight: 700, color: 'var(--color-primary)' }}>{money(profile.detail.teacher.payroll?.nextMonthProjected ?? 0)}</span>
+                        {profile.detail.teacher.payroll?.extraClassesPayroll ? (
+                          <span style={{ fontSize: '12px', color: 'var(--color-success)' }}>Includes {money(profile.detail.teacher.payroll.extraClassesPayroll)} for extra classes</span>
+                        ) : null}
+                      </div>
+                    </div>
                   </div>
                 </div>
               ) : null}
