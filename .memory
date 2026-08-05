@@ -537,9 +537,8 @@ Known non-blocking warnings:
 
 ## Remaining work, in priority order
 
-1. Replace remaining sample/mock-backed portal presentation data with live,
-   tenant-scoped API contracts while retaining explicit loading, empty, error,
-   and permission states.
+Completed 2026-08-05: removed remaining sample/mock-backed portal presentation data and replaced it with live, permission-scoped contracts for Tenant, Student, Teacher, Receptionist, Accountant, and Branch Admin surfaces. Loading, empty, error, and permission states now fail closed. Accountant and Branch Admin dashboards use scoped aggregates, petty-cash lists enforce requester/branch ownership, and the configured per-branch monthly cap is enforced for requests and revisions.
+
 2. Replace the Teacher homework/result small data-URL attachment preview with
    production-grade authenticated object storage, file validation, malware
    scanning, retention rules, and authorized download URLs.
