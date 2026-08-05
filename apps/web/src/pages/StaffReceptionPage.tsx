@@ -55,9 +55,7 @@ export function StaffReceptionPage() {
   const handleCheckIn = async (studentId: string) => {
     setCheckingIn(studentId);
     try {
-      const result = data?.isDemo
-        ? { message: 'Student checked in at the front desk. Demo data was updated locally.', checkedInAt: new Date().toISOString() }
-        : await checkInStudent(studentId);
+      const result = await checkInStudent(studentId);
       setData((current) => current ? {
         ...current,
         roster: current.roster.map((student) => student.id === studentId
@@ -102,8 +100,6 @@ export function StaffReceptionPage() {
           Branch-limited view
         </div>
       </header>
-
-      {data.isDemo ? <div className="reception-demo-note" role="status"><span className="material-symbols-outlined" aria-hidden="true">database</span><div><strong>Demonstration front desk</strong><span>Sample branch data is shown until today’s live roster is available.</span></div></div> : null}
 
       <section className="reception-metrics" aria-label="Today's front desk summary">
         <article><span className="metric-icon metric-icon--blue material-symbols-outlined">how_to_reg</span><div><strong>{checkedInCount}</strong><span>Students checked in</span></div></article>

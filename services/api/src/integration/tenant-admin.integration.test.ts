@@ -623,6 +623,18 @@ async function main(): Promise<void> {
     });
     assert.equal(response.status, 409);
 
+    const adminPettyCash = await request('POST', '/api/finances/petty-cash/request', adminACookie, {
+      branchId: branchA.id,
+      amount: 500,
+      purpose: 'Administrator-owned request hidden from Accountant workspace',
+    });
+    assert.equal(adminPettyCash.status, 201);
+    response = await request('POST', '/api/finances/petty-cash/request', accountantCookie, {
+      branchId: branchA.id,
+      amount: 30000,
+      purpose: 'Request above the remaining monthly cap',
+    });
+    assert.equal(response.status, 422, 'petty-cash requests must enforce the branch monthly cap');
     response = await request('POST', '/api/finances/petty-cash/request', accountantCookie, {
       branchId: branchA.id,
       amount: 1500,
@@ -630,6 +642,15 @@ async function main(): Promise<void> {
     });
     assert.equal(response.status, 201);
     const pettyCashId = response.body.pettyCash.id;
+    response = await request('GET', '/api/finances/accountant-workspace', accountantCookie);
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.branches.map((branch: any) => branch.id), [branchA.id], 'Accountant workspace must expose only assigned branches');
+    assert(response.body.pettyCash.some((item: any) => item.id === pettyCashId), 'Accountant workspace must include the caller\'s request');
+    assert(!response.body.pettyCash.some((item: any) => item.id === adminPettyCash.body.pettyCash.id), 'Accountant workspace must hide another requester\'s petty cash');
+    assert(response.body.invoices.every((invoice: any) => invoice.branchId === branchA.id), 'Accountant invoices must stay within assigned branches');
+    response = await request('GET', '/api/finances/petty-cash', accountantCookie);
+    assert.equal(response.status, 200);
+    assert(response.body.every((item: any) => item.accountantId === accountantA.id), 'Accountant petty-cash list must contain only owned records');
     response = await request('POST', `/api/finances/petty-cash/approve-l1/${pettyCashId}`, branchAdminCookie, {
       remarks: 'Verified',
     });
@@ -654,6 +675,33 @@ async function main(): Promise<void> {
     assert.equal(response.status, 404);
     response = await request('POST', `/api/finances/petty-cash/close/${pettyCashId}`, adminACookie, {});
     assert.equal(response.status, 200);
+
+    response = await request('POST', '/api/finances/petty-cash/request', accountantCookie, {
+      branchId: branchA.id,
+      amount: 900,
+      purpose: 'Request that needs revision',
+    });
+    assert.equal(response.status, 201);
+    const revisionPettyCashId = response.body.pettyCash.id;
+    response = await request('POST', `/api/finances/petty-cash/approve-l1/${revisionPettyCashId}`, branchAdminCookie, {});
+    assert.equal(response.status, 200);
+    response = await request('POST', `/api/finances/petty-cash/decide/${revisionPettyCashId}`, adminACookie, {
+      action: 'REVISION',
+      remarks: 'Clarify the required supplies.',
+    });
+    assert.equal(response.status, 200);
+    response = await request('PUT', `/api/finances/petty-cash/${revisionPettyCashId}`, branchAdminCookie, {
+      amount: 850,
+      purpose: 'Unauthorized revision',
+    });
+    assert.equal(response.status, 409, 'only the requesting Accountant may resubmit a revision');
+    response = await request('PUT', `/api/finances/petty-cash/${revisionPettyCashId}`, accountantCookie, {
+      amount: 850,
+      purpose: 'Revised classroom supply request',
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.pettyCash.amount, '850');
+    assert.equal(response.body.pettyCash.approvalChain.at(-1).action, 'RESUBMITTED');
 
     const staffUser = await createTenantAdmin(
       tenantA.id,
@@ -855,6 +903,12 @@ async function main(): Promise<void> {
     assert.equal(response.status, 403, 'branch admins must not read another branch student timetable');
     response = await request('GET', `/api/courses/timetable/teacher/${teacherA2.id}`, branchAdminCookie);
     assert.equal(response.status, 403, 'branch admins must not read another branch teacher timetable');
+    response = await request('GET', `/api/branch-admin/dashboard?branchId=${branchA.id}`, branchAdminCookie);
+    assert.equal(response.status, 200, 'assigned Branch Admin must receive a live branch dashboard');
+    assert.equal(response.body.selectedBranch.id, branchA.id);
+    assert(response.body.pettyCash.every((item: any) => item.status === 'PENDING'), 'dashboard approval queue must contain only pending requests');
+    response = await request('GET', `/api/branch-admin/dashboard?branchId=${branchA2.id}`, branchAdminCookie);
+    assert.equal(response.status, 403, 'Branch Admin dashboard must reject an unassigned branch');
     response = await request('GET', `/api/finances/students/${studentA2.id}/invoices`, branchAdminCookie);
     assert.equal(response.status, 404, 'another branch student invoice list must be hidden');
     response = await request('GET', `/api/finances/nepalpay-qr/${invoiceA2.id}`, branchAdminCookie);

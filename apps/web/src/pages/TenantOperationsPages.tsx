@@ -5,12 +5,6 @@ import { Card } from '../components/ui/Card';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { useToast } from '../components/ui/Toast';
 import {
-  tenantAcademicEventsMock,
-  tenantExpensesMock,
-  tenantForecastMock,
-  tenantProfitLossMock,
-  tenantSuggestionsMock,
-  withMockWhenEmpty,
   type FinancialForecast,
   type FinancialSignal,
   type FinancialSuggestions,
@@ -78,23 +72,14 @@ export function TenantPettyCashPage() {
 export function TenantReportsPage() {
   const { showToast } = useToast();
   const loader = useCallback(async () => {
-    const [plResult, expensesResult, forecastResult, suggestionsResult] = await Promise.allSettled([
+    const [pl, expenses, forecast, suggestions] = await Promise.all([
       financeApi.pl(), financeApi.expenses(), financeApi.forecast(), financeApi.suggestions(),
     ]);
-    const liveExpenses = expensesResult.status === 'fulfilled' ? expensesResult.value.expenses : [];
-    const pl = plResult.status === 'fulfilled' && plResult.value.revenue > 0 ? plResult.value : tenantProfitLossMock;
-    const forecast = forecastResult.status === 'fulfilled'
-      ? forecastResult.value as unknown as FinancialForecast
-      : tenantForecastMock;
-    const suggestions = suggestionsResult.status === 'fulfilled'
-      ? suggestionsResult.value as unknown as FinancialSuggestions
-      : tenantSuggestionsMock;
     return {
       pl,
-      expenses: withMockWhenEmpty(liveExpenses, tenantExpensesMock),
-      forecast: forecast.metrics ? forecast : tenantForecastMock,
-      suggestions: Array.isArray(suggestions.alerts) ? suggestions : tenantSuggestionsMock,
-      isDemo: pl === tenantProfitLossMock || liveExpenses.length === 0 || forecast === tenantForecastMock || suggestions === tenantSuggestionsMock,
+      expenses: expenses.expenses,
+      forecast: forecast as unknown as FinancialForecast,
+      suggestions: suggestions as unknown as FinancialSuggestions,
     };
   }, []);
   const { data, loading, error, reload } = useRemote(loader);
@@ -118,7 +103,6 @@ export function TenantReportsPage() {
       <Header title="P&L and Ledger" description="Consolidated institution reporting from recorded financial transactions."/>
       <Button onClick={() => void download()}><span className="material-symbols-outlined" aria-hidden="true" style={{ fontSize: 18 }}>download</span>Download ledger</Button>
     </div>
-    {data.isDemo ? <div role="status" style={{ padding: '10px 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-muted)', fontSize: 13 }}>Demonstration figures are filling gaps until live financial records are available.</div> : null}
     <div style={grid}>{cards.map(([name, value, color]) => <Card key={name} hoverable={false}><p style={{ color: 'var(--text-muted)', fontSize: 13, fontWeight: 700 }}>{name}</p><strong style={{ display: 'block', marginTop: 8, fontSize: 25, color, fontVariantNumeric: 'tabular-nums' }}>NPR {value.toLocaleString()}</strong><p style={{ marginTop: 6, color: 'var(--text-muted)', fontSize: 12 }}>{data.pl.month}</p></Card>)}</div>
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.15fr) minmax(300px, 0.85fr)', gap: 18 }}>
       <Card hoverable={false}>
@@ -175,9 +159,9 @@ export function TenantCalendarPage() {
   const { showToast } = useToast(); const loader = useCallback(() => academicEventsApi.list(), []); const { data, loading, error, reload } = useRemote(loader);
   const [busy, setBusy] = useState(false); const [form, setForm] = useState({ title: '', description: '', eventType: 'EVENT' as EventType, startDate: '', endDate: '' });
   const submit = async (event: FormEvent) => { event.preventDefault(); setBusy(true); try { await academicEventsApi.createTenantWide({ ...form, startDate: new Date(form.startDate).toISOString(), endDate: new Date(form.endDate).toISOString() }); showToast('Institution-wide event published.', 'success'); setForm({ title: '', description: '', eventType: 'EVENT', startDate: '', endDate: '' }); await reload(); } catch (next) { showToast(errorMessage(next), 'error'); } finally { setBusy(false); } };
-  const events = data?.events.length ? data.events : tenantAcademicEventsMock;
+  const events = data?.events ?? [];
   return <div style={{ display: 'grid', gap: 18 }}><Header title="Academic Calendar" description="Plan institution-wide events and review the complete academic month."/>
-    {error ? <div role="status" style={{ padding: '10px 14px', borderRadius: 10, border: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: 13 }}>Live events could not be loaded. Demonstration events are shown on the calendar. <button type="button" onClick={() => void reload()} style={{ marginLeft: 8, border: 0, background: 'transparent', color: 'var(--color-primary)', font: 'inherit', fontWeight: 700, cursor: 'pointer' }}>Try again</button></div> : null}
+    {error ? <RemoteState kind="error" message={errorMessage(error)} onRetry={() => void reload()}/> : null}
     <TenantAcademicCalendar events={events} loading={loading} />
     <div className="tenant-calendar-page__lower"><Card hoverable={false}><h3>New institution event</h3><form onSubmit={(e) => void submit(e)} style={{ display: 'grid', gap: 14, marginTop: 14 }}>
       <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700 }}>Event title<input style={input} placeholder="Parent orientation" value={form.title} onChange={(e) => setForm((old) => ({ ...old, title: e.target.value }))} required/></label>

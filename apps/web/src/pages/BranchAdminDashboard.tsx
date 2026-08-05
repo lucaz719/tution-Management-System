@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -6,89 +6,74 @@ import { KPICard } from '../components/ui/KPICard';
 import { ProgressRing } from '../components/ui/ProgressRing';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { TimetableList, type TimetableListItem } from '../components/ui/TimetableList';
-import { api } from '../services/api';
+import { useToast } from '../components/ui/Toast';
+import { api, type BranchAdminDashboardData } from '../services/api';
 
-interface PettyCashRequest {
-  id: string;
-  amount: number;
-  purpose: string;
-  status: 'PENDING' | 'APPROVED_LEVEL1';
-  branch?: string;
+const money = (value: number) => `NPR ${Number(value || 0).toLocaleString('en-NP')}`;
+
+function sessionStatus(status: string): Pick<TimetableListItem, 'status' | 'statusVariant'> {
+  if (status === 'PRESENT_CONFIRMED') return { status: 'Completed', statusVariant: 'success' };
+  if (status === 'PARTIAL_PRESENCE') return { status: 'Partial', statusVariant: 'gold' };
+  if (status === 'ABSENT') return { status: 'Absent', statusVariant: 'error' };
+  if (status === 'UNSCHEDULED_PRESENCE') return { status: 'Unscheduled', statusVariant: 'warning' };
+  return { status: 'Update pending', statusVariant: 'info' };
 }
 
-interface ResourceLogItem {
-  id: string;
-  label: string;
-  detail: string;
-  state: 'Logged' | 'Pending' | 'Overdue';
+function resourcePresentation(item: BranchAdminDashboardData['resources'][number]) {
+  if (item.status === 'COMPLETED') return { label: 'Logged', variant: 'success' as const, color: 'var(--color-success)' };
+  if (item.actionRequired) return { label: 'Action required', variant: 'error' as const, color: 'var(--color-error)' };
+  return { label: item.status === 'IN_PROGRESS' ? 'In progress' : 'Pending', variant: 'warning' as const, color: 'var(--color-warning)' };
 }
 
-const todaysTimetable: TimetableListItem[] = [
-  { id: 'tt-1', time: '07:30', title: 'Grade 8 Mathematics', room: 'Room 204', detail: 'Rina Karki', status: 'Scheduled', statusVariant: 'info' },
-  { id: 'tt-2', time: '09:00', title: 'Science Lab Batch A', room: 'Lab 2', detail: 'Sanjay Rai', status: 'In Progress', statusVariant: 'gold' },
-  { id: 'tt-3', time: '11:15', title: 'English Foundation', room: 'Room 112', detail: 'Sarita Limbu', status: 'Completed', statusVariant: 'success' },
-  { id: 'tt-4', time: '13:30', title: 'Bridge Course Session', room: 'Room 301', detail: 'Aakash Bista', status: 'Cancelled', statusVariant: 'error' },
-];
-
-const resourceLogItems: ResourceLogItem[] = [
-  { id: 'log-1', label: 'Classroom Sanitization', detail: 'All classrooms before first bell', state: 'Logged' },
-  { id: 'log-2', label: 'Generator Fuel Check', detail: 'Utility room checklist', state: 'Pending' },
-  { id: 'log-3', label: 'Science Lab Closure', detail: 'End-of-day signoff', state: 'Overdue' },
-  { id: 'log-4', label: 'Library Asset Register', detail: 'New shipment intake', state: 'Logged' },
-];
-
-function getPettyCashVariant(status: PettyCashRequest['status']) {
-  return status === 'PENDING' ? 'warning' : 'success';
-}
-
-function getIndicatorColor(state: ResourceLogItem['state']) {
-  if (state === 'Logged') {
-    return 'var(--color-success)';
-  }
-  if (state === 'Pending') {
-    return 'var(--color-warning)';
-  }
-  return 'var(--color-error)';
+function Empty({ children }: { children: string }) {
+  return <p style={{ color: 'rgba(44, 62, 80, 0.64)', fontSize: '14px', textAlign: 'center', padding: '24px 0' }}>{children}</p>;
 }
 
 export function BranchAdminDashboard() {
-  const [pettyCashRequests, setPettyCashRequests] = useState<PettyCashRequest[]>([]);
+  const { showToast } = useToast();
+  const [data, setData] = useState<BranchAdminDashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [approvingId, setApprovingId] = useState('');
+  const navigate = useNavigate();
 
-  const loadBranchData = async () => {
+  const loadBranchData = useCallback(async (branchId?: string) => {
     setIsLoading(true);
-
+    setError('');
     try {
-      const pettyCash = await api.finances.getPettyCash() as PettyCashRequest[];
-      setPettyCashRequests(pettyCash);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      console.warn('API error, using local mocks:', message);
-      setPettyCashRequests([
-        { id: 'pc-101', amount: 4500, purpose: 'Classroom Whiteboards', status: 'PENDING', branch: 'Baneshwor Branch' },
-        { id: 'pc-102', amount: 1500, purpose: 'Science Lab Beakers', status: 'PENDING', branch: 'Baneshwor Branch' },
-      ]);
+      setData(await api.branchAdmin.getDashboard(branchId));
+    } catch (loadError) {
+      setData(null);
+      setError(loadError instanceof Error ? loadError.message : 'Unable to load this branch dashboard.');
     } finally {
-      window.setTimeout(() => setIsLoading(false), 700);
+      setIsLoading(false);
     }
-  };
-
-  useEffect(() => {
-    void loadBranchData();
   }, []);
 
+  useEffect(() => { void loadBranchData(); }, [loadBranchData]);
+
+  const timetable = useMemo<TimetableListItem[]>(() => (data?.timetable ?? []).map((item) => ({
+    id: item.id,
+    time: item.time ? new Intl.DateTimeFormat('en-NP', { hour: '2-digit', minute: '2-digit' }).format(new Date(item.time)) : 'Not checked in',
+    title: item.title,
+    room: item.room,
+    detail: item.detail,
+    ...sessionStatus(item.status),
+  })), [data]);
+
   const handleL1Approve = async (id: string) => {
+    if (!data) return;
+    setApprovingId(id);
     try {
-      await api.finances.approvePettyCash(id, 'APPROVE_L1');
-      await loadBranchData();
-    } catch {
-      setPettyCashRequests((previous) =>
-        previous.map((request) => (request.id === id ? { ...request, status: 'APPROVED_LEVEL1' } : request))
-      );
+      const result = await api.finances.approvePettyCash(id, 'APPROVE_L1');
+      showToast(result.message, 'success');
+      await loadBranchData(data.selectedBranch.id);
+    } catch (approvalError) {
+      showToast(approvalError instanceof Error ? approvalError.message : 'Approval failed.', 'error');
+    } finally {
+      setApprovingId('');
     }
   };
-
-  const navigate = useNavigate();
 
   const QuickAccessItem = ({ icon, label, path }: { icon: string, label: string, path: string }) => (
     <div 
@@ -100,127 +85,123 @@ export function BranchAdminDashboard() {
     </div>
   );
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      <Card hoverable={false} style={{ padding: '18px 20px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-          <div>
-            <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '20px', fontWeight: 600, color: 'var(--color-text)' }}>Baneshwor Branch Control Panel</h3>
-            <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.7)', fontSize: '13px' }}>Attendance, timetable, fee, and operations status for today.</p>
-          </div>
-          <Button variant="outline" onClick={() => void loadBranchData()} disabled={isLoading} style={{ height: '40px' }}>
+  if (error) {
+    return <Card hoverable={false}><Empty>{error}</Empty><div style={{ display: 'flex', justifyContent: 'center' }}><Button variant="outline" onClick={() => void loadBranchData()}>Try again</Button></div></Card>;
+  }
+
+  return <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+    <Card hoverable={false} style={{ padding: '18px 20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+        <div>
+          <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '20px', fontWeight: 600, color: 'var(--color-text)' }}>{data?.selectedBranch.name ?? 'Branch'} Control Panel</h3>
+          <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.7)', fontSize: '13px' }}>Live attendance, timetable, fee, and operations status for today.</p>
+        </div>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'end' }}>
+          {data && data.branches.length > 1 && (
+            <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>Branch
+              <select value={data.selectedBranch.id} onChange={(event) => void loadBranchData(event.target.value)} disabled={isLoading}>
+                {data.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+              </select>
+            </label>
+          )}
+          <Button variant="outline" onClick={() => void loadBranchData(data?.selectedBranch.id)} disabled={isLoading} style={{ height: '40px' }}>
             <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>refresh</span>
             Sync Branch
           </Button>
         </div>
-      </Card>
-
-      <div style={{ marginBottom: '8px' }}>
-        <h3 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '16px' }}>Quick Access</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '16px' }}>
-          <QuickAccessItem icon="groups" label="Students" path="/branch/students" />
-          <QuickAccessItem icon="badge" label="Teachers" path="/branch/teachers" />
-          <QuickAccessItem icon="event_available" label="Attendance" path="/branch/attendance" />
-          <QuickAccessItem icon="assignment" label="Homework" path="/branch/homework" />
-          <QuickAccessItem icon="analytics" label="Results" path="/branch/results" />
-          <QuickAccessItem icon="payments" label="Fee & Billing" path="/branch/fees" />
-        </div>
       </div>
+    </Card>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '18px' }}>
-        <Card hoverable={false} style={{ padding: '22px', minHeight: '166px' }}>
-          <p style={{ color: 'rgba(44, 62, 80, 0.72)', fontSize: '13px', fontWeight: 600, marginBottom: '14px' }}>Teacher Attendance Today</p>
-          <ProgressRing percent={92} color="var(--color-accent)" label="Present" loading={isLoading} />
-        </Card>
-        <Card hoverable={false} style={{ padding: '22px', minHeight: '166px' }}>
-          <p style={{ color: 'rgba(44, 62, 80, 0.72)', fontSize: '13px', fontWeight: 600, marginBottom: '14px' }}>Student Attendance Today</p>
-          <ProgressRing percent={87} color="var(--color-primary)" label="Present" loading={isLoading} />
-        </Card>
-        <KPICard title="Blocked Students" value="18" delta="3 overrides today" icon="block" loading={isLoading} accentColor="var(--color-warning)" />
-        <KPICard title="Pending Fee Invoices" value="12" delta="₹28,400 outstanding" icon="receipt_long" loading={isLoading} />
+    <div style={{ marginBottom: '8px' }}>
+      <h3 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '16px' }}>Quick Access</h3>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '16px' }}>
+        <QuickAccessItem icon="groups" label="Students" path="/branch/students" />
+        <QuickAccessItem icon="badge" label="Teachers" path="/branch/teachers" />
+        <QuickAccessItem icon="event_available" label="Attendance" path="/branch/attendance" />
+        <QuickAccessItem icon="assignment" label="Homework" path="/branch/homework" />
+        <QuickAccessItem icon="analytics" label="Results" path="/branch/results" />
+        <QuickAccessItem icon="payments" label="Fee & Billing" path="/branch/fees" />
       </div>
+    </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '18px' }}>
-        <Card hoverable={false}>
-          <div style={{ marginBottom: '18px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Today's Timetable</h3>
-              <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Time-ordered classroom activity across the branch.</p>
-            </div>
-            <Button variant="ghost" onClick={() => navigate('/branch/timetables')} style={{ padding: '8px', minHeight: 'unset' }}>
-              <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>open_in_new</span>
-            </Button>
-          </div>
-          <TimetableList items={todaysTimetable} />
-        </Card>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '18px' }}>
+      <Card hoverable={false} style={{ padding: '22px', minHeight: '166px' }}><p style={{ color: 'rgba(44, 62, 80, 0.72)', fontSize: '13px', fontWeight: 600, marginBottom: '14px' }}>Teacher Attendance Today</p><ProgressRing percent={data?.metrics.teacherAttendance.rate ?? 0} color="var(--color-accent)" label={data?.metrics.teacherAttendance.rate === null ? 'No staff' : `${data?.metrics.teacherAttendance.present ?? 0}/${data?.metrics.teacherAttendance.total ?? 0} present`} loading={isLoading} /></Card>
+      <Card hoverable={false} style={{ padding: '22px', minHeight: '166px' }}><p style={{ color: 'rgba(44, 62, 80, 0.72)', fontSize: '13px', fontWeight: 600, marginBottom: '14px' }}>Student Attendance Today</p><ProgressRing percent={data?.metrics.studentAttendance.rate ?? 0} color="var(--color-primary)" label={data?.metrics.studentAttendance.rate === null ? 'No marks' : `${data?.metrics.studentAttendance.present ?? 0}/${data?.metrics.studentAttendance.total ?? 0} present`} loading={isLoading} /></Card>
+      <KPICard title="Blocked Students" value={String(data?.metrics.blockedStudents ?? 0)} delta="Active blocked enrollments" icon="block" loading={isLoading} accentColor="var(--color-warning)" />
+      <KPICard title="Pending Fee Invoices" value={String(data?.metrics.pendingInvoices ?? 0)} delta={`${money(data?.metrics.outstandingAmount ?? 0)} outstanding`} icon="receipt_long" loading={isLoading} />
+    </div>
 
-        <Card hoverable={false}>
-          <div style={{ marginBottom: '18px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Resource Log Status</h3>
-              <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Daily operational checklist with log health indicators.</p>
-            </div>
-            <Button variant="ghost" onClick={() => navigate('/branch/resource-logs')} style={{ padding: '8px', minHeight: 'unset' }}>
-              <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>open_in_new</span>
-            </Button>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {resourceLogItems.map((item) => (
-              <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.1)', background: '#FFFFFF' }}>
-                <div>
-                  <div style={{ color: 'var(--color-text)', fontSize: '14px', fontWeight: 700 }}>{item.label}</div>
-                  <div style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.62)', fontSize: '12px' }}>{item.detail}</div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div style={{ display: 'flex', gap: '6px' }}>
-                    {Array.from({ length: 3 }, (_, index) => (
-                      <span key={`${item.id}-${index}`} style={{ width: '8px', height: '8px', borderRadius: '50%', background: getIndicatorColor(item.state), opacity: 1 - index * 0.2 }} />
-                    ))}
-                  </div>
-                  <StatusBadge variant={item.state === 'Logged' ? 'success' : item.state === 'Pending' ? 'warning' : 'error'}>{item.state}</StatusBadge>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
-
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '18px' }}>
       <Card hoverable={false}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '12px', flexWrap: 'wrap' }}>
+        <div style={{ marginBottom: '18px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
-            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Petty Cash Level 1 Approvals Queue</h3>
-            <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Existing finance workflow preserved.</p>
+            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Today's Sessions</h3>
+            <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Recorded classroom sessions for this branch.</p>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <StatusBadge variant="info">{pettyCashRequests.length} requests</StatusBadge>
-            <Button variant="ghost" onClick={() => navigate('/branch/petty-cash')} style={{ padding: '8px', minHeight: 'unset' }}>
-              <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>open_in_new</span>
-            </Button>
+          <Button variant="ghost" onClick={() => navigate('/branch/timetable')} style={{ padding: '8px', minHeight: 'unset' }}>
+            <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>open_in_new</span>
+          </Button>
+        </div>
+        {isLoading ? <Empty>Loading sessions…</Empty> : timetable.length ? <TimetableList items={timetable} /> : <Empty>No sessions are recorded for today.</Empty>}
+      </Card>
+      
+      <Card hoverable={false}>
+        <div style={{ marginBottom: '18px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Resource Log Status</h3>
+            <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Latest persisted classroom resource checks.</p>
           </div>
+          <Button variant="ghost" onClick={() => navigate('/branch/resource-logs')} style={{ padding: '8px', minHeight: 'unset' }}>
+            <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>open_in_new</span>
+          </Button>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {pettyCashRequests.length === 0 ? (
-            <p style={{ color: 'rgba(44, 62, 80, 0.64)', fontSize: '14px', textAlign: 'center', padding: '24px 0' }}>No active petty cash requests.</p>
-          ) : (
-            pettyCashRequests.map((request) => (
-              <div key={request.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.1)', background: '#FFFFFF', flexWrap: 'wrap' }}>
-                <div>
-                  <p style={{ fontWeight: 700, fontSize: '15px', color: 'var(--color-text)' }}>{request.purpose}</p>
-                  <p style={{ marginTop: '4px', fontSize: '12px', color: 'rgba(44, 62, 80, 0.68)' }}>ID: {request.id} · Amount: NPR {request.amount.toLocaleString()} · Branch: {request.branch ?? 'Baneshwor'}</p>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <StatusBadge variant={getPettyCashVariant(request.status)}>{request.status}</StatusBadge>
-                  {request.status === 'PENDING' ? (
-                    <Button variant="outline" onClick={() => void handleL1Approve(request.id)} style={{ minHeight: '36px', height: '36px', padding: '8px 16px', borderColor: 'rgba(21, 96, 189, 0.18)' }}>
-                      Approve L1
-                    </Button>
-                  ) : null}
-                </div>
+          {isLoading ? <Empty>Loading resource logs…</Empty> : !data?.resources.length ? <Empty>No resource logs have been submitted.</Empty> : data.resources.map((item) => { 
+            const presentation = resourcePresentation(item); 
+            return <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.1)', background: '#FFFFFF' }}>
+              <div>
+                <div style={{ color: 'var(--color-text)', fontSize: '14px', fontWeight: 700 }}>{item.label}</div>
+                <div style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.62)', fontSize: '12px' }}>{item.detail}</div>
               </div>
-            ))
-          )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: presentation.color }} />
+                <StatusBadge variant={presentation.variant}>{presentation.label}</StatusBadge>
+              </div>
+            </div>; 
+          })}
         </div>
       </Card>
     </div>
-  );
+
+    <Card hoverable={false}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '12px', flexWrap: 'wrap' }}>
+        <div>
+          <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Petty Cash Level 1 Approval Queue</h3>
+          <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.68)', fontSize: '13px' }}>Only pending requests for the selected branch are shown.</p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <StatusBadge variant="info">{data?.pettyCash.length ?? 0} requests</StatusBadge>
+          <Button variant="ghost" onClick={() => navigate('/branch/petty-cash')} style={{ padding: '8px', minHeight: 'unset' }}>
+            <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>open_in_new</span>
+          </Button>
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        {isLoading ? <Empty>Loading approvals…</Empty> : !data?.pettyCash.length ? <Empty>No pending petty cash requests.</Empty> : data.pettyCash.map((request) => 
+          <div key={request.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.1)', background: '#FFFFFF', flexWrap: 'wrap' }}>
+            <div>
+              <p style={{ fontWeight: 700, fontSize: '15px', color: 'var(--color-text)' }}>{request.purpose}</p>
+              <p style={{ marginTop: '4px', fontSize: '12px', color: 'rgba(44, 62, 80, 0.68)' }}>ID: {request.id.slice(0, 8)} · Amount: {money(request.amount)}</p>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <StatusBadge variant="warning">Pending</StatusBadge>
+              <Button variant="outline" disabled={approvingId === request.id} onClick={() => void handleL1Approve(request.id)} style={{ minHeight: '36px', height: '36px', padding: '8px 16px', borderColor: 'rgba(21, 96, 189, 0.18)' }}>
+                {approvingId === request.id ? 'Approving…' : 'Approve L1'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Card>
+  </div>;
 }
