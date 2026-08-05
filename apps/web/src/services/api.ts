@@ -163,6 +163,8 @@ export const api = {
       request<any>(`/teacher/class/${classId}/attendance`, { method: 'POST', body: JSON.stringify({ date, records }) }),
     createSyllabus: async (payload: { classId: string; subject: string; chapters: string[] }) =>
       request<any>('/teacher/syllabus', { method: 'POST', body: JSON.stringify(payload) }),
+    updateSyllabus: async (syllabusId: string, payload: { subject: string; chapters: Array<{ id?: string; title: string }> }) =>
+      request<any>(`/teacher/syllabus/${syllabusId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
     updateSyllabusLog: async (syllabusId: string, payload: { chapterId: string; status: 'IN_PROGRESS' | 'COMPLETED' | 'LEFT'; notes?: string; logDate?: string }) =>
       request<any>(`/teacher/syllabus/${syllabusId}/log`, { method: 'POST', body: JSON.stringify(payload) }),
     createHomework: async (payload: { classId: string; subject: string; title: string; description?: string; contentUrl?: string; deadline: string }) =>
