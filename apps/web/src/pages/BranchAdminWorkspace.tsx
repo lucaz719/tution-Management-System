@@ -1166,86 +1166,199 @@ function TimetableView() {
   const [activeTab, setActiveTab] = useState<'view' | 'add'>('view');
   const action = useAction();
   
-  // Mock Data
-  const schedule = [
-    { id: '1', time: '08:00 AM - 09:30 AM', class: 'Grade 10', subject: 'Mathematics', teacher: 'Sanjay Rai', room: 'Room 302' },
-    { id: '2', time: '10:00 AM - 11:30 AM', class: 'Grade 12', subject: 'Physics', teacher: 'Rina Karki', room: 'Lab 1' },
-    { id: '3', time: '12:00 PM - 01:30 PM', class: 'IELTS Prep', subject: 'English', teacher: 'Bikash Thapa', room: 'Room 105' }
-  ];
+  const [schedule, setSchedule] = useState([
+    { id: '1', date: '2026-08-06', day: 'Thursday', time: '08:00 AM - 09:30 AM', class: 'Grade 10', subject: 'Mathematics', teacher: 'Sanjay Rai', room: 'Room 302' },
+    { id: '2', date: '2026-08-07', day: 'Friday', time: '10:00 AM - 11:30 AM', class: 'Grade 12', subject: 'Physics', teacher: 'Rina Karki', room: 'Lab 1' },
+    { id: '3', date: '2026-08-08', day: 'Saturday', time: '12:00 PM - 01:30 PM', class: 'IELTS Prep', subject: 'English', teacher: 'Bikash Thapa', room: 'Room 105' }
+  ]);
+
+  const [editingId, setEditingId] = useState('');
+  const [formData, setFormData] = useState({
+    date: '', day: 'Monday', startTime: '', endTime: '', class: '', subject: '', teacher: '', room: ''
+  });
+
+  const handleDelete = (id: string) => {
+    if (window.confirm('Are you sure you want to delete this session?')) {
+      setSchedule(prev => prev.filter(s => s.id !== id));
+    }
+  };
+
+  const handleEdit = (session: any) => {
+    const [start, end] = session.time.split(' - ');
+    // Very basic time string mapping back to input[type=time] format, assuming simplified format or we just use text inputs for simplicity in mock
+    // For a robust implementation, parsing '08:00 AM' to '08:00' is needed. 
+    // Here we'll just store the raw values if possible, or expect the user to re-enter. Let's do a simple parse:
+    const parseTime = (t: string) => {
+      if (!t) return '';
+      const [time, modifier] = t.split(' ');
+      if (!time || !modifier) return t;
+      let [hours, minutes] = time.split(':');
+      if (hours === '12') hours = '00';
+      if (modifier === 'PM') hours = String(parseInt(hours, 10) + 12);
+      return `${hours.padStart(2, '0')}:${minutes}`;
+    };
+
+    setFormData({
+      date: session.date || '',
+      day: session.day || 'Monday',
+      startTime: parseTime(start) || '',
+      endTime: parseTime(end) || '',
+      class: session.class,
+      subject: session.subject,
+      teacher: session.teacher,
+      room: session.room
+    });
+    setEditingId(session.id);
+    setActiveTab('add');
+  };
+
+  const handleCreate = () => {
+    setEditingId('');
+    setFormData({ date: '', day: 'Monday', startTime: '', endTime: '', class: '', subject: '', teacher: '', room: '' });
+    setActiveTab('add');
+  };
+
+  const formatTime = (time24: string) => {
+    if (!time24) return '';
+    const [h, m] = time24.split(':');
+    const hours = parseInt(h, 10);
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const hours12 = hours % 12 || 12;
+    return `${hours12.toString().padStart(2, '0')}:${m} ${ampm}`;
+  };
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     void action.run(async () => {
-      await new Promise(r => setTimeout(r, 800));
+      await new Promise(r => setTimeout(r, 600));
+      
+      const newSession = {
+        id: editingId || `new-${Date.now()}`,
+        date: formData.date,
+        day: formData.day,
+        time: `${formatTime(formData.startTime)} - ${formatTime(formData.endTime)}`,
+        class: formData.class,
+        subject: formData.subject,
+        teacher: formData.teacher,
+        room: formData.room
+      };
+
+      if (editingId) {
+        setSchedule(prev => prev.map(s => s.id === editingId ? newSession : s));
+      } else {
+        setSchedule(prev => [...prev, newSession]);
+      }
+      
       setActiveTab('view');
-    }, 'Timetable session added successfully.');
+    }, `Timetable session ${editingId ? 'updated' : 'added'} successfully.`);
   };
 
   return (
     <Page title="Branch Timetable Management" description="Full CRUD operations for all classes, subjects, and teachers of the branch.">
       <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
         <Button variant={activeTab === 'view' ? 'primary' : 'outline'} onClick={() => setActiveTab('view')}>View Schedule</Button>
-        <Button variant={activeTab === 'add' ? 'primary' : 'outline'} onClick={() => setActiveTab('add')}>Add Session</Button>
+        <Button variant={activeTab === 'add' ? 'primary' : 'outline'} onClick={handleCreate}>{editingId ? 'Edit Session' : 'Add Session'}</Button>
       </div>
 
       <Card hoverable={false}>
         {activeTab === 'view' ? (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ fontSize: '18px' }}>Today's Classes</h2>
+              <h2 style={{ fontSize: '18px' }}>Scheduled Classes</h2>
               <StatusBadge variant="info">{schedule.length} sessions</StatusBadge>
             </div>
-            <table style={{ width: '100%', marginTop: '16px', borderCollapse: 'collapse', fontSize: '14px' }}>
-              <thead>
-                <tr style={{ borderBottom: '2px solid var(--border)', textAlign: 'left' }}>
-                  <th style={{ padding: '8px' }}>Time</th>
-                  <th style={{ padding: '8px' }}>Class & Subject</th>
-                  <th style={{ padding: '8px' }}>Teacher</th>
-                  <th style={{ padding: '8px' }}>Room</th>
-                  <th style={{ padding: '8px' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {schedule.map(session => (
-                  <tr key={session.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <td style={{ padding: '12px 8px', fontWeight: 600 }}>{session.time}</td>
-                    <td style={{ padding: '12px 8px' }}>
-                      <div>{session.subject}</div>
-                      <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{session.class}</div>
-                    </td>
-                    <td style={{ padding: '12px 8px' }}>{session.teacher}</td>
-                    <td style={{ padding: '12px 8px' }}>{session.room}</td>
-                    <td style={{ padding: '12px 8px', display: 'flex', gap: '8px' }}>
-                      <Button variant="outline" style={{ padding: '4px 8px', minHeight: 'unset', height: '28px', fontSize: '12px' }}>Edit</Button>
-                      <Button variant="outline" style={{ padding: '4px 8px', minHeight: 'unset', height: '28px', fontSize: '12px', color: 'var(--color-error)', borderColor: 'var(--color-error)' }}>Delete</Button>
-                    </td>
+            <div style={{ overflowX: 'auto', marginTop: '16px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '800px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '2px solid var(--border)', textAlign: 'left' }}>
+                    <th style={{ padding: '8px' }}>Date & Day</th>
+                    <th style={{ padding: '8px' }}>Time</th>
+                    <th style={{ padding: '8px' }}>Class & Subject</th>
+                    <th style={{ padding: '8px' }}>Teacher</th>
+                    <th style={{ padding: '8px' }}>Room</th>
+                    <th style={{ padding: '8px' }}>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {schedule.map(session => (
+                    <tr key={session.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={{ padding: '12px 8px' }}>
+                        <div style={{ fontWeight: 600 }}>{session.date}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{session.day}</div>
+                      </td>
+                      <td style={{ padding: '12px 8px', fontWeight: 600 }}>{session.time}</td>
+                      <td style={{ padding: '12px 8px' }}>
+                        <div>{session.subject}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{session.class}</div>
+                      </td>
+                      <td style={{ padding: '12px 8px' }}>{session.teacher}</td>
+                      <td style={{ padding: '12px 8px' }}>{session.room}</td>
+                      <td style={{ padding: '12px 8px', display: 'flex', gap: '8px' }}>
+                        <Button variant="outline" onClick={() => handleEdit(session)} style={{ padding: '4px 8px', minHeight: 'unset', height: '28px', fontSize: '12px' }}>Edit</Button>
+                        <Button variant="outline" onClick={() => handleDelete(session.id)} style={{ padding: '4px 8px', minHeight: 'unset', height: '28px', fontSize: '12px', color: 'var(--color-error)', borderColor: 'var(--color-error)' }}>Delete</Button>
+                      </td>
+                    </tr>
+                  ))}
+                  {schedule.length === 0 && (
+                    <tr>
+                      <td colSpan={6} style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)' }}>No sessions scheduled.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : (
           <div>
-            <h2 style={{ fontSize: '18px', marginBottom: '16px' }}>Add New Session</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h2 style={{ fontSize: '18px' }}>{editingId ? 'Edit Session' : 'Add New Session'}</h2>
+              {editingId && <Button variant="outline" onClick={() => setActiveTab('view')}>Cancel</Button>}
+            </div>
             <form onSubmit={submit} style={form} aria-busy={action.busy}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <label style={label}>Class / Group<input required style={field} placeholder="e.g. Grade 10" /></label>
-                <label style={label}>Subject<input required style={field} placeholder="e.g. Mathematics" /></label>
+                <label style={label}>Date
+                  <input type="date" required style={field} value={formData.date} onChange={e => {
+                    const d = e.target.value;
+                    let dayName = formData.day;
+                    if (d) {
+                      const dateObj = new Date(d);
+                      if (!isNaN(dateObj.getTime())) {
+                         dayName = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
+                      }
+                    }
+                    setFormData({ ...formData, date: d, day: dayName });
+                  }} />
+                </label>
+                <label style={label}>Day
+                  <select required style={field} value={formData.day} onChange={e => setFormData({ ...formData, day: e.target.value })}>
+                    <option value="Sunday">Sunday</option>
+                    <option value="Monday">Monday</option>
+                    <option value="Tuesday">Tuesday</option>
+                    <option value="Wednesday">Wednesday</option>
+                    <option value="Thursday">Thursday</option>
+                    <option value="Friday">Friday</option>
+                    <option value="Saturday">Saturday</option>
+                  </select>
+                </label>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <label style={label}>Class / Group<input required style={field} value={formData.class} onChange={e => setFormData({ ...formData, class: e.target.value })} placeholder="e.g. Grade 10" /></label>
+                <label style={label}>Subject<input required style={field} value={formData.subject} onChange={e => setFormData({ ...formData, subject: e.target.value })} placeholder="e.g. Mathematics" /></label>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                 <label style={label}>Assign Teacher
-                  <select required style={field}>
+                  <select required style={field} value={formData.teacher} onChange={e => setFormData({ ...formData, teacher: e.target.value })}>
                     <option value="">Select a teacher...</option>
-                    <option>Sanjay Rai</option>
-                    <option>Rina Karki</option>
-                    <option>Bikash Thapa</option>
+                    <option value="Sanjay Rai">Sanjay Rai</option>
+                    <option value="Rina Karki">Rina Karki</option>
+                    <option value="Bikash Thapa">Bikash Thapa</option>
                   </select>
                 </label>
-                <label style={label}>Room<input required style={field} placeholder="e.g. Room 302" /></label>
+                <label style={label}>Room<input required style={field} value={formData.room} onChange={e => setFormData({ ...formData, room: e.target.value })} placeholder="e.g. Room 302" /></label>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <label style={label}>Start Time<input type="time" required style={field} /></label>
-                <label style={label}>End Time<input type="time" required style={field} /></label>
+                <label style={label}>Start Time<input type="time" required style={field} value={formData.startTime} onChange={e => setFormData({ ...formData, startTime: e.target.value })} /></label>
+                <label style={label}>End Time<input type="time" required style={field} value={formData.endTime} onChange={e => setFormData({ ...formData, endTime: e.target.value })} /></label>
               </div>
               <Feedback message={action.message} error={action.error} />
               <Button type="submit" disabled={action.busy} style={{ width: 'fit-content' }}>
