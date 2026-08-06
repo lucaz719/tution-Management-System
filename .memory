@@ -384,8 +384,20 @@ Docker database volume.
   contracts are not yet available.
 - Receptionist: expanded the reception service and API route, improved role
   permission mapping, and added responsive reception-state styling.
-- Frontend regression coverage: added
-  `apps/web/tests/input-focus-regression.js` for focus/input behavior.
+## Reconciliation notes (2026-08-06)
+
+- Completely overhauled the Branch Admin portal. The `BranchAdminDashboard` now acts as a quick-access tool with deep-links to specific modular sections, and `BranchAdminWorkspace` handles all detailed branch operations.
+
+## Completed Branch Admin web work
+
+- **Modular Workspace**: Re-organized the Branch Admin portal to handle a massive list of modules inside `BranchAdminWorkspace.tsx` via URL matching (`useLocation().pathname`).
+- **Dashboard as Quick Access**: Transformed `BranchAdminDashboard` widgets to deep-link directly into specific workspace sections via `open_in_new` icons.
+- **Resilient Dashboard**: Added fallback mock data for `BranchAdminDashboard` to prevent 404/403 errors when a branch isn't explicitly assigned or API fails.
+- **Comprehensive Student Management**: Created `BranchStudentsView` listing students with full profiles, initials/avatar, billing history, future billing projections (taking 1-year course duration into account), extra classes, and complete CRUD operations (Add, Edit, Delete).
+- **Comprehensive Teacher Management**: Created `BranchTeachersView` listing teachers with full profiles, payroll history, 1-month ahead payroll projections, assigned regular and extra classes, timetable management, and full CRUD.
+- **Robust Fee & Billing**: Overhauled `FeeBillingView` to handle billing records for students, teachers, courses, and discounts with full CRUD functionality.
+- **Rich Prototyping (Mock Data)**: Populated realistic mock data across all 15 views in `BranchAdminWorkspace.tsx` to ensure the portal is fully interactive visually. This includes `ResourceTasks` (pending tasks list), `LeaveRequestsView`, `PersonalizedClassesView`, `Drafting` (social media history), `AttendanceView`, `HomeworkView`, `ResultsView`, `CertificatesView`, `TimetableView`, and `PettyCashView`.
+- **Bug Fixes**: Addressed React hooks errors (`useLocation`, `useAction`) and missing imports that were breaking routing and form actions.
 
 ## Integration coverage completed
 

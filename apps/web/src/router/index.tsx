@@ -30,6 +30,9 @@ const TenantResourcesPage = lazy(() => import('../pages/TenantOperationsPages').
 const TenantCalendarPage = lazy(() => import('../pages/TenantOperationsPages').then((module) => ({ default: module.TenantCalendarPage })));
 const TenantHrPage = lazy(() => import('../pages/TenantOperationsPages').then((module) => ({ default: module.TenantHrPage })));
 const TenantAdmissionsPage = lazy(() => import('../pages/TenantOperationsPages').then((module) => ({ default: module.TenantAdmissionsPage })));
+const TenantSocialMediaPage = lazy(() => import('../pages/TenantOperationsPages').then((module) => ({ default: module.TenantSocialMediaPage })));
+const TenantCertificatesPage = lazy(() => import('../pages/TenantOperationsPages').then((module) => ({ default: module.TenantCertificatesPage })));
+const TenantLeaveRequestsPage = lazy(() => import('../pages/TenantOperationsPages').then((module) => ({ default: module.TenantLeaveRequestsPage })));
 const PeopleDirectory = lazy(() => import('../pages/PeopleDirectory').then((module) => ({ default: module.PeopleDirectory })));
 const AcademicCourses = lazy(() => import('../pages/AcademicCourses').then((module) => ({ default: module.AcademicCourses })));
 const AcademicTimetables = lazy(() => import('../pages/AcademicTimetables').then((module) => ({ default: module.AcademicTimetables })));
@@ -261,6 +264,9 @@ const router = createBrowserRouter([
               { path: '/tenant/hr-management', element: <Suspense fallback={<FullPageSpinner />}><TenantHrPage /></Suspense> },
               { path: '/tenant/resource-logs', element: <Suspense fallback={<FullPageSpinner />}><TenantResourcesPage /></Suspense> },
               { path: '/tenant/academic-calendar', element: <Suspense fallback={<FullPageSpinner />}><TenantCalendarPage /></Suspense> },
+              { path: '/tenant/social-media', element: <Suspense fallback={<FullPageSpinner />}><TenantSocialMediaPage /></Suspense> },
+              { path: '/tenant/certificates', element: <Suspense fallback={<FullPageSpinner />}><TenantCertificatesPage /></Suspense> },
+              { path: '/tenant/leave-requests', element: <Suspense fallback={<FullPageSpinner />}><TenantLeaveRequestsPage /></Suspense> },
               { path: '/tenant/*', element: <RoleWorkspacePlaceholder role="tenant-admin" /> },
             ],
           },
@@ -268,9 +274,7 @@ const router = createBrowserRouter([
             element: <RequireRole allowedRoles={['BRANCH_ADMIN']} />,
             children: [
               { path: '/branch/dashboard', element: <Suspense fallback={<FullPageSpinner />}><BranchAdminDashboard /></Suspense> },
-              { path: '/branch/people', element: <Suspense fallback={<FullPageSpinner />}><PeopleDirectory /></Suspense> },
-              { path: '/branch/students', element: <Suspense fallback={<FullPageSpinner />}><AcademicStudents /></Suspense> },
-              { path: '/branch/teachers', element: <Suspense fallback={<FullPageSpinner />}><AcademicTeachers /></Suspense> },
+              { path: '/branch/staff', element: <Suspense fallback={<FullPageSpinner />}><PeopleDirectory /></Suspense> },
               { path: '/branch/*', element: <Suspense fallback={<FullPageSpinner />}><BranchAdminWorkspace /></Suspense> },
             ],
           },

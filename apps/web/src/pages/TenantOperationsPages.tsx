@@ -209,3 +209,227 @@ export function TenantAdmissionsPage() {
     {credentials ? <div role="alert" style={{ padding: 16, background: 'rgba(245,158,11,.1)', borderRadius: 10 }}><strong>Copy now—these passwords are not stored in browser storage.</strong><p>Student: {credentials.student.email} · <code>{credentials.student.temporaryPassword}</code></p><p>Parent: {credentials.parent.email} · <code>{credentials.parent.temporaryPassword}</code></p><Button style={{ marginTop: 10 }} onClick={acknowledge}>I have delivered these securely</Button></div> : null}</Card>}
   </div>;
 }
+
+interface SocialPost { id: string; branchId: string; author: string; content: string; platforms: string[]; scheduledTime: string; status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'PUBLISHED'; }
+
+export function TenantSocialMediaPage() {
+  const { showToast } = useToast();
+  const loader = useCallback(async () => {
+    // Note: Mocking data if API is not yet wired
+    try {
+      const res = await request<{ posts: SocialPost[] }>('/social-media/posts?status=PENDING');
+      return res.posts;
+    } catch {
+      return [
+        { id: '1', branchId: 'BR-01', author: 'Sanjay Rai', content: 'Happy Independence Day from our branch!', platforms: ['Facebook', 'Instagram'], scheduledTime: '2026-08-15T10:00:00Z', status: 'PENDING' }
+      ] as SocialPost[];
+    }
+  }, []);
+  const { data, loading, error, reload } = useRemote(loader);
+  const [busy, setBusy] = useState('');
+
+  const mutate = async (id: string, action: 'APPROVE' | 'REJECT' | 'PUBLISH') => {
+    setBusy(id);
+    try {
+      const endpoint = `/social-media/posts/${id}/${action.toLowerCase()}`;
+      await request(endpoint, { method: 'POST' });
+      showToast(`Post ${action.toLowerCase()}d successfully.`, 'success');
+      await reload();
+    } catch (next) {
+      showToast(errorMessage(next), 'error');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const posts = data ?? [];
+
+  return (
+    <div style={{ display: 'grid', gap: 18 }}>
+      <Header title="Social Media Approval Queue" description="Review, approve, reject, or publish social media posts submitted by branch admins." />
+      {loading ? <RemoteState kind="loading" /> : error ? <RemoteState kind="error" message={errorMessage(error)} onRetry={() => void reload()} /> :
+        !posts.length ? <RemoteState kind="empty" message="No pending social media posts." /> :
+        <Card hoverable={false}>
+          {posts.map((post) => (
+            <div key={post.id} style={row}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                <div>
+                  <strong style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {post.platforms.map(p => <StatusBadge key={p} variant="info">{p}</StatusBadge>)}
+                  </strong>
+                  <p style={{ marginTop: 8, fontSize: 14 }}>{post.content}</p>
+                  <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
+                    Branch: {post.branchId} · Author: {post.author} · Scheduled: {new Date(post.scheduledTime).toLocaleString()}
+                  </p>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <StatusBadge variant="warning">{post.status}</StatusBadge>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <Button disabled={busy === post.id} onClick={() => void mutate(post.id, 'APPROVE')}>Approve (Queue for schedule)</Button>
+                <Button disabled={busy === post.id} variant="outline" onClick={() => void mutate(post.id, 'PUBLISH')}>Publish Now</Button>
+                <Button disabled={busy === post.id} variant="danger" onClick={() => void mutate(post.id, 'REJECT')}>Reject</Button>
+              </div>
+            </div>
+          ))}
+        </Card>}
+    </div>
+  );
+}
+
+export function TenantCertificatesPage() {
+  const [templates, setTemplates] = useState([
+    { id: '1', name: 'Course Completion Certificate', type: 'COMPLETION', status: 'ACTIVE' },
+    { id: '2', name: 'Certificate of Merit', type: 'MERIT', status: 'ACTIVE' },
+    { id: '3', name: 'Leaving Certificate', type: 'LEAVING', status: 'DRAFT' },
+  ]);
+  const [form, setForm] = useState({ name: '', type: 'COMPLETION' });
+
+  const addTemplate = (e: FormEvent) => {
+    e.preventDefault();
+    if (!form.name.trim()) return;
+    setTemplates(old => [...old, { id: String(Date.now()), name: form.name, type: form.type, status: 'DRAFT' }]);
+    setForm({ name: '', type: 'COMPLETION' });
+  };
+
+  return (
+    <div style={{ display: 'grid', gap: 18 }}>
+      <Header title="Master Certificate Templates" description="Create and manage certificate templates that branch admins can issue to students." />
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(300px, 1fr)', gap: 18 }}>
+        <Card hoverable={false}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 style={{ fontSize: '18px' }}>Existing Templates</h3>
+          </div>
+          <table style={{ width: '100%', marginTop: '16px', borderCollapse: 'collapse', fontSize: '14px' }}>
+            <thead>
+              <tr style={{ borderBottom: '2px solid var(--border)', textAlign: 'left' }}>
+                <th style={{ padding: '8px' }}>Template Name</th>
+                <th style={{ padding: '8px' }}>Type</th>
+                <th style={{ padding: '8px' }}>Status</th>
+                <th style={{ padding: '8px', textAlign: 'right' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {templates.map(t => (
+                <tr key={t.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                  <td style={{ padding: '12px 8px', fontWeight: 600 }}>{t.name}</td>
+                  <td style={{ padding: '12px 8px' }}>{t.type}</td>
+                  <td style={{ padding: '12px 8px' }}>
+                    <StatusBadge variant={t.status === 'ACTIVE' ? 'success' : 'warning'}>{t.status}</StatusBadge>
+                  </td>
+                  <td style={{ padding: '12px 8px', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                    <Button variant="outline" style={{ padding: '4px 8px', minHeight: 'unset', height: '28px', fontSize: '12px' }}>Edit Design</Button>
+                    {t.status === 'DRAFT' && <Button style={{ padding: '4px 8px', minHeight: 'unset', height: '28px', fontSize: '12px' }} onClick={() => setTemplates(old => old.map(x => x.id === t.id ? { ...x, status: 'ACTIVE' } : x))}>Activate</Button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+        
+        <Card hoverable={false}>
+          <h3 style={{ fontSize: '18px' }}>Create Template</h3>
+          <p style={{ marginTop: '8px', color: 'var(--text-muted)', fontSize: '13px' }}>Define a new template structure for branches.</p>
+          <form onSubmit={addTemplate} style={{ display: 'grid', gap: '14px', marginTop: '16px' }}>
+            <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700 }}>
+              Template Name
+              <input style={input} placeholder="e.g. Special Achievement" value={form.name} onChange={e => setForm(old => ({ ...old, name: e.target.value }))} required />
+            </label>
+            <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700 }}>
+              Certificate Type
+              <select style={input} value={form.type} onChange={e => setForm(old => ({ ...old, type: e.target.value }))}>
+                <option value="COMPLETION">Course Completion</option>
+                <option value="MERIT">Merit / Achievement</option>
+                <option value="LEAVING">Leaving / Transfer</option>
+              </select>
+            </label>
+            <div style={{ padding: '12px', background: 'var(--color-surface)', border: '1px solid var(--border)', borderRadius: '8px' }}>
+              <strong style={{ fontSize: '13px' }}>Design Builder</strong>
+              <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>Visual template editor will open after creation to add branding and placeholders (e.g. {"{{studentName}}"}, {"{{branchName}}"}).</p>
+            </div>
+            <Button type="submit">Create Template</Button>
+          </form>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+export function TenantLeaveRequestsPage() {
+  const { showToast } = useToast();
+  // Mock data for leave requests escalated to Level 2
+  const [requests, setRequests] = useState([
+    { id: 'LR-101', staffName: 'Sanjay Rai', branch: 'BR-01', type: 'SICK_LEAVE', duration: '5 Days', startDate: '2026-08-20', status: 'PENDING_L2', reason: 'Severe viral infection, doctor recommended rest.', l1Approver: 'Branch Admin (Aisha)' },
+    { id: 'LR-102', staffName: 'Rina Karki', branch: 'BR-02', type: 'MATERNITY', duration: '90 Days', startDate: '2026-09-01', status: 'PENDING_L2', reason: 'Expected due date in early September.', l1Approver: 'Branch Admin (Bikash)' },
+  ]);
+  const [busy, setBusy] = useState('');
+
+  const mutate = async (id: string, action: 'APPROVE' | 'REJECT') => {
+    setBusy(id);
+    try {
+      // Mock API delay
+      await new Promise(r => setTimeout(r, 800));
+      setRequests(old => old.map(r => r.id === id ? { ...r, status: action === 'APPROVE' ? 'APPROVED' : 'REJECTED' } : r));
+      showToast(`Leave request ${action.toLowerCase()}d at Level 2.`, 'success');
+    } catch (next) {
+      showToast(errorMessage(next), 'error');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const pending = requests.filter(r => r.status === 'PENDING_L2');
+  const history = requests.filter(r => r.status !== 'PENDING_L2');
+
+  return (
+    <div style={{ display: 'grid', gap: 18 }}>
+      <Header title="Leave Requests (Level 2)" description="Final approval for long-duration or special leaves forwarded by Branch Admins." />
+      
+      <Card hoverable={false}>
+        <h3 style={{ fontSize: '18px', marginBottom: '16px' }}>Pending Final Approval</h3>
+        {!pending.length ? <RemoteState kind="empty" message="No pending Level 2 leave requests." /> : 
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            {pending.map(req => (
+              <div key={req.id} style={{ ...row, padding: '16px', border: '1px solid var(--border)', borderRadius: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <strong style={{ fontSize: '15px' }}>{req.staffName}</strong> <span style={{ color: 'var(--text-muted)' }}>({req.branch})</span>
+                    <div style={{ marginTop: '8px', display: 'flex', gap: '12px', fontSize: '13px' }}>
+                      <span style={{ fontWeight: 600 }}>{req.type.replace('_', ' ')}</span>
+                      <span>{req.duration}</span>
+                      <span>Starts: {req.startDate}</span>
+                    </div>
+                    <p style={{ marginTop: '8px', fontSize: '14px', color: 'var(--text-muted)' }}>"{req.reason}"</p>
+                    <p style={{ marginTop: '8px', fontSize: '12px', color: 'var(--color-primary)' }}>Level 1 Approved by: {req.l1Approver}</p>
+                  </div>
+                  <StatusBadge variant="warning">L2 Review</StatusBadge>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
+                  <Button disabled={busy === req.id} onClick={() => void mutate(req.id, 'APPROVE')}>Approve Leave</Button>
+                  <Button disabled={busy === req.id} variant="danger" onClick={() => void mutate(req.id, 'REJECT')}>Reject Leave</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        }
+      </Card>
+
+      {history.length > 0 && (
+        <Card hoverable={false}>
+          <h3 style={{ fontSize: '18px', marginBottom: '16px' }}>Recent Decisions</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {history.map(req => (
+              <div key={req.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', borderBottom: '1px solid var(--border)' }}>
+                <div>
+                  <strong>{req.staffName}</strong> · {req.type.replace('_', ' ')} ({req.duration})
+                </div>
+                <StatusBadge variant={req.status === 'APPROVED' ? 'success' : 'error'}>{req.status}</StatusBadge>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}

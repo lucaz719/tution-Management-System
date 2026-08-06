@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { useToast } from '../components/ui/Toast';
@@ -152,9 +152,13 @@ export function PeopleDirectory() {
     };
   }, [people]);
 
+  const location = useLocation();
+  const isBranchStaff = location.pathname.includes('/branch/staff');
+
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return people.filter((person) => {
+      if (isBranchStaff && !person.roles.some((r) => STAFF_ROLES.includes(r.role))) return false;
       const matchesSearch =
         !term || person.name.toLowerCase().includes(term) || person.email.toLowerCase().includes(term);
       const matchesRole = roleFilter === 'ALL' || person.roles.some((r) => r.role === roleFilter);
@@ -162,7 +166,7 @@ export function PeopleDirectory() {
         branchFilter === 'ALL' || person.roles.some((r) => r.branchId === branchFilter);
       return matchesSearch && matchesRole && matchesBranch;
     });
-  }, [people, search, roleFilter, branchFilter]);
+  }, [people, search, roleFilter, branchFilter, isBranchStaff]);
 
   const roleOptions = useMemo(() => {
     const set = new Set(people.flatMap((p) => p.roles.map((r) => r.role)));

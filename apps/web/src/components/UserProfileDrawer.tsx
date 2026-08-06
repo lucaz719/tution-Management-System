@@ -42,8 +42,9 @@ interface Profile {
       totalSessions: number;
       pendingUpdates: number;
       payroll?: { totalPaid: number; lastMonthPaid: number; nextMonthProjected: number; extraClassesPayroll?: number; history: Array<{ month: string; amount: number; status: string }> };
+      timetable?: Array<{ id: string; day: string; time: string; subject: string; room: string }>;
     };
-    staff?: { designation: string; contractType: string; joiningDate: string };
+    staff?: { designation: string; contractType: string; joiningDate: string; performanceScore?: number; hrAlerts?: Array<{ type: string; message: string; severity: 'warning' | 'error' | 'info' }> };
   };
 }
 
@@ -254,6 +255,21 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                       <>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Designation</span><span>{profile.detail.staff.designation}</span></div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Contract</span><span>{profile.detail.staff.contractType}</span></div>
+                        {profile.detail.staff.performanceScore !== undefined && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: 'var(--text-muted)' }}>Performance Score</span>
+                            <span style={{ color: 'var(--color-success)', fontWeight: 700 }}>{profile.detail.staff.performanceScore}/100</span>
+                          </div>
+                        )}
+                        {profile.detail.staff.hrAlerts && profile.detail.staff.hrAlerts.length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px' }}>
+                            {profile.detail.staff.hrAlerts.map((alert, idx) => (
+                              <div key={idx} style={{ padding: '8px', borderRadius: '6px', fontSize: '12px', background: alert.severity === 'error' ? 'var(--color-error-soft)' : alert.severity === 'warning' ? 'var(--color-warning-soft)' : 'var(--color-info-soft)', color: alert.severity === 'error' ? 'var(--color-error)' : alert.severity === 'warning' ? 'var(--color-warning)' : 'var(--color-info)' }}>
+                                <strong>{alert.type}:</strong> {alert.message}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </>
                     ) : null}
                   </div>
@@ -475,6 +491,38 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                           <span style={{ fontSize: '12px', color: 'var(--color-success)' }}>Includes {money(profile.detail.teacher.payroll.extraClassesPayroll)} for extra classes</span>
                         ) : null}
                       </div>
+                    </div>
+                  </div>
+
+                  {/* Teacher Timetable */}
+                  <div style={{ marginTop: '16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                      <div style={sectionTitle as React.CSSProperties}>Timetable</div>
+                      <Button variant="outline" onClick={() => showToast('Timetable add functionality mock', 'info')} style={{ minHeight: '30px', height: '30px', padding: '4px 12px', fontSize: '12.5px' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>add</span> Add Session
+                      </Button>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {profile.detail.teacher.timetable && profile.detail.teacher.timetable.length > 0 ? (
+                        profile.detail.teacher.timetable.map((session) => (
+                          <div key={session.id} style={{ ...rowCard, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                              <div style={{ fontSize: '13.5px', fontWeight: 700 }}>{session.subject}</div>
+                              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{session.day} · {session.time} · Room {session.room}</div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '4px' }}>
+                              <button type="button" onClick={() => showToast('Timetable edit mock', 'info')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-primary)', display: 'grid', placeItems: 'center', padding: '4px' }}>
+                                <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>edit</span>
+                              </button>
+                              <button type="button" onClick={() => { if(window.confirm('Delete session?')) { showToast('Session deleted (mock)', 'success') } }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-error)', display: 'grid', placeItems: 'center', padding: '4px' }}>
+                                <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>delete</span>
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>No timetable sessions assigned.</p>
+                      )}
                     </div>
                   </div>
                 </div>

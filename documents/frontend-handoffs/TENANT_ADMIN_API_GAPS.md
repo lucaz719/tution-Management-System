@@ -83,3 +83,24 @@ Tenant Admin for tenant-wide events; Branch Admin cannot mutate tenant-wide even
 
 ### UI blocked
 Edit/cancel controls. The frontend currently supports create and list only.
+
+## Social media approval queue
+
+### Required operation
+List pending social media posts for review, approve, reject, or publish. Manage API credentials.
+
+### Proposed contract
+`GET /api/social-media/posts?status=PENDING`
+`POST /api/social-media/posts/:id/approve`
+`POST /api/social-media/posts/:id/reject`
+`POST /api/social-media/posts/:id/publish`
+`PUT /api/social-media/config`
+
+### Required response fields
+Post ID, content, image/video URLs, platforms, scheduled time, branch, author, status.
+
+### Authorization
+`TENANT_ADMIN`, current tenant only.
+
+### UI blocked
+Approval queue and publishing workflow. Platform API configuration.

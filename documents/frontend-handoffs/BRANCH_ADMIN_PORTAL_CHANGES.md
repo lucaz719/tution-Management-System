@@ -108,41 +108,121 @@ This document outlines the frontend state changes, required UI components, and A
 ## 8. Petty Cash Section
 **Requirements**:
 - Manage requests from Accountants.
-- Direct approval if within Tenant Admin-allocated monthly limit.
-- If out of limit: Reject, or Approve (which forwards to Tenant Admin).
+- Branch Admin provides Level 1 Review (Approves or rejects with reason).
+- All approved requests are forwarded to Tenant Admin for Level 2 Review.
 
 **UI Changes**:
 - Display current monthly limit and remaining balance.
-- Request table with "Approve" and "Reject" actions.
-- Confirmation dialog explaining that out-of-limit approvals will be forwarded.
+- Request table with "Approve (Forward to Tenant Admin)" and "Reject" actions, requiring a reason input.
 
 **API Gaps**:
 - `GET /api/branch-admin/petty-cash/limit-status`: Get current monthly limit and usage.
-- `PUT /api/branch-admin/petty-cash/requests/:id/status`: Needs to handle the logic of changing status to `APPROVED` (if within limit) or `PENDING_TENANT_APPROVAL` (if out of limit).
+- `PUT /api/branch-admin/petty-cash/requests/:id/status`: Updates status to `PENDING_TENANT_APPROVAL` upon Branch Admin approval, or `REJECTED` with reason.
 
 ## 9. Leave Requests Section
 **Requirements**:
-- View all leave requests sent to the branch.
-- Branch Admin provides first-level approval/rejection.
-- Approvals forward to Tenant Admin for final decision.
+- View all leave requests (Staff and Student) sent to the branch.
+- Staff Casual Leave & Early Out: Branch Admin approves/rejects directly.
+- Staff Long Sick Leave: Branch Admin provides first-level approval, forwards to Tenant Admin.
+- Student Advance Leave: Branch Admin approves, teachers notified.
+- Student Emergency Out: Branch Admin logs the exit, which triggers immediate push notification to parents.
 
 **UI Changes**:
-- Data table for leave requests.
-- Action buttons indicating "Approve & Forward" or "Reject".
+- Data tables separated by leave type/group (Staff vs Student).
+- Action buttons context-aware: "Approve" (Casual/Student), "Approve & Forward" (Sick), "Reject".
+- Form to log Student Emergency Out.
 
 **API Gaps**:
-- `PUT /api/branch-admin/leave-requests/:id/status`: Needs to update status to `PENDING_TENANT_APPROVAL` upon Branch Admin approval.
+- `PUT /api/branch-admin/leave-requests/:id/status`: Update status based on leave type.
+- `POST /api/branch-admin/student-leaves/emergency-out`: Log emergency out and trigger notifications.
 
 ## 10. Academic Calendar Section
 **Requirements**:
 - Interactive real calendar for the branch.
-- View upcoming events.
-- Click past dates to see past events.
+- View upcoming events (Quarterly view on dashboard).
+- View tenant-pushed events (Public holidays, exam periods) - read-only.
+- Add branch-specific events on top of the tenant calendar.
 
 **UI Changes**:
-- Full-page calendar component.
-- Add event modal.
+- Full-page calendar component distinguishing tenant events vs branch events (color coding).
+- Add event modal (only for branch events).
+- Read-only details for tenant events.
 
 **API Gaps**:
-- `GET /api/branch-admin/academic-calendar/events`: Fetch events.
-- `POST /api/branch-admin/academic-calendar/events`: Add new event.
+- `GET /api/branch-admin/academic-calendar/events`: Fetch events (both tenant and branch).
+- `POST /api/branch-admin/academic-calendar/events`: Add new branch-specific event.
+
+## 11. Social Media Management
+**Requirements**:
+- Create, edit, and delete draft social media posts (Facebook, Instagram, TikTok, LinkedIn).
+- Cannot publish directly; submit for Tenant Admin approval.
+- View status of drafted, pending, and published posts.
+
+**UI Changes**:
+- Post composer with text, image/video upload, platform selection, and scheduling date/time.
+- Data table or Kanban board for post statuses (Draft, Pending Approval, Published, Rejected).
+
+**API Gaps**:
+- `GET /api/branch-admin/social-media/posts`: Fetch posts.
+- `POST /api/branch-admin/social-media/posts`: Create draft post.
+- `PUT /api/branch-admin/social-media/posts/:id/submit`: Submit post for tenant approval.
+
+## 12. Certificate Generation
+**Requirements**:
+- Manually issue certificates (Course Completion, Merit, Attendance, Custom).
+- Customize branch-specific details on top of Tenant Admin's master template.
+
+**UI Changes**:
+- Certificate issuance modal to select student, certificate type, and fill in branch-specific fields.
+- PDF preview before issuance.
+- Certificate history log per student.
+
+**API Gaps**:
+- `GET /api/branch-admin/certificates/templates`: Fetch master templates.
+- `POST /api/branch-admin/certificates/issue`: Issue certificate and generate PDF.
+
+## 13. Student Performance Tracking
+**Requirements**:
+- Full view across all students and all metrics (Test scores, trends, class comparisons).
+- Add administrative remarks per student, visible to admin and teachers (configurable visibility to parents).
+- View upgrade/downgrade signals based on performance thresholds.
+
+**UI Changes**:
+- Enhanced student profile with "Performance & Analytics" tab showing trend graphs.
+- Badges/Icons for upgrade/downgrade signals.
+- Form to add and view administrative remarks.
+
+**API Gaps**:
+- `GET /api/branch-admin/students/:id/performance`: Fetch performance analytics, trends, and signals.
+- `POST /api/branch-admin/students/:id/remarks`: Add administrative remark.
+
+## 14. HR Management
+**Requirements**:
+- Receive alerts 30 days before staff document/contract expiry.
+- View all staff performance scores (attendance, feedback, compliance).
+- Initiate and manage formal exit flow (resignation clearance checklist).
+- Confirm clearance checklist completion before Tenant Admin settlement.
+
+**UI Changes**:
+- Dashboard alerts widget for expiring documents.
+- "Performance Score" column in Staff data table.
+- "Exit Management" action in Staff profile to initiate/review clearance checklist.
+
+**API Gaps**:
+- `GET /api/branch-admin/hr/expiring-documents`: Fetch expiring documents alerts.
+- `GET /api/branch-admin/hr/staff-scores`: Fetch staff performance scores.
+- `POST /api/branch-admin/hr/exit-clearance`: Update clearance checklist status.
+
+## 15. Resource & Infrastructure Logging
+**Requirements**:
+- Oversight of daily mandatory resource logs per classroom.
+- Override auto-assigned maintenance tasks.
+- Escalate unresolved tasks.
+
+**UI Changes**:
+- "Resource Logs & Maintenance" view showing daily classroom status.
+- Task management table to reassign tasks or escalate.
+
+**API Gaps**:
+- `GET /api/branch-admin/resource-logs`: Fetch daily logs and tasks.
+- `PUT /api/branch-admin/resource-logs/tasks/:id/reassign`: Reassign or escalate task.
