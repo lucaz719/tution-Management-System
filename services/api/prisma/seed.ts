@@ -202,7 +202,7 @@ async function seedDemoTenant(): Promise<void> {
       });
     }
 
-    const passwordHash = await bcrypt.hash(crypto.randomUUID(), 10);
+    const passwordHash = await bcrypt.hash('Password123', 10);
 
     const user = await prisma.user.upsert({
       where: { email: spec.email },

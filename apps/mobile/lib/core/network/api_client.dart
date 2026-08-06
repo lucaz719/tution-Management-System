@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/foundation.dart';
 
 /// Central API client for the TMS mobile app.
 ///
@@ -35,7 +36,9 @@ class ApiClient {
       responseType: ResponseType.json,
     ));
 
-    dio.interceptors.add(CookieManager(CookieJar()));
+    if (!kIsWeb) {
+      dio.interceptors.add(CookieManager(CookieJar()));
+    }
     dio.interceptors.add(_AuthInterceptor());
     _initialized = true;
   }
