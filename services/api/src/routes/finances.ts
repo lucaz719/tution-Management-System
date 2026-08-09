@@ -31,10 +31,11 @@ async function loadInvoicePaymentAccess(req: TenantRequest, invoiceId: string) {
   const branchIds = invoice.student.user.userRoles
     .map((assignment) => assignment.branchId)
     .filter((branchId): branchId is string => Boolean(branchId));
+  const billingAccess = billingBranchScopes(req.user!);
   const staffAccess = branchIds.some((branchId) =>
-    hasBranchPermission(req.user!, 'manage_billing', branchId) || hasBranchPermission(req.user!, 'manage_students', branchId),
+    billingAccess.scopes.includes(branchId) || hasBranchPermission(req.user!, 'manage_students', branchId),
   );
-  return ownStudent || ownParent || isTenantAdmin(req.user!) || staffAccess ? invoice : null;
+  return ownStudent || ownParent || billingAccess.isTenantAdmin || staffAccess ? invoice : null;
 }
 
 async function loadStudentBillingAccess(req: TenantRequest, studentId: string) {
@@ -49,10 +50,11 @@ async function loadStudentBillingAccess(req: TenantRequest, studentId: string) {
   const branchIds = student.user.userRoles
     .map((assignment) => assignment.branchId)
     .filter((branchId): branchId is string => Boolean(branchId));
+  const billingAccess = billingBranchScopes(req.user!);
   const allowed = student.userId === req.user!.id
     || student.studentParents.some((link) => link.parent.userId === req.user!.id)
-    || isTenantAdmin(req.user!)
-    || branchIds.some((branchId) => hasBranchPermission(req.user!, 'manage_billing', branchId));
+    || billingAccess.isTenantAdmin
+    || branchIds.some((branchId) => billingAccess.scopes.includes(branchId));
   return allowed ? student : null;
 }
 
@@ -201,7 +203,16 @@ function permissionBranchScopes(user: any, permission: string): { isTenantAdmin:
 }
 
 function billingBranchScopes(user: any) {
-  return permissionBranchScopes(user, 'manage_billing');
+  const permissionAccess = permissionBranchScopes(user, 'manage_billing');
+  const roles = Array.isArray(user?.roles) ? user.roles : [];
+  const branchAdminScopes = roles
+    .filter((role: any) => role?.roleName === 'Branch Admin' && role?.branchId)
+    .map((role: any) => String(role.branchId));
+
+  return {
+    isTenantAdmin: permissionAccess.isTenantAdmin,
+    scopes: [...new Set([...permissionAccess.scopes, ...branchAdminScopes])],
+  };
 }
 
 function addMonths(value: Date, count: number): Date {
@@ -316,7 +327,11 @@ router.get('/billing-ledger', authMiddleware, async (req: TenantRequest, res: Re
   }
 });
 
-router.post('/billing-ledger/invoices', authMiddleware, hasPermission('manage_billing'), async (req: TenantRequest, res: Response) => {
+router.post('/billing-ledger/invoices', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const access = billingBranchScopes(req.user);
+  if (!access.isTenantAdmin && access.scopes.length === 0) {
+    return res.status(403).json({ error: 'You do not have access to create billing records.' });
+  }
   const shape = parseStrictKeys(req.body, ['studentId', 'amount', 'discount', 'fine', 'invoiceType', 'billingCycleStart', 'billingCycleEnd', 'dueDate']);
   if (!shape.success) return res.status(400).json({ error: shape.error });
   const studentId = readTrimmedString(shape.data, 'studentId', { required: true, maxLength: 128, message: 'A valid student is required.' });
@@ -346,7 +361,11 @@ router.post('/billing-ledger/invoices', authMiddleware, hasPermission('manage_bi
   return res.status(201).json({ message: 'Invoice created in the shared ledger.', invoice });
 });
 
-router.post('/billing-ledger/payrolls', authMiddleware, hasPermission('manage_billing'), async (req: TenantRequest, res: Response) => {
+router.post('/billing-ledger/payrolls', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const access = billingBranchScopes(req.user);
+  if (!access.isTenantAdmin && access.scopes.length === 0) {
+    return res.status(403).json({ error: 'You do not have access to create payroll records.' });
+  }
   const shape = parseStrictKeys(req.body, ['staffRecordId', 'month', 'year', 'baseSalary', 'bonuses', 'deductions']);
   if (!shape.success) return res.status(400).json({ error: shape.error });
   const staffRecordId = readTrimmedString(shape.data, 'staffRecordId', { required: true, maxLength: 128, message: 'A valid teacher is required.' });
@@ -358,7 +377,6 @@ router.post('/billing-ledger/payrolls', authMiddleware, hasPermission('manage_bi
   if (!staffRecordId.success || !month.success || !year.success || !baseSalary.success || !bonuses.success || !deductions.success || !Number.isInteger(month.data) || !Number.isInteger(year.data)) {
     return res.status(400).json({ error: 'Valid teacher and payroll amounts are required.' });
   }
-  const access = billingBranchScopes(req.user);
   const record = await prisma.staffRecord.findFirst({
     where: {
       id: staffRecordId.data,
@@ -645,9 +663,10 @@ router.post(
       const studentBranchIds = invoice.student.user.userRoles
         .map((assignment) => assignment.branchId)
         .filter((branchId): branchId is string => Boolean(branchId));
+      const billingAccess = billingBranchScopes(req.user!);
       if (
-        !isTenantAdmin(req.user!) &&
-        !studentBranchIds.some((branchId) => hasBranchPermission(req.user!, 'manage_billing', branchId))
+        !billingAccess.isTenantAdmin &&
+        !studentBranchIds.some((branchId) => billingAccess.scopes.includes(branchId))
       ) {
         return res.status(403).json({ error: 'You cannot record payments for this student branch.' });
       }
