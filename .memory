@@ -525,6 +525,10 @@ Additional defects fixed during the full route pass:
   displays all branch invoice/payroll records plus derived institution tuition,
   payroll, collection, and margin projections. The obsolete in-memory global
   ledger calls are no longer used by active portal code.
+- Tenant Admin `/tenant/fees` keeps the student `View` action enabled even when
+  `invoiceCount` is zero. Opening the drawer loads the shared ledger profile in
+  parallel with posted invoices, shows the student's billing plan and future
+  projections, and renders an explicit no-invoice-history state when applicable.
 - Research basis: subscription schedules/upcoming amounts remain projections
   until an invoice is created; posted invoices remain historical financial
   records. This follows the lifecycle distinction documented by Stripe Billing.
