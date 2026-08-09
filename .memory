@@ -1,10 +1,25 @@
 # TMS Working Memory
 
-Last reconciled: 2026-08-05
+Last reconciled: 2026-08-09
 Repository: `https://github.com/lucazsoft/tution-Management-System/`
 Branch: `main`
 Repository baseline: `4783370 teacher portal update` (2026-08-05)
 Worktree at reconciliation: clean
+
+## Reconciliation notes (2026-08-09)
+
+- The working tree currently contains substantial uncommitted portal, security,
+  and finance changes. Preserve unrelated edits and do not treat the repository
+  baseline or prior clean-worktree statement as current.
+- Billing and payroll are now consolidated behind the persisted, permission-
+  scoped `/api/finances/billing-ledger` contract. The Branch Admin and
+  Accountant portals render the same `SharedBillingWorkspace`; Tenant Admin
+  reporting reads the same ledger tenant-wide.
+- The local web development server is running on port `5173`. The API on port
+  `3001` is served by the Compose `api` container, not by a local Node process.
+  After finance-route changes, rebuild it with
+  `docker compose up -d --build api`; otherwise the browser can receive a 404
+  from an older API image even though the frontend bundle is current.
 
 ## Documentation authority
 
@@ -45,7 +60,7 @@ facts change.
 - Runtime and validation statements remain dated records. Re-run the relevant
   commands before treating them as a current production-readiness assertion.
 
-## Current runtime (last verified 2026-08-03)
+## Current runtime (last verified 2026-08-09)
 
 - Docker Desktop is running with the WSL 2 Linux engine.
 - PostgreSQL 16 is healthy for this Compose project at `localhost:5433`.
@@ -74,6 +89,11 @@ facts change.
 - Direct `npm run dev` from `services/api` does not load the repository-root
   `.env`. Prefer the healthy Compose API, which receives its required auth and
   database environment through Compose.
+- On 2026-08-09 the Compose API image was rebuilt from the current source and
+  reported healthy. An unauthenticated request to
+  `/api/finances/billing-ledger` returned `401 Authentication required`, which
+  verifies that the route exists and is protected. Before the rebuild, the old
+  image returned `404 Cannot GET /api/finances/billing-ledger`.
 - `PLATFORM_ADMIN_ENABLED=false` after provisioning. Re-enable it only when a
   new local tenant must be provisioned, then disable it again.
 
@@ -475,6 +495,61 @@ Additional defects fixed during the full route pass:
 - Leave and maintenance completion transitions are conditional and atomic.
 - Nepali date library default/named ESM export shapes are normalized, restoring
   executable billing overview/reporting.
+
+## Shared billing and payroll ledger (2026-08-09)
+
+- Added authenticated `GET /api/finances/billing-ledger`, scoped by signed
+  `manage_billing` branch assignments. Tenant Admin receives tenant-wide data;
+  Branch Admin and Accountant users receive only permitted branches.
+- Added persisted `POST /api/finances/billing-ledger/invoices` and
+  `POST /api/finances/billing-ledger/payrolls`. Both require
+  `manage_billing`; writes go through Prisma and therefore appear across all
+  authorized role portals after refresh. Duplicate teacher/month payrolls are
+  rejected with `409`.
+- The ledger returns complete posted invoice details: invoice type, base amount,
+  discount, fine, net payable, VAT snapshot, cycle dates, due date, payment
+  date/reference, overdue derivation, status, and creation time.
+- Student projections derive monthly tuition from the assigned grade plus
+  eligible active course/activity fees and show future cycles only within the
+  one-year course window derived from admission date. Projections are labelled
+  as forecasts and are not persisted as debts or payable invoices.
+- Teacher history uses persisted Payroll records. The next-month projection is
+  derived from the active staff salary structure; bonuses and deductions remain
+  zero until payroll is posted. Fixed salaries use `basicSalary`; hourly
+  contracts use `hourlyRate * expectedMonthlyHours` when configured.
+- Added typed client contracts in `apps/web/src/services/api.ts` and the shared
+  UI at `apps/web/src/components/finance/SharedBillingWorkspace.tsx`.
+  `BranchAdminWorkspace.tsx` and `StaffFinancePage.tsx` both render this shared
+  component, preventing role-specific billing behavior from drifting.
+- Tenant Admin P&L/reporting now reads the same persisted billing ledger and
+  displays all branch invoice/payroll records plus derived institution tuition,
+  payroll, collection, and margin projections. The obsolete in-memory global
+  ledger calls are no longer used by active portal code.
+- Research basis: subscription schedules/upcoming amounts remain projections
+  until an invoice is created; posted invoices remain historical financial
+  records. This follows the lifecycle distinction documented by Stripe Billing.
+
+Validation completed for this change:
+
+```powershell
+npm run build --workspace @tms/api
+npm run test:billing --workspace @tms/api
+npx webpack --mode production  # from apps/web
+docker compose up -d --build api
+docker compose ps api
+```
+
+- API TypeScript build passed.
+- Existing billing-rule tests passed.
+- Webpack production compilation passed with the existing main-bundle size
+  warnings (approximately 407 KiB).
+- The full `npm run build --workspace web` remains blocked by four unrelated
+  existing TypeScript errors: two unsupported `Button` variant values in
+  `BranchAdminDashboard.tsx`, and two Teacher security-view type mismatches in
+  `TeacherPortal.tsx`. No shared-billing files appeared in that error list.
+- `git diff --check` currently reports pre-existing trailing whitespace in
+  `apps/web/src/pages/PeopleDirectory.tsx`; no billing-file whitespace errors
+  were reported.
 
 ## Validation status
 

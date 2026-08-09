@@ -15,6 +15,8 @@ import { ApiError, errorMessage, request } from '../services/api/client';
 import { financeApi, type Expense, type PettyCashRecord } from '../services/api/finance';
 import { hrApi, type DocumentAlert, type PayrollRecord } from '../services/api/hr';
 import { resourcesApi, type MaintenanceTask } from '../services/api/resources';
+import { api } from '../services/api';
+import './staffFinance.css';
 
 const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 };
 const input: React.CSSProperties = { width: '100%', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 9, background: 'var(--bg-card)', color: 'var(--color-text)' };
@@ -72,14 +74,15 @@ export function TenantPettyCashPage() {
 export function TenantReportsPage() {
   const { showToast } = useToast();
   const loader = useCallback(async () => {
-    const [pl, expenses, forecast, suggestions] = await Promise.all([
-      financeApi.pl(), financeApi.expenses(), financeApi.forecast(), financeApi.suggestions(),
+    const [pl, expenses, forecast, suggestions, globalLedger] = await Promise.all([
+      financeApi.pl(), financeApi.expenses(), financeApi.forecast(), financeApi.suggestions(), api.finances.getBillingLedger()
     ]);
     return {
       pl,
       expenses: expenses.expenses,
       forecast: forecast as unknown as FinancialForecast,
       suggestions: suggestions as unknown as FinancialSuggestions,
+      globalLedger
     };
   }, []);
   const { data, loading, error, reload } = useRemote(loader);
@@ -98,6 +101,10 @@ export function TenantReportsPage() {
     ? Math.min(100, Math.round((forecastMetrics.actualCollectedNpr / forecastMetrics.netForecastNpr) * 100))
     : 0;
   const signalVariant = (signal: FinancialSignal): 'error' | 'warning' | 'info' => signal.severity === 'HIGH' ? 'error' : signal.severity === 'INFO' ? 'info' : 'warning';
+  const projectedMonthlyRevenue = data.globalLedger.students.reduce((sum, student) => sum + student.monthlyAmount, 0);
+  const projectedMonthlyPayroll = data.globalLedger.teachers.reduce((sum, teacher) => sum + teacher.baseSalary, 0);
+  const collectedRevenue = data.globalLedger.students.flatMap((student) => student.invoices).filter((invoice) => invoice.status === 'PAID').reduce((sum, invoice) => sum + invoice.netPayable, 0);
+  const projectedMargin = projectedMonthlyRevenue - projectedMonthlyPayroll;
   return <div style={{ display: 'grid', gap: 18 }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
       <Header title="P&L and Ledger" description="Consolidated institution reporting from recorded financial transactions."/>
@@ -106,21 +113,62 @@ export function TenantReportsPage() {
     <div style={grid}>{cards.map(([name, value, color]) => <Card key={name} hoverable={false}><p style={{ color: 'var(--text-muted)', fontSize: 13, fontWeight: 700 }}>{name}</p><strong style={{ display: 'block', marginTop: 8, fontSize: 25, color, fontVariantNumeric: 'tabular-nums' }}>NPR {value.toLocaleString()}</strong><p style={{ marginTop: 6, color: 'var(--text-muted)', fontSize: 12 }}>{data.pl.month}</p></Card>)}</div>
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.15fr) minmax(300px, 0.85fr)', gap: 18 }}>
       <Card hoverable={false}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}><div><h3>Monthly forecast</h3><p style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 13 }}>{data.forecast.billingCycle}</p></div><StatusBadge variant={forecastMetrics.varianceNpr >= 0 ? 'success' : 'warning'}>{forecastProgress}% collected</StatusBadge></div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}><div><h3>Institution billing projections</h3><p style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 13 }}>Derived from active student fees and staff contracts</p></div><StatusBadge variant={projectedMargin >= 0 ? 'success' : 'warning'}>{projectedMargin >= 0 ? 'Positive margin' : 'Projected deficit'}</StatusBadge></div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: 12, marginTop: 16 }}>
+          {[
+            ['Projected monthly tuition', projectedMonthlyRevenue],
+            ['Projected annual tuition', projectedMonthlyRevenue * 12],
+            ['Projected monthly payroll', projectedMonthlyPayroll],
+            ['Recorded invoice collections', collectedRevenue],
+            ['Projected monthly margin', projectedMargin]
+          ].map(([label, value]) => <div key={String(label)} style={{ padding: 14, borderRadius: 10, background: 'var(--color-surface)', border: '1px solid var(--border)' }}><p style={{ color: 'var(--text-muted)', fontSize: 12 }}>{label}</p><strong style={{ display: 'block', marginTop: 6, fontVariantNumeric: 'tabular-nums', color: String(label).includes('Net') ? (Number(value) > 0 ? 'var(--color-success)' : 'var(--color-error)') : 'inherit' }}>NPR {Number(value).toLocaleString()}</strong></div>)}
+        </div>
+      </Card>
+      <Card hoverable={false}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}><div><h3>Legacy Monthly forecast</h3><p style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 13 }}>{data.forecast.billingCycle}</p></div><StatusBadge variant={forecastMetrics.varianceNpr >= 0 ? 'success' : 'warning'}>{forecastProgress}% collected</StatusBadge></div>
         <div style={{ height: 8, margin: '18px 0', overflow: 'hidden', borderRadius: 999, background: 'var(--border)' }}><div style={{ width: `${forecastProgress}%`, height: '100%', borderRadius: 'inherit', background: 'var(--color-primary)' }}/></div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: 12 }}>
-          {[['Expected tuition', forecastMetrics.baseForecastNpr], ['Net forecast', forecastMetrics.netForecastNpr], ['Collected', forecastMetrics.actualCollectedNpr], ['Forecast variance', forecastMetrics.varianceNpr]].map(([label, value]) => <div key={String(label)} style={{ padding: 14, borderRadius: 10, background: 'var(--color-surface)', border: '1px solid var(--border)' }}><p style={{ color: 'var(--text-muted)', fontSize: 12 }}>{label}</p><strong style={{ display: 'block', marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>NPR {Number(value).toLocaleString()}</strong></div>)}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+          {[['Expected tuition', forecastMetrics.baseForecastNpr], ['Net forecast', forecastMetrics.netForecastNpr]].map(([label, value]) => <div key={String(label)} style={{ padding: 14, borderRadius: 10, background: 'var(--color-surface)', border: '1px solid var(--border)' }}><p style={{ color: 'var(--text-muted)', fontSize: 12 }}>{label}</p><strong style={{ display: 'block', marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>NPR {Number(value).toLocaleString()}</strong></div>)}
         </div>
         <p style={{ marginTop: 14, color: 'var(--text-muted)', fontSize: 13 }}>{forecastMetrics.activeEnrollments} active enrollments · Estimated attrition {forecastMetrics.attritionPercentage}</p>
       </Card>
+    </div>
+    <Card hoverable={false}>
+      <div className="accountant-header" style={{ marginBottom: 16 }}>
+        <div className="accountant-header-title">
+          <h2>Global Ledger (All Branches)</h2>
+          <p className="accountant-text-muted" style={{ marginTop: 4 }}>Consolidated view of all branch invoices and payrolls.</p>
+        </div>
+      </div>
+      <div className="accountant-table-scroll">
+        <table className="accountant-table">
+          <thead><tr><th>ID</th><th>Type</th><th>Name</th><th>Branch</th><th>Amount</th><th>Status</th></tr></thead>
+          <tbody>
+            {data.globalLedger.students.flatMap((student) => student.invoices.map((invoice) => (
+              <tr key={invoice.id}>
+                <td><strong>{invoice.id.slice(0, 8)}</strong></td><td>Invoice · {invoice.invoiceType}</td><td>{student.studentName}</td><td>{student.branchName}</td><td className="is-amount">NPR {invoice.netPayable.toLocaleString()}</td><td><StatusBadge variant={invoice.status === 'PAID' ? 'success' : invoice.overdue ? 'error' : 'warning'}>{invoice.overdue && invoice.status !== 'PAID' ? 'OVERDUE' : invoice.status}</StatusBadge></td>
+              </tr>
+            )))}
+            {data.globalLedger.teachers.flatMap((teacher) => teacher.payrolls.map((payroll) => (
+              <tr key={payroll.id}>
+                <td><strong>{payroll.id.slice(0, 8)}</strong></td><td>Payroll</td><td>{teacher.teacherName}</td><td>{teacher.branchName}</td><td className="is-amount">NPR {payroll.netPayable.toLocaleString()}</td><td><StatusBadge variant={payroll.status === 'MANUALLY_PAID' ? 'success' : 'warning'}>{payroll.status.replaceAll('_', ' ')}</StatusBadge></td>
+              </tr>
+            )))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.15fr) minmax(300px, 0.85fr)', gap: 18 }}>
       <Card hoverable={false}>
         <h3>Budget outlook</h3><p style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 13 }}>Projected operational surplus</p>
         <strong style={{ display: 'block', marginTop: 14, color: 'var(--color-success)', fontSize: 26, fontVariantNumeric: 'tabular-nums' }}>NPR {data.suggestions.budgetAnalysis.projectedSurplusNpr.toLocaleString()}</strong>
         <p style={{ marginTop: 14, lineHeight: 1.6, color: 'var(--text-muted)', fontSize: 13 }}>{data.suggestions.budgetAnalysis.promptText}</p>
       </Card>
+      <Card hoverable={false}>
+        <h3>Recorded expenses</h3><p style={{ marginTop: 4, marginBottom: 8, color: 'var(--text-muted)', fontSize: 13 }}>Latest operating costs by category</p>{data.expenses.map((expense: Expense) => <div key={expense.id} style={row}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}><div><strong>{expense.category}</strong><p style={{ marginTop: 3, color: 'var(--text-muted)', fontSize: 12 }}>{expense.description}</p></div><strong style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>NPR {Number(expense.amount).toLocaleString()}</strong></div></div>)}
+      </Card>
     </div>
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(320px, 1fr)', gap: 18 }}>
-      <Card hoverable={false}><h3>Recorded expenses</h3><p style={{ marginTop: 4, marginBottom: 8, color: 'var(--text-muted)', fontSize: 13 }}>Latest operating costs by category</p>{data.expenses.map((expense: Expense) => <div key={expense.id} style={row}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}><div><strong>{expense.category}</strong><p style={{ marginTop: 3, color: 'var(--text-muted)', fontSize: 12 }}>{expense.description}</p></div><strong style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>NPR {Number(expense.amount).toLocaleString()}</strong></div></div>)}</Card>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 18 }}>
       <Card hoverable={false}><h3>Financial signals</h3><p style={{ marginTop: 4, marginBottom: 8, color: 'var(--text-muted)', fontSize: 13 }}>Items that may need review</p>{data.suggestions.alerts.map((signal: FinancialSignal, index: number) => <div key={`${signal.type}-${index}`} style={row}><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}><strong style={{ fontSize: 13 }}>{signal.type.replaceAll('_', ' ')}</strong><StatusBadge variant={signalVariant(signal)}>{signal.severity}</StatusBadge></div><p style={{ color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.55 }}>{signal.message}</p></div>)}</Card>
     </div>
   </div>;

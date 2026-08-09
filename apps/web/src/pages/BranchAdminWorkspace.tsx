@@ -1,13 +1,11 @@
-import { useState, useMemo, useEffect, FormEvent, ReactNode } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useState, useMemo, type FormEvent, type ReactNode } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { StatusBadge } from '../components/ui/StatusBadge';
-import { ProgressRing } from '../components/ui/ProgressRing';
+import { SharedBillingWorkspace } from '../components/finance/SharedBillingWorkspace';
 import { api } from '../services/api';
-import { UserProfileDrawer } from '../components/UserProfileDrawer';
-import { TenantAcademicCalendar } from '../features/tenant/TenantAcademicCalendar';
-import type { AcademicEvent } from '../services/api/academicEvents';
+import './staffFinance.css';
 
 function CalendarGrid({ onDateClick, events }: { onDateClick: (date: Date) => void; events: Record<string, string> }) {
   const [visibleMonth, setVisibleMonth] = useState(() => { const now = new Date(); return new Date(now.getFullYear(), now.getMonth(), 1); });
@@ -463,6 +461,9 @@ function PersonalizedClassesView() {
   );
 }
 
+function FeeBillingView() {
+  return <SharedBillingWorkspace heading="Branch billing & payroll" />;
+}
 function BranchCalendarView() {
   const action = useAction();
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
@@ -928,161 +929,6 @@ function ResultsView() {
           </div>
         )}
       </Card>
-    </Page>
-  );
-}
-
-function FeeBillingView() {
-  const [activeTab, setActiveTab] = useState<'students' | 'teachers' | 'courses' | 'discounts'>('students');
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const action = useAction();
-
-  const [addMode, setAddMode] = useState(false);
-  const [editingRecord, setEditingRecord] = useState<any>(null);
-
-  const [records, setRecords] = useState({
-    students: [
-      { id: '101', name: 'Aakash Bista', amount: 'NPR 15,000', status: 'Pending' },
-      { id: '102', name: 'Priya Gurung', amount: 'NPR 12,000', status: 'Cleared' },
-    ],
-    teachers: [
-      { id: '201', name: 'Sanjay Rai', amount: 'NPR 45,000', status: 'Pending' },
-      { id: '202', name: 'Rina Karki', amount: 'NPR 40,000', status: 'Cleared' },
-    ],
-    courses: [
-      { id: '301', name: 'Grade 10 Mathematics', amount: 'NPR 5,000 / month', status: 'Active' },
-      { id: '302', name: 'Grade 8 Science', amount: 'NPR 4,500 / month', status: 'Active' },
-    ]
-  });
-
-  const handleDelete = (id: string, type: 'students' | 'teachers' | 'courses') => {
-    if (window.confirm('Delete this record?')) {
-      setRecords(prev => ({ ...prev, [type]: prev[type].filter(r => r.id !== id) }));
-    }
-  };
-
-  const handleSave = (e: FormEvent) => {
-    e.preventDefault();
-    void action.run(async () => {
-      await new Promise(r => setTimeout(r, 600));
-      if (editingRecord.id) {
-        setRecords(prev => ({
-          ...prev,
-          [activeTab as keyof typeof records]: prev[activeTab as keyof typeof records].map(r => r.id === editingRecord.id ? editingRecord : r)
-        }));
-      } else {
-        const newRecord = { ...editingRecord, id: Date.now().toString() };
-        setRecords(prev => ({
-          ...prev,
-          [activeTab as keyof typeof records]: [...prev[activeTab as keyof typeof records], newRecord]
-        }));
-      }
-      setAddMode(false);
-      setEditingRecord(null);
-    }, `Record successfully ${editingRecord.id ? 'updated' : 'added'}.`);
-  };
-
-  const openAdd = () => {
-    setEditingRecord({ name: '', amount: '', status: 'Pending' });
-    setAddMode(true);
-  };
-
-  const openEdit = (record: any) => {
-    setEditingRecord(record);
-    setAddMode(true);
-  };
-
-  return (
-    <Page title="Fee & Billing Management" description="Manage course fees, student billing, teacher payroll, and discount coupons.">
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
-        <Button variant={activeTab === 'students' ? 'primary' : 'outline'} onClick={() => { setActiveTab('students'); setAddMode(false); }}>Students</Button>
-        <Button variant={activeTab === 'teachers' ? 'primary' : 'outline'} onClick={() => { setActiveTab('teachers'); setAddMode(false); }}>Teachers</Button>
-        <Button variant={activeTab === 'courses' ? 'primary' : 'outline'} onClick={() => { setActiveTab('courses'); setAddMode(false); }}>Courses</Button>
-        <Button variant={activeTab === 'discounts' ? 'primary' : 'outline'} onClick={() => { setActiveTab('discounts'); setAddMode(false); }}>Discounts</Button>
-      </div>
-
-      <Card hoverable={false}>
-        {activeTab === 'discounts' ? (
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ fontSize: '18px' }}>Discount Coupons</h2>
-              <Button onClick={() => alert('Request sent to Tenant Admin.')}>Request Coupon from Tenant Admin</Button>
-            </div>
-            <p style={{ marginTop: '8px', color: 'var(--text-muted)' }}>Apply discounts to individual students or an entire class.</p>
-            
-            <div style={{ marginTop: '24px', border: '1px solid var(--border)', borderRadius: '8px', padding: '16px' }}>
-              <h3 style={{ fontSize: '15px' }}>Apply Discount</h3>
-              <div style={{ display: 'grid', gap: '12px', marginTop: '12px' }}>
-                <label style={label}>Coupon Code<input style={field} placeholder="e.g. SUMMER2026" /></label>
-                <label style={label}>Target<select style={field}><option>Specific Student</option><option>Entire Class</option></select></label>
-                <label style={label}>Target ID<input style={field} placeholder="Student ID or Class ID" /></label>
-                <Button style={{ width: 'fit-content' }}>Apply Coupon</Button>
-              </div>
-            </div>
-          </div>
-        ) : addMode ? (
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h2 style={{ fontSize: '18px', textTransform: 'capitalize' }}>{editingRecord?.id ? 'Edit' : 'Add'} {activeTab.slice(0, -1)} Record</h2>
-              <Button variant="outline" onClick={() => setAddMode(false)}>Cancel</Button>
-            </div>
-            <form onSubmit={handleSave} style={form}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <label style={label}>Name<input required style={field} value={editingRecord?.name || ''} onChange={e => setEditingRecord({ ...editingRecord, name: e.target.value })} /></label>
-                <label style={label}>Amount<input required style={field} value={editingRecord?.amount || ''} onChange={e => setEditingRecord({ ...editingRecord, amount: e.target.value })} /></label>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '16px' }}>
-                <label style={label}>Status<select style={field} value={editingRecord?.status || 'Pending'} onChange={e => setEditingRecord({ ...editingRecord, status: e.target.value })}><option>Pending</option><option>Cleared</option><option>Active</option><option>Inactive</option></select></label>
-              </div>
-              <Feedback message={action.message} error={action.error} />
-              <Button type="submit" disabled={action.busy} style={{ width: 'fit-content' }}>
-                {action.busy ? 'Saving...' : 'Save Record'}
-              </Button>
-            </form>
-          </div>
-        ) : (
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ fontSize: '18px', textTransform: 'capitalize' }}>{activeTab} Billing Records</h2>
-              <Button onClick={openAdd}>Add Record</Button>
-            </div>
-            <table style={{ width: '100%', marginTop: '16px', borderCollapse: 'collapse', fontSize: '14px' }}>
-              <thead>
-                <tr style={{ borderBottom: '2px solid var(--border)', textAlign: 'left' }}>
-                  <th style={{ padding: '8px' }}>ID</th>
-                  <th style={{ padding: '8px' }}>Name</th>
-                  <th style={{ padding: '8px' }}>Amount</th>
-                  <th style={{ padding: '8px' }}>Status</th>
-                  <th style={{ padding: '8px' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {records[activeTab as keyof typeof records].map(record => (
-                  <tr key={record.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <td style={{ padding: '12px 8px' }}>{record.id}</td>
-                    <td style={{ padding: '12px 8px' }}>{record.name}</td>
-                    <td style={{ padding: '12px 8px' }}>{record.amount}</td>
-                    <td style={{ padding: '12px 8px' }}><StatusBadge variant={record.status === 'Cleared' || record.status === 'Active' ? 'success' : 'warning'}>{record.status}</StatusBadge></td>
-                    <td style={{ padding: '12px 8px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                      {activeTab === 'students' && <Button variant="outline" onClick={() => setSelectedUserId(record.id)} style={{ padding: '4px 8px', minHeight: 'unset', height: '28px', fontSize: '12px' }}>History</Button>}
-                      {activeTab === 'teachers' && <Button variant="outline" onClick={() => setSelectedUserId(record.id)} style={{ padding: '4px 8px', minHeight: 'unset', height: '28px', fontSize: '12px' }}>History</Button>}
-                      <Button variant="outline" onClick={() => openEdit(record)} style={{ padding: '4px 8px', minHeight: 'unset', height: '28px', fontSize: '12px' }}>Edit</Button>
-                      <Button variant="outline" onClick={() => handleDelete(record.id, activeTab as any)} style={{ padding: '4px 8px', minHeight: 'unset', height: '28px', fontSize: '12px', color: 'var(--color-error)', borderColor: 'var(--color-error)' }}>Delete</Button>
-                    </td>
-                  </tr>
-                ))}
-                {records[activeTab as keyof typeof records].length === 0 && (
-                  <tr><td colSpan={5} style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)' }}>No records found.</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-      
-      {selectedUserId && (
-        <UserProfileDrawer userId={selectedUserId} onClose={() => setSelectedUserId(null)} />
-      )}
     </Page>
   );
 }
@@ -1829,4 +1675,4 @@ function BranchTeachersView() {
   );
 }
 
-export function BranchAdminWorkspace() { const path = useLocation().pathname; if (path.includes('leave-requests')) return <LeaveRequestsView />; if (path.includes('petty-cash')) return <PettyCashView />; if (path.includes('personalized-classes')) return <PersonalizedClassesView />; if (path.includes('resource-logs')) return <ResourceTasks />; if (path.includes('academic-calendar')) return <BranchCalendarView />; if (path.includes('social-media') || path.includes('announcements')) return <Drafting />; if (path.includes('attendance')) return <AttendanceView />; if (path.includes('homework')) return <HomeworkView />; if (path.includes('results')) return <ResultsView />; if (path.includes('fees')) return <FeeBillingView />; if (path.includes('certificates')) return <CertificatesView />; if (path.includes('timetable')) return <TimetableView />; if (path.includes('teachers')) return <BranchTeachersView />; if (path.includes('students')) return <BranchStudentsView />; return <Page title="Branch operations" description="This workspace is limited to your assigned physical branch."><Card hoverable={false}>Choose a branch operation from the navigation.</Card></Page>; }
+export function BranchAdminWorkspace() { const path = useLocation().pathname; if (path.includes('leave-requests')) return <LeaveRequestsView />; if (path.includes('petty-cash')) return <PettyCashView />; if (path.includes('student-exceptions')) return <StudentExceptions />; if (path.includes('personalized-classes')) return <PersonalizedClassesView />; if (path.includes('resource-logs')) return <ResourceTasks />; if (path.includes('academic-calendar')) return <BranchCalendarView />; if (path.includes('social-media') || path.includes('announcements')) return <Drafting />; if (path.includes('attendance')) return <AttendanceView />; if (path.includes('homework')) return <HomeworkView />; if (path.includes('results')) return <ResultsView />; if (path.includes('fees')) return <FeeBillingView />; if (path.includes('certificates')) return <CertificatesView />; if (path.includes('timetable')) return <TimetableView />; if (path.includes('teachers')) return <BranchTeachersView />; if (path.includes('students')) return <BranchStudentsView />; return <Page title="Branch operations" description="This workspace is limited to your assigned physical branch."><Card hoverable={false}>Choose a branch operation from the navigation.</Card></Page>; }

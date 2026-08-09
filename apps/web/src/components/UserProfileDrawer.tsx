@@ -84,6 +84,8 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
   const [activities, setActivities] = useState<Array<{ id: string; name: string; classes: Array<{ id: string; name: string }> }>>([]);
   const [enrollCourse, setEnrollCourse] = useState('');
   const [enrollClass, setEnrollClass] = useState('');
+  const [resetModalOpen, setResetModalOpen] = useState(false);
+  const [tempPassword, setTempPassword] = useState('');
 
   const openEnroll = async () => {
     setEnrollOpen(true);
@@ -179,6 +181,20 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
       onChanged?.();
     } catch (error: unknown) {
       showToast(error instanceof Error ? error.message : 'Failed to change status.', 'error');
+    } finally { setBusy(false); }
+  };
+
+  const handleResetPassword = async () => {
+    if (!profile) return;
+    if (!window.confirm(`Are you sure you want to reset the password for ${profile.name}?`)) return;
+    setBusy(true);
+    try {
+      const response = await api.people.resetPassword(userId);
+      setTempPassword(response.temporaryPassword);
+      setResetModalOpen(true);
+      showToast('Password reset successfully.', 'success');
+    } catch (error: unknown) {
+      showToast(error instanceof Error ? error.message : 'Failed to reset password.', 'error');
     } finally { setBusy(false); }
   };
 
@@ -283,6 +299,9 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                     ) : null}
                     <Button variant="outline" onClick={startEdit} disabled={busy} style={{ minHeight: '36px', height: '36px' }}>
                       <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>edit</span> Edit
+                    </Button>
+                    <Button variant="outline" onClick={() => void handleResetPassword()} disabled={busy} style={{ minHeight: '36px', height: '36px', color: 'var(--color-primary)' }}>
+                      <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>lock_reset</span> Reset Password
                     </Button>
                     <Button variant="outline" onClick={() => void toggleActive()} disabled={busy} style={{ minHeight: '36px', height: '36px', color: profile.status === 'ACTIVE' ? 'var(--color-error)' : 'var(--color-success)', borderColor: profile.status === 'ACTIVE' ? 'rgba(230,57,70,0.4)' : 'rgba(0,171,102,0.4)' }}>
                       {profile.status === 'ACTIVE' ? 'Deactivate' : 'Reactivate'}
@@ -534,6 +553,33 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
 
       {showAnalytics ? (
         <StudentAnalytics userId={userId} fetcher={api.people.getAnalytics} onClose={() => setShowAnalytics(false)} />
+      ) : null}
+
+      {resetModalOpen && tempPassword ? (
+        <div className="auth-dialog-overlay" role="dialog" aria-modal="true" style={{ zIndex: 100000 }}>
+          <div className="auth-dialog">
+            <span className="material-symbols-outlined" style={{ fontSize: '42px', color: 'var(--color-success)' }}>
+              check_circle
+            </span>
+            <h3 className="auth-dialog-title">Password Reset Successful</h3>
+            <p className="auth-dialog-body" style={{ marginBottom: '16px' }}>
+              The password for <strong>{profile?.name}</strong> has been reset. Please copy and share this temporary password securely. The user will be required to change it on their next login.
+            </p>
+            <div style={{ padding: '16px', background: 'var(--bg-background)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', textAlign: 'center', marginBottom: '24px' }}>
+              <div style={{ fontSize: '24px', fontWeight: 700, fontFamily: 'monospace', letterSpacing: '2px', color: 'var(--text-foreground)' }}>
+                {tempPassword}
+              </div>
+            </div>
+            <div className="auth-dialog-actions" style={{ flexDirection: 'row', gap: '12px' }}>
+              <Button onClick={() => { navigator.clipboard.writeText(tempPassword); showToast('Password copied to clipboard', 'success'); }} style={{ flex: 1 }}>
+                Copy Password
+              </Button>
+              <Button variant="outline" onClick={() => { setResetModalOpen(false); setTempPassword(''); }} style={{ flex: 1 }}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </>
   );

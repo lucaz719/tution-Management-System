@@ -12,6 +12,7 @@ import {
 } from '../features/student/studentPortalData';
 import { loadNepalPayPayload, loadStudentPortal, studentFileUrl } from '../features/student/studentPortalService';
 import { errorMessage } from '../services/api/client';
+import { ChangePasswordForm } from '../components/ChangePasswordForm';
 import '../features/student/studentPortal.css';
 
 type StudentView =
@@ -25,7 +26,8 @@ type StudentView =
   | 'digital-id'
   | 'certificates'
   | 'calendar'
-  | 'notifications';
+  | 'notifications'
+  | 'security';
 
 const VIEW_TITLES: Record<StudentView, [string, string]> = {
   home: ['Student dashboard', 'Here is what needs your attention today.'],
@@ -39,6 +41,7 @@ const VIEW_TITLES: Record<StudentView, [string, string]> = {
   certificates: ['Certificates', 'Your permanent certificate history.'],
   calendar: ['Academic calendar', 'Holidays, exams, ceremonies, and fee deadlines.'],
   notifications: ['Notifications', 'Academic, attendance, fee, and certificate updates.'],
+  security: ['Security', 'Manage your account password and security settings.'],
 };
 
 const StudentDataContext = createContext<StudentPortalDataset | null>(null);
@@ -381,9 +384,15 @@ function DigitalIdView() {
         <div className="student-id-body"><div className="student-id-avatar">{studentProfile.initials}</div><div><span className="student-eyebrow">STUDENT</span><h2>{studentProfile.name}</h2><p>{studentProfile.grade} · Roll no. {studentProfile.rollNumber}</p><dl><div><dt>Enrollment ID</dt><dd>{studentProfile.enrollmentId}</dd></div><div><dt>Academic year</dt><dd>{studentProfile.academicYear}</dd></div><div><dt>Valid until</dt><dd>{studentProfile.validUntil}</dd></div></dl></div></div>
         <footer><div className="student-barcode" aria-hidden="true" /><span>Present this ID for identification at your branch.</span></footer>
       </section>
-      <aside className="student-card student-id-help">{icon('badge')}<h2>Branch identification</h2><p>This digital ID confirms your current enrollment. It is read-only and cannot be edited from the student portal.</p>{studentProfile.blocked ? <div className="student-warning-note">{icon('lock')}Fee dues have blocked the account. Identification remains visible.</div> : null}</aside>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <aside className="student-card student-id-help">{icon('badge')}<h2>Branch identification</h2><p>This digital ID confirms your current enrollment. It is read-only and cannot be edited from the student portal.</p>{studentProfile.blocked ? <div className="student-warning-note">{icon('lock')}Fee dues have blocked the account. Identification remains visible.</div> : null}</aside>
+      </div>
     </div>
   );
+}
+
+function SecurityView() {
+  return <div className="student-view"><ChangePasswordForm className="student-card" /></div>;
 }
 
 function CertificatesView() {
@@ -532,7 +541,8 @@ export function StudentPortal() {
                 : view === 'digital-id' ? <DigitalIdView />
                   : view === 'certificates' ? <CertificatesView />
                     : view === 'calendar' ? <CalendarView />
-                      : <NotificationsView go={go} readIds={readIds} markRead={markRead} markAllRead={markAllRead} />;
+                      : view === 'security' ? <SecurityView />
+                        : <NotificationsView go={go} readIds={readIds} markRead={markRead} markAllRead={markAllRead} />;
 
   return (
     <StudentDataContext.Provider value={data}><div className="student-portal">

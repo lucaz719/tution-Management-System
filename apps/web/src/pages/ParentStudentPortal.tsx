@@ -19,10 +19,13 @@ import type {
   ParentInvoice,
   ParentPortalDataset,
   ParentTone,
-  ParentView,
+  ParentView as OriginalParentView,
 } from '../features/parent/parentPortalTypes';
 import { errorMessage } from '../services/api/client';
+import { ChangePasswordForm } from '../components/ChangePasswordForm';
 import '../features/parent/parentPortal.css';
+
+type ParentView = OriginalParentView | 'security';
 
 const VIEW_COPY: Record<ParentView, [string, string]> = {
   home: ['Family overview', 'A private, child-specific view of today’s priorities.'],
@@ -36,6 +39,7 @@ const VIEW_COPY: Record<ParentView, [string, string]> = {
   certificates: ['Certificates', 'Permanent issued-document history for the selected child.'],
   calendar: ['Academic calendar', 'Exams, holidays, ceremonies, and fee deadlines.'],
   notifications: ['Notifications', 'Push and SMS activity scoped to the selected child.'],
+  security: ['Security', 'Manage your account password and security settings.'],
 };
 
 const ParentDataContext = createContext<ParentPortalDataset | null>(null);
@@ -82,6 +86,10 @@ function DashboardView({ child, go }: { child: ParentChild; go: (view: ParentVie
     <section className="parent-metrics" aria-label={`${child.name} summary`}><button type="button" onClick={() => go('attendance')}>{icon('fact_check')}<span><small>Attendance</small><strong>{child.attendanceRate}%</strong></span>{icon('arrow_forward')}</button><button type="button" onClick={() => go('fees')}>{icon('payments')}<span><small>Outstanding</small><strong>{money(child.outstanding)}</strong></span>{icon('arrow_forward')}</button><button type="button" onClick={() => go('appointments')}>{icon('event')}<span><small>Appointments</small><strong>{appointments.length}</strong></span>{icon('arrow_forward')}</button><button type="button" onClick={() => go('leave')}>{icon('event_available')}<span><small>Leave records</small><strong>{leaves.length}</strong></span>{icon('arrow_forward')}</button></section>
     <section className="parent-card"><SectionHeader title="Upcoming events" description={`Dates relevant to ${child.name}.`} action="Open calendar" onAction={() => go('calendar')} />{events.length ? <div className="parent-event-strip">{events.slice(0, 3).map((event) => <article key={event.id}><div><strong>{event.day}</strong><span>{event.month}</span></div><span><b>{event.title}</b><small>{event.kind}</small></span></article>)}</div> : <EmptyState title="No upcoming events" message="Published dates will appear here." iconName="event" />}</section>
   </div>;
+}
+
+function SecurityView() {
+  return <div className="parent-view"><ChangePasswordForm className="parent-card" /></div>;
 }
 function TimetableView({ child }: { child: ParentChild }) { return <div className="parent-view"><section className="parent-card"><SectionHeader title={`${child.name}’s merged schedule`} description="Every active course type, scoped to this child." /><SessionList /></section><div className="parent-info-note">{icon('info')}<span>Switching children changes this schedule; sessions are never merged across siblings.</span></div></div>; }
 function AttendanceView({ child }: { child: ParentChild }) {
@@ -241,6 +249,7 @@ export function ParentStudentPortal() {
                 : view === 'fees' ? <FeesView child={child} />
                   : view === 'certificates' ? <CertificatesView child={child} />
                     : view === 'calendar' ? <CalendarView child={child} />
-                      : <NotificationsView child={child} go={go} readIds={readIds} storeRead={storeRead} />;
+                      : view === 'security' ? <SecurityView />
+                        : <NotificationsView child={child} go={go} readIds={readIds} storeRead={storeRead} />;
   return <ParentDataContext.Provider value={data}><div className="parent-portal"><ChildSwitcher linkedChildren={data.children} activeChild={child} onSelect={(id) => navigate(`${location.pathname}?child=${id}`, { replace: true })} /><header className="parent-page-header"><div><span className="parent-eyebrow">PARENT PORTAL · {child.name.toUpperCase()}</span><h1>{title}</h1><p>{subtitle}</p><span className="parent-sync" role="status">{icon('cloud_done')}Loaded · {new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div><button type="button" className="parent-notification-button" aria-label={`${unread} unread notifications for ${child.name}`} onClick={() => go('notifications')}>{icon('notifications')}<span>{unread}</span></button></header><ChildContext child={child} />{content}</div></ParentDataContext.Provider>;
 }

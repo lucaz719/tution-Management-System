@@ -2,6 +2,32 @@
 // Tenant scope is authoritative from the signed session on the API.
 import { request } from './api/client';
 
+export interface BillingInvoice {
+  id: string; invoiceType: 'ADMISSION' | 'TUITION' | 'SUBJECT' | 'ACTIVITY'; amount: number; discount: number; fine: number;
+  netPayable: number; status: string; overdue: boolean; billingCycleStart: string; billingCycleEnd: string; dueDate: string;
+  paymentDate: string | null; transactionId: string | null; vatRate: number; createdAt: string;
+}
+
+export interface BillingPayroll {
+  id: string; month: number; year: number; baseSalary: number; deductions: number; bonuses: number; netPayable: number;
+  status: string; settlementReference: string | null; paymentDate: string | null; createdAt: string;
+}
+
+export interface BillingLedger {
+  generatedAt: string;
+  vatRate: number;
+  students: Array<{
+    studentId: string; studentName: string; email: string; grade: string; branchId: string | null; branchName: string;
+    admissionDate: string; courseEnd: string; monthlyAmount: number; invoices: BillingInvoice[];
+    projections: Array<{ cycleStart: string; cycleEnd: string; dueDate: string; amount: number }>;
+  }>;
+  teachers: Array<{
+    teacherId: string; userId: string; teacherName: string; email: string; designation: string; contractType: string;
+    branchId: string | null; branchName: string; baseSalary: number; payrolls: BillingPayroll[];
+    projection: { month: number; year: number; baseSalary: number; deductions: number; bonuses: number; netPayable: number };
+  }>;
+}
+
 export interface AccountantWorkspace {
   branches: Array<{ id: string; name: string }>;
   pettyCashCap: number;
@@ -102,11 +128,22 @@ export const api = {
         body: JSON.stringify({ resetToken, newPassword }),
       });
     },
+    changePassword: async (currentPassword: string, newPassword: string) => {
+      return request<{ success: boolean }>('/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+    },
   },
 
   // Finances
   finances: {
     getAccountantWorkspace: async () => request<AccountantWorkspace>('/finances/accountant-workspace'),
+    getBillingLedger: async () => request<BillingLedger>('/finances/billing-ledger'),
+    createInvoice: async (payload: { studentId: string; amount: number; discount: number; fine: number; invoiceType: 'TUITION' | 'SUBJECT' | 'ACTIVITY'; billingCycleStart: string; billingCycleEnd: string; dueDate: string }) =>
+      request<{ message: string; invoice: BillingInvoice }>('/finances/billing-ledger/invoices', { method: 'POST', body: JSON.stringify(payload) }),
+    createPayroll: async (payload: { staffRecordId: string; month: number; year: number; baseSalary: number; bonuses: number; deductions: number }) =>
+      request<{ message: string; payroll: BillingPayroll }>('/finances/billing-ledger/payrolls', { method: 'POST', body: JSON.stringify(payload) }),
     requestPettyCash: async (payload: { branchId: string; purpose: string; amount: number }) =>
       request<{ message: string; pettyCash: AccountantWorkspace['pettyCash'][number] }>('/finances/petty-cash/request', {
         method: 'POST',
@@ -223,7 +260,7 @@ export const api = {
       return request<{ message: string; created: number; billingPeriod: string; skipped: number }>('/finances/generate-invoices', {
         method: 'POST',
       });
-    }
+    },
   },
 
   // Teacher workspace
@@ -319,6 +356,9 @@ export const api = {
     },
     getProfile: async (userId: string) => {
       return request<any>(`/users/${userId}/profile`);
+    },
+    resetPassword: async (userId: string) => {
+      return request<{ temporaryPassword: string }>(`/users/${userId}/reset-password`, { method: 'POST' });
     },
     getAnalytics: async (userId: string) => {
       return request<{

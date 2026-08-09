@@ -28,6 +28,7 @@ export const DASHBOARD_NAVIGATION: Record<DashboardRole, DashboardNavItem[]> = {
     { section: 'Governance', label: 'Policy Defaults', icon: 'tune', path: '/platform/policies' },
     { section: 'Governance', label: 'Billing', icon: 'receipt_long', path: '/platform/billing' },
     { section: 'Security', label: 'Audit Log', icon: 'policy', path: '/platform/audit' },
+    { section: 'Security', label: 'Security', icon: 'security', path: '/platform/security' },
   ],
   'tenant-admin': [
     { section: 'Main', label: 'Dashboard', icon: 'dashboard', path: '/tenant/dashboard' },
@@ -51,6 +52,7 @@ export const DASHBOARD_NAVIGATION: Record<DashboardRole, DashboardNavItem[]> = {
     { section: 'Operations', label: 'Academic Calendar', icon: 'date_range', path: '/tenant/academic-calendar' },
     { section: 'Communication', label: 'Social Media', icon: 'share', path: '/tenant/social-media' },
     { section: 'Settings', label: 'Tenant Settings', icon: 'settings', path: '/tenant/settings' },
+    { section: 'Settings', label: 'Security', icon: 'security', path: '/tenant/security' },
   ],
   'branch-admin': [
     { section: 'Main', label: 'Dashboard', icon: 'dashboard', path: '/branch/dashboard' },
@@ -72,6 +74,7 @@ export const DASHBOARD_NAVIGATION: Record<DashboardRole, DashboardNavItem[]> = {
     { section: 'Communication', label: 'Announcements', icon: 'campaign', path: '/branch/announcements' },
     { section: 'Communication', label: 'Social Media', icon: 'share', path: '/branch/social-media' },
     { section: 'Calendar', label: 'Academic Calendar', icon: 'date_range', path: '/branch/academic-calendar' },
+    { section: 'Settings', label: 'Security', icon: 'security', path: '/branch/security' },
   ],
   teacher: [
     { section: 'Overview', label: 'Teacher Dashboard', icon: 'dashboard', path: '/teacher/dashboard' },
@@ -85,6 +88,7 @@ export const DASHBOARD_NAVIGATION: Record<DashboardRole, DashboardNavItem[]> = {
     { section: 'Personal', label: 'My Profile', icon: 'person', path: '/teacher/profile' },
     { section: 'Personal', label: 'Leave Requests', icon: 'time_to_leave', path: '/teacher/leave-requests' },
     { section: 'Personal', label: 'Salary Slips', icon: 'receipt_long', path: '/teacher/salary-slips' },
+    { section: 'Personal', label: 'Security', icon: 'security', path: '/teacher/security' },
   ],
   student: [
     { section: 'Overview', label: 'Home', icon: 'home', path: '/student/home' },
@@ -97,6 +101,7 @@ export const DASHBOARD_NAVIGATION: Record<DashboardRole, DashboardNavItem[]> = {
     { section: 'My Record', label: 'Digital ID', icon: 'badge', path: '/student/digital-id' },
     { section: 'My Record', label: 'Certificates', icon: 'workspace_premium', path: '/student/certificates' },
     { section: 'Calendar', label: 'Academic Calendar', icon: 'date_range', path: '/student/calendar' },
+    { section: 'Settings', label: 'Security', icon: 'security', path: '/student/security' },
   ],
   parent: [
     { section: 'Family', label: 'Home', icon: 'home', path: '/parent/home' },
@@ -109,12 +114,15 @@ export const DASHBOARD_NAVIGATION: Record<DashboardRole, DashboardNavItem[]> = {
     { section: 'Records', label: 'Fees & Payment', icon: 'payments', path: '/parent/fees' },
     { section: 'Records', label: 'Certificates', icon: 'workspace_premium', path: '/parent/certificates' },
     { section: 'Calendar', label: 'Academic Calendar', icon: 'date_range', path: '/parent/calendar' },
+    { section: 'Settings', label: 'Security', icon: 'security', path: '/parent/security' },
   ],
   receptionist: [
     { section: 'Front desk', label: "Today's desk", icon: 'desk', path: '/staff/reception' },
+    { section: 'Settings', label: 'Security', icon: 'security', path: '/staff/reception#security' },
   ],
   janitor: [
     { section: 'Maintenance', label: 'My Tasks', icon: 'cleaning_services', path: '/staff/tasks' },
+    { section: 'Settings', label: 'Security', icon: 'security', path: '/staff/tasks#security' },
   ],
 };
 

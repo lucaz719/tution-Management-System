@@ -17,6 +17,7 @@ export interface AuthUser {
   avatar?: string;
   firstLogin?: boolean;
   requiresTwoFactor?: boolean;
+  requiresPasswordChange?: boolean;
 }
 
 export type AuthErrorCode =

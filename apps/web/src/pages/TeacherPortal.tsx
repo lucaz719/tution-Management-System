@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useToast } from '../components/ui/Toast';
+import { ChangePasswordForm } from '../components/ChangePasswordForm';
 import { api } from '../services/api';
 import type { ChapterStatus, TeacherClass, TeacherDashboard, TeacherView } from '../features/teacher/teacherPortalTypes';
 import '../features/teacher/teacherPortal.css';
@@ -17,6 +18,7 @@ const VIEW_COPY: Record<TeacherView, [string, string]> = {
   profile: ['My profile', 'Your personal, employment, attendance, and performance record.'],
   'leave-requests': ['Leave requests', 'Submit leave to your branch or tenant approval path.'],
   'salary-slips': ['Salary slips', 'Review upcoming pay and your complete salary history.'],
+  security: ['Security', 'Manage your account password and authentication settings.'],
 };
 
 const icon = (name: string) => <span className="material-symbols-outlined" aria-hidden="true">{name}</span>;
@@ -130,6 +132,12 @@ function Profile({ data }: { data: TeacherDashboard }) {
   return <div className="teacher-view"><section className="teacher-profile-hero"><span className="teacher-profile-avatar">{data.teacher.name.split(' ').map((item) => item[0]).join('').slice(0, 2)}</span><div><span className="teacher-eyebrow">TEACHER RECORD</span><h2>{data.teacher.name}</h2><p>{data.teacher.designation}</p></div><Status tone="success">Active</Status></section><section className="teacher-section"><header><div><h2>Profile details</h2><p>Contact an administrator to correct institutional records.</p></div></header><dl className="teacher-detail-grid">{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></section><section className="teacher-section"><header><div><h2>Own performance summary</h2></div><strong className="teacher-score-total">{data.statistics.updateCompliance}%</strong></header><div className="teacher-performance"><div><span>Attendance rate<small>Geo-verified presence</small></span><b>{data.statistics.attendanceRate}%</b><i><span style={{ width: `${data.statistics.attendanceRate}%` }} /></i></div><div><span>Update compliance<small>Confirmed daily logs</small></span><b>{data.statistics.updateCompliance}%</b><i><span style={{ width: `${data.statistics.updateCompliance}%` }} /></i></div></div></section><section className="teacher-section"><header><div><h2>Attendance stamp history</h2><p>IN, OUT, AUTO-OUT, and RE-IN remain separate.</p></div></header>{data.stamps.length ? <div className="teacher-stamps">{data.stamps.map((stamp) => <article key={stamp.id}><i className={`is-${stamp.stampType.toLowerCase().replace('_', '-')}`} /><div><strong>{statusLabel(stamp.stampType)}</strong><small>{stamp.branchName} · GPS ±{Math.round(stamp.gpsAccuracy)} m</small></div><time>{new Date(stamp.timestamp).toLocaleString()}</time></article>)}</div> : <Empty iconName="location_off" title="No attendance stamps" text="Geo-attendance history appears after your first Mark IN." />}</section></div>;
 }
 
+function SecurityView() {
+  return <div className="teacher-view">
+    <ChangePasswordForm className="teacher-section" />
+  </div>;
+}
+
 function Leave({ data, reload }: { data: TeacherDashboard; reload: () => Promise<void> }) {
   const { showToast } = useToast(); const [busy, setBusy] = useState(false); const branch = data.teacher.branches[0];
   const submit = async (event: React.FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = new FormData(event.currentTarget); if (!branch) return showToast('No assigned branch is available.', 'error'); setBusy(true); try { await api.teacher.requestLeave({ branchId: branch.id, leaveType: String(form.get('leaveType')), startDate: String(form.get('startDate')), endDate: String(form.get('endDate')), reason: String(form.get('reason')) }); showToast('Leave request submitted for approval.', 'success'); event.currentTarget.reset(); await reload(); } catch (error) { showToast(error instanceof Error ? error.message : 'Leave request failed.', 'error'); } finally { setBusy(false); } };
@@ -147,6 +155,6 @@ export function TeacherPortal() {
   const load = async () => { setLoading(true); setError(''); try { setData(await api.teacher.getDashboard()); } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not load your teacher workspace.'); } finally { setLoading(false); } };
   useEffect(() => { void load(); }, []);
   const go = (next: TeacherView) => navigate(`/teacher/${next}`); const copy = VIEW_COPY[view];
-  const content = (() => { if (!data) return null; if (view === 'dashboard') return <Dashboard data={data} go={go} />; if (view === 'timetable') return <Timetable data={data} />; if (view === 'geo-attendance') return <GeoAttendanceFuture />; if (view === 'attendance') return <Attendance data={data} reload={load} />; if (view === 'syllabus') return <Syllabus data={data} reload={load} />; if (view === 'daily-update-log') return <DailyUpdate data={data} reload={load} />; if (view === 'homework') return <Homework data={data} reload={load} />; if (view === 'results') return <Results data={data} reload={load} />; if (view === 'profile') return <Profile data={data} />; if (view === 'leave-requests') return <Leave data={data} reload={load} />; return <Salary data={data} />; })();
+  const content = (() => { if (!data) return null; if (view === 'dashboard') return <Dashboard data={data} go={go} />; if (view === 'timetable') return <Timetable data={data} />; if (view === 'geo-attendance') return <GeoAttendanceFuture />; if (view === 'attendance') return <Attendance data={data} reload={load} />; if (view === 'syllabus') return <Syllabus data={data} reload={load} />; if (view === 'daily-update-log') return <DailyUpdate data={data} reload={load} />; if (view === 'homework') return <Homework data={data} reload={load} />; if (view === 'results') return <Results data={data} reload={load} />; if (view === 'profile') return <Profile data={data} />; if (view === 'leave-requests') return <Leave data={data} reload={load} />; if (view === 'security') return <SecurityView />; return <Salary data={data} />; })();
   return <main className="teacher-portal"><header className="teacher-page-head"><div><span className="teacher-eyebrow">TEACHER WORKSPACE</span><h1>{copy[0]}</h1><p>{copy[1]}</p></div>{data ? <Status>Teacher portal</Status> : null}</header>{loading ? <div className="teacher-skeleton" aria-busy="true" aria-label="Loading teacher workspace"><i /><i /><i /></div> : error ? <div className="teacher-error" role="alert">{icon('cloud_off')}<div><strong>Couldn’t load the Teacher portal</strong><p>{error}</p></div><button type="button" onClick={() => void load()}>Try again</button></div> : content}</main>;
 }

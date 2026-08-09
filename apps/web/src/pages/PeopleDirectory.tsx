@@ -48,9 +48,13 @@ interface FormState {
   branchId: string;
   gradeId: string;
   studentId: string;
+  parentFirstName: string;
+  parentLastName: string;
+  parentEmail: string;
+  parentPhone: string;
 }
 
-const EMPTY_FORM: FormState = { firstName: '', lastName: '', email: '', phone: '', role: '', branchId: '', gradeId: '', studentId: '' };
+const EMPTY_FORM: FormState = { firstName: '', lastName: '', email: '', phone: '', role: '', branchId: '', gradeId: '', studentId: '', parentFirstName: '', parentLastName: '', parentEmail: '', parentPhone: '' };
 
 // Categorize a role for the stat strip.
 const STAFF_ROLES = ['Teacher', 'Accountant', 'Receptionist', 'Janitor'];
@@ -110,7 +114,7 @@ export function PeopleDirectory() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [isSaving, setIsSaving] = useState(false);
-  const [credentials, setCredentials] = useState<CreatedCredentials | null>(null);
+  const [credentials, setCredentials] = useState<CreatedCredentials[]>([]);
   const [copied, setCopied] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState('');
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -219,19 +223,57 @@ export function PeopleDirectory() {
         phone: form.phone.trim(),
         branchId: form.branchId,
       };
-      const result =
-        form.role === 'Branch Admin'
-          ? await api.people.createBranchAdmin(payload)
-          : await api.people.create({ ...payload, role: form.role, gradeId: form.role === 'Student' && form.gradeId ? form.gradeId : undefined, studentId: form.role === 'Parent' ? form.studentId : undefined });
-
+      
       const branchName = caps?.manageableBranches.find((b) => b.id === form.branchId)?.name ?? '';
-      setCredentials({
-        name: `${payload.firstName} ${payload.lastName}`,
-        email: result.user.email,
-        role: form.role,
-        branch: branchName,
-        temporaryPassword: result.temporaryPassword,
-      });
+      const creds: CreatedCredentials[] = [];
+
+      if (form.role === 'Student') {
+        if (!form.parentFirstName.trim() || !form.parentLastName.trim() || !form.parentEmail.trim()) {
+          showToast('Parent first name, last name, and email are required for students.', 'error');
+          setIsSaving(false);
+          return;
+        }
+
+        const studentResult = await api.people.create({ ...payload, role: 'Student', gradeId: form.gradeId || undefined });
+        creds.push({
+          name: `${payload.firstName} ${payload.lastName}`,
+          email: studentResult.user.email,
+          role: 'Student',
+          branch: branchName,
+          temporaryPassword: studentResult.temporaryPassword,
+        });
+
+        const parentResult = await api.people.create({
+          firstName: form.parentFirstName.trim(),
+          lastName: form.parentLastName.trim(),
+          email: form.parentEmail.trim(),
+          phone: form.parentPhone.trim(),
+          branchId: form.branchId,
+          role: 'Parent',
+          studentId: studentResult.user.id || studentResult.user.studentId
+        });
+        creds.push({
+          name: `${form.parentFirstName.trim()} ${form.parentLastName.trim()}`,
+          email: parentResult.user.email,
+          role: 'Parent',
+          branch: branchName,
+          temporaryPassword: parentResult.temporaryPassword,
+        });
+      } else {
+        const result = form.role === 'Branch Admin'
+          ? await api.people.createBranchAdmin(payload)
+          : await api.people.create({ ...payload, role: form.role, studentId: form.role === 'Parent' ? form.studentId : undefined });
+          
+        creds.push({
+          name: `${payload.firstName} ${payload.lastName}`,
+          email: result.user.email,
+          role: form.role,
+          branch: branchName,
+          temporaryPassword: result.temporaryPassword,
+        });
+      }
+
+      setCredentials(creds);
       setCopied(false);
       setDrawerOpen(false);
       showToast(`${form.role} created successfully.`, 'success');
@@ -244,14 +286,14 @@ export function PeopleDirectory() {
   };
 
   const handleCopy = async () => {
-    if (!credentials) return;
+    if (credentials.length === 0) return;
     try {
-      await navigator.clipboard.writeText(
-        `TMS login for ${credentials.name} (${credentials.role})\nEmail: ${credentials.email}\nTemporary password: ${credentials.temporaryPassword}`
-      );
+      const text = credentials.map(c => `TMS login for ${c.name} (${c.role})\nEmail: ${c.email}\nTemporary password: ${c.temporaryPassword}`).join('\n\n');
+      await navigator.clipboard.writeText(text);
       setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     } catch {
-      showToast('Could not copy. Please copy manually.', 'error');
+      showToast('Failed to copy credentials to clipboard.', 'error');
     }
   };
 
@@ -467,19 +509,42 @@ export function PeopleDirectory() {
                 </div>
 
                 {form.role === 'Student' ? (
-                  <div className="people-field">
-                    <label>Grade <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>(class level)</span></label>
-                    {grades.length === 0 ? (
-                      <input value="No grades set up — add them under Academics › Grades" disabled />
-                    ) : (
-                      <select value={form.gradeId} onChange={(e) => setField('gradeId', e.target.value)}>
-                        <option value="">Not assigned</option>
-                        {grades.map((g) => (
-                          <option key={g.id} value={g.id}>{g.name}</option>
-                        ))}
-                      </select>
-                    )}
-                  </div>
+                  <>
+                    <div className="people-field">
+                      <label>Grade <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>(class level)</span></label>
+                      {grades.length === 0 ? (
+                        <input value="No grades set up — add them under Academics › Grades" disabled />
+                      ) : (
+                        <select value={form.gradeId} onChange={(e) => setField('gradeId', e.target.value)}>
+                          <option value="">Not assigned</option>
+                          {grades.map((g) => (
+                            <option key={g.id} value={g.id}>{g.name}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                    
+                    <hr style={{ margin: '20px 0', border: 'none', borderTop: '1px dashed var(--border)' }} />
+                    <h3 style={{ fontSize: '14px', marginBottom: '12px' }}>Parent Details</h3>
+                    <div className="people-field-row">
+                      <div className="people-field">
+                        <label>Parent First name</label>
+                        <input value={form.parentFirstName} onChange={(e) => setField('parentFirstName', e.target.value)} placeholder="Ram" required />
+                      </div>
+                      <div className="people-field">
+                        <label>Parent Last name</label>
+                        <input value={form.parentLastName} onChange={(e) => setField('parentLastName', e.target.value)} placeholder="Thapa" required />
+                      </div>
+                    </div>
+                    <div className="people-field">
+                      <label>Parent Email</label>
+                      <input type="email" value={form.parentEmail} onChange={(e) => setField('parentEmail', e.target.value)} placeholder="parent@example.com" required />
+                    </div>
+                    <div className="people-field">
+                      <label>Parent Phone <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>(optional)</span></label>
+                      <input value={form.parentPhone} onChange={(e) => setField('parentPhone', e.target.value)} placeholder="98XXXXXXXX" inputMode="tel" />
+                    </div>
+                  </>
                 ) : null}
 
                 {form.role === 'Parent' ? (
@@ -507,35 +572,41 @@ export function PeopleDirectory() {
         </>
       ) : null}
 
-      {credentials ? (
+      {credentials.length > 0 ? (
         <div className="people-cred-overlay">
-          <div className="people-cred-card" role="dialog" aria-modal="true">
+          <div className="people-cred-card" role="dialog" aria-modal="true" style={{ maxWidth: '500px', width: '100%' }}>
             <div className="people-cred-icon">
               <span className="material-symbols-outlined">check</span>
             </div>
-            <h2>{credentials.role} created</h2>
-            <p className="people-cred-sub">{credentials.name} · {credentials.branch}</p>
-
-            <div className="people-cred-box">
-              <div className="people-cred-row">
-                <span className="people-cred-key">Login email</span>
-                <span className="people-cred-val">{credentials.email}</span>
-              </div>
-              <div className="people-cred-row">
-                <span className="people-cred-key">Temporary password (shown once)</span>
-                <span className="people-cred-val people-cred-val--mono">{credentials.temporaryPassword}</span>
-              </div>
+            <h2>Accounts created successfully</h2>
+            
+            <div style={{ maxHeight: '400px', overflowY: 'auto', paddingRight: '4px', margin: '16px 0', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {credentials.map((cred, idx) => (
+                <div key={idx} style={{ background: 'var(--color-surface)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                  <h3 style={{ fontSize: '15px', marginBottom: '8px', color: 'var(--color-primary)' }}>{cred.role} · {cred.name}</h3>
+                  <div className="people-cred-box" style={{ margin: 0 }}>
+                    <div className="people-cred-row">
+                      <span className="people-cred-key">Login email</span>
+                      <span className="people-cred-val">{cred.email}</span>
+                    </div>
+                    <div className="people-cred-row">
+                      <span className="people-cred-key">Temporary password</span>
+                      <span className="people-cred-val people-cred-val--mono">{cred.temporaryPassword}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
 
             <p className="people-cred-note">
-              Share these credentials securely. The password is stored only as a hash and cannot be shown again.
+              Share these credentials securely. The passwords are stored only as a hash and cannot be shown again.
             </p>
 
             <div style={{ display: 'flex', gap: '12px', marginTop: '18px' }}>
               <Button onClick={() => void handleCopy()} style={{ flex: 1 }}>
                 {copied ? 'Copied ✓' : 'Copy Credentials'}
               </Button>
-              <Button variant="outline" onClick={() => setCredentials(null)} style={{ flex: 1 }}>Done</Button>
+              <Button variant="outline" onClick={() => setCredentials([])} style={{ flex: 1 }}>Done</Button>
             </div>
           </div>
         </div>
