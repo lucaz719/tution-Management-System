@@ -1,10 +1,10 @@
-import { useState, useMemo, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useState, useMemo, type FormEvent, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { SharedBillingWorkspace } from '../components/finance/SharedBillingWorkspace';
-import { api } from '../services/api';
+import { api, type BranchAppointment } from '../services/api';
 import './staffFinance.css';
 
 function CalendarGrid({ onDateClick, events }: { onDateClick: (date: Date) => void; events: Record<string, string> }) {
@@ -1675,4 +1675,32 @@ function BranchTeachersView() {
   );
 }
 
-export function BranchAdminWorkspace() { const path = useLocation().pathname; if (path.includes('leave-requests')) return <LeaveRequestsView />; if (path.includes('petty-cash')) return <PettyCashView />; if (path.includes('student-exceptions')) return <StudentExceptions />; if (path.includes('personalized-classes')) return <PersonalizedClassesView />; if (path.includes('resource-logs')) return <ResourceTasks />; if (path.includes('academic-calendar')) return <BranchCalendarView />; if (path.includes('social-media') || path.includes('announcements')) return <Drafting />; if (path.includes('attendance')) return <AttendanceView />; if (path.includes('homework')) return <HomeworkView />; if (path.includes('results')) return <ResultsView />; if (path.includes('fees')) return <FeeBillingView />; if (path.includes('certificates')) return <CertificatesView />; if (path.includes('timetable')) return <TimetableView />; if (path.includes('teachers')) return <BranchTeachersView />; if (path.includes('students')) return <BranchStudentsView />; return <Page title="Branch operations" description="This workspace is limited to your assigned physical branch."><Card hoverable={false}>Choose a branch operation from the navigation.</Card></Page>; }
+function AppointmentsView() {
+  const action = useAction();
+  const [items, setItems] = useState<BranchAppointment[]>([]);
+  const [selected, setSelected] = useState<BranchAppointment | null>(null);
+  const [scheduledTime, setScheduledTime] = useState('');
+  const [response, setResponse] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const load = async () => { setLoading(true); setLoadError(''); try { const dashboard = await api.branchAdmin.getDashboard(); setItems((await api.branchAdmin.getAppointments(dashboard.selectedBranch.id)).appointments); } catch (cause) { setLoadError(cause instanceof Error ? cause.message : 'Appointments could not be loaded.'); } finally { setLoading(false); } };
+  useEffect(() => { void load(); }, []);
+  const choose = (item: BranchAppointment) => { setSelected(item); setScheduledTime(new Date(item.scheduledTime).toISOString().slice(0, 16)); setResponse(item.responseRemarks || ''); };
+  const decide = async (actionName: 'APPROVE' | 'REJECT') => {
+    if (!selected) return;
+    await api.branchAdmin.respondToAppointment(selected.id, { action: actionName, scheduledTime: actionName === 'APPROVE' ? new Date(scheduledTime).toISOString() : undefined, remarks: response });
+    setSelected(null); setScheduledTime(''); setResponse(''); await load();
+  };
+  const pending = items.filter((item) => item.status === 'REQUESTED');
+  const history = items.filter((item) => item.status !== 'REQUESTED');
+  return <Page title="Parent appointments" description="Review requests from parents, confirm a date and time, and send the response back to their portal.">
+    <Feedback message={action.message} error={loadError || action.error} />
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20 }}>
+      <Card hoverable={false}><h2 style={{ fontSize: 17, marginBottom: 12 }}>Pending requests</h2>{loading ? <p role="status">Loading appointment requests…</p> : pending.length ? <div style={{ display: 'grid', gap: 8 }}>{pending.map((item) => <button key={item.id} type="button" onClick={() => choose(item)} style={{ minHeight: 76, padding: 12, textAlign: 'left', border: `1px solid ${selected?.id === item.id ? 'var(--color-primary)' : 'var(--border)'}`, borderRadius: 8, background: selected?.id === item.id ? 'var(--color-primary-soft)' : 'var(--color-surface)', color: 'var(--color-text)', cursor: 'pointer' }}><strong>{item.student.user.firstName} {item.student.user.lastName}</strong><span style={{ display: 'block', marginTop: 4, color: 'var(--text-muted)', fontSize: 12 }}>Parent: {item.requestedBy.firstName} {item.requestedBy.lastName}</span><span style={{ display: 'block', marginTop: 4, color: 'var(--text-muted)', fontSize: 12 }}>Preferred: {new Date(item.scheduledTime).toLocaleString('en-NP')}</span></button>)}</div> : <p role="status" style={{ color: 'var(--text-muted)' }}>No parent requests are waiting.</p>}</Card>
+      {selected ? <Card hoverable={false}><StatusBadge variant="warning">Awaiting decision</StatusBadge><h2 style={{ marginTop: 12, fontSize: 18 }}>{selected.student.user.firstName} {selected.student.user.lastName}</h2><p style={{ marginTop: 6, color: 'var(--text-muted)', fontSize: 13 }}>{selected.remarks || 'No reason was provided.'}</p><form onSubmit={(event) => { event.preventDefault(); void action.run(() => decide('APPROVE'), 'Appointment confirmed and sent to the parent.'); }} style={{ ...form, marginTop: 16 }}><label style={label} htmlFor="branch-appointment-time">Confirmed date and time<input id="branch-appointment-time" type="datetime-local" min={new Date().toISOString().slice(0, 16)} value={scheduledTime} onChange={(event) => setScheduledTime(event.target.value)} style={field} required /></label><label style={label} htmlFor="branch-appointment-response">Message to parent<textarea id="branch-appointment-response" maxLength={2000} value={response} onChange={(event) => setResponse(event.target.value)} style={{ ...field, minHeight: 96 }} required /></label><div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}><Button type="submit" disabled={action.busy || !scheduledTime || !response.trim()}>Accept and send time</Button><Button type="button" variant="danger" disabled={action.busy || !response.trim()} onClick={() => void action.run(() => decide('REJECT'), 'Appointment request rejected and the parent was notified.')}>Reject request</Button></div></form></Card> : <Card hoverable={false}><p style={{ color: 'var(--text-muted)' }}>Select a pending request to review it.</p></Card>}
+    </div>
+    <Card hoverable={false}><h2 style={{ fontSize: 17, marginBottom: 12 }}>Appointment history</h2>{history.length ? history.map((item) => <div key={item.id} style={{ padding: '12px 0', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><strong>{item.student.user.firstName} {item.student.user.lastName}</strong><p style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 12 }}>{new Date(item.scheduledTime).toLocaleString('en-NP')} · {item.responseRemarks || 'No response note'}</p></div><StatusBadge variant={item.status === 'CONFIRMED' ? 'success' : 'error'}>{item.status}</StatusBadge></div>) : <p style={{ color: 'var(--text-muted)' }}>No completed appointment decisions yet.</p>}</Card>
+  </Page>;
+}
+
+export function BranchAdminWorkspace() { const path = useLocation().pathname; if (path.includes('appointments')) return <AppointmentsView />; if (path.includes('leave-requests')) return <LeaveRequestsView />; if (path.includes('petty-cash')) return <PettyCashView />; if (path.includes('student-exceptions')) return <StudentExceptions />; if (path.includes('personalized-classes')) return <PersonalizedClassesView />; if (path.includes('resource-logs')) return <ResourceTasks />; if (path.includes('academic-calendar')) return <BranchCalendarView />; if (path.includes('social-media') || path.includes('announcements')) return <Drafting />; if (path.includes('attendance')) return <AttendanceView />; if (path.includes('homework')) return <HomeworkView />; if (path.includes('results')) return <ResultsView />; if (path.includes('fees')) return <FeeBillingView />; if (path.includes('certificates')) return <CertificatesView />; if (path.includes('timetable')) return <TimetableView />; if (path.includes('teachers')) return <BranchTeachersView />; if (path.includes('students')) return <BranchStudentsView />; return <Page title="Branch operations" description="This workspace is limited to your assigned physical branch."><Card hoverable={false}>Choose a branch operation from the navigation.</Card></Page>; }

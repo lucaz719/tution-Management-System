@@ -12,11 +12,10 @@ export function sendParentMessage(input: { studentId: string; receiverId: string
 
 export function requestAppointment(input: {
   studentId: string;
-  teacherId: string;
+  branchId: string;
+  target: 'BRANCH_ADMIN';
   scheduledTime: string;
   remarks: string;
-  isGroup: boolean;
-  participantIds?: string[];
 }) {
   return request('/appointments/request', { method: 'POST', body: JSON.stringify(input) });
 }

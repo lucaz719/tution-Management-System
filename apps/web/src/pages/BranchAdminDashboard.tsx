@@ -79,10 +79,12 @@ export function BranchAdminDashboard() {
             blockedStudents: 2,
             pendingInvoices: 5,
             outstandingAmount: 25000,
+            pendingAppointments: 0,
           },
           timetable: [],
           resources: [],
           pettyCash: [],
+          appointments: [],
         });
       } else {
         setData(null);
@@ -164,6 +166,7 @@ export function BranchAdminDashboard() {
         <QuickAccessItem icon="assignment" label="Homework" path="/branch/homework" />
         <QuickAccessItem icon="analytics" label="Results" path="/branch/results" />
         <QuickAccessItem icon="payments" label="Fee & Billing" path="/branch/fees" />
+        <QuickAccessItem icon="event" label="Appointments" path="/branch/appointments" />
       </div>
     </div>
 
@@ -184,7 +187,15 @@ export function BranchAdminDashboard() {
       <KPICard title="Pending Fee Invoices" value={String(data?.metrics.pendingInvoices ?? 0)} delta={`${money(data?.metrics.outstandingAmount ?? 0)} outstanding`} icon="receipt_long" loading={isLoading} onClick={() => navigate('/branch/fees')}>
         <span className="material-symbols-outlined" style={{ position: 'absolute', top: '16px', right: '16px', fontSize: '20px', color: 'var(--text-muted)' }}>open_in_new</span>
       </KPICard>
+      <KPICard title="Pending Appointments" value={String(data?.metrics.pendingAppointments ?? 0)} delta="Parent requests awaiting your response" icon="event_pending" loading={isLoading} accentColor="var(--color-warning)" onClick={() => navigate('/branch/appointments')}>
+        <span className="material-symbols-outlined" style={{ position: 'absolute', top: '16px', right: '16px', fontSize: '20px', color: 'var(--text-muted)' }}>open_in_new</span>
+      </KPICard>
     </div>
+
+    {data?.appointments.length ? <Card hoverable={false}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 12 }}><div><h3 style={{ fontSize: 17 }}>Pending appointment requests</h3><p style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 13 }}>Parents waiting for a confirmed meeting time.</p></div><Button variant="outline" onClick={() => navigate('/branch/appointments')}>Review all</Button></div>
+      <div style={{ display: 'grid', gap: 8 }}>{data.appointments.map((appointment) => <button key={appointment.id} type="button" onClick={() => navigate('/branch/appointments')} style={{ minHeight: 56, padding: 12, border: '1px solid var(--border)', borderRadius: 8, background: 'var(--color-surface)', color: 'var(--color-text)', textAlign: 'left', cursor: 'pointer' }}><strong>{appointment.student}</strong><span style={{ display: 'block', marginTop: 4, color: 'var(--text-muted)', fontSize: 12 }}>{appointment.parent} · {new Date(appointment.preferredTime).toLocaleString('en-NP')}</span></button>)}</div>
+    </Card> : null}
 
     {/* New Row: Active Students Breakdown & Staff Performance */}
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '18px' }}>

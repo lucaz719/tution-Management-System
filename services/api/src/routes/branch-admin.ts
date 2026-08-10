@@ -33,7 +33,7 @@ router.get('/dashboard', async (req: TenantRequest, res: Response) => {
     start.setHours(0, 0, 0, 0);
     const end = new Date(start);
     end.setDate(end.getDate() + 1);
-    const [teacherCount, presentTeachers, attendance, blockedEnrollments, invoices, sessions, resources, pettyCash] = await Promise.all([
+    const [teacherCount, presentTeachers, attendance, blockedEnrollments, invoices, sessions, resources, pettyCash, appointments] = await Promise.all([
       prisma.user.count({ where: { tenantId: req.tenantId!, status: 'ACTIVE', userRoles: { some: { branchId, role: { name: 'Teacher' } } } } }),
       prisma.teacherAttendance.findMany({ where: { branchId, timestamp: { gte: start, lt: end }, stampType: { in: ['IN', 'RE_IN'] } }, select: { userId: true }, distinct: ['userId'] }),
       prisma.studentAttendance.findMany({ where: { date: { gte: start, lt: end }, class: { branchId, course: { tenantId: req.tenantId! } } }, select: { status: true } }),
@@ -47,6 +47,11 @@ router.get('/dashboard', async (req: TenantRequest, res: Response) => {
       }),
       prisma.resourceLog.findMany({ where: { branchId }, orderBy: { createdAt: 'desc' }, take: 8 }),
       prisma.pettyCash.findMany({ where: { tenantId: req.tenantId!, branchId, status: 'PENDING' }, orderBy: { createdAt: 'asc' }, take: 20 }),
+      prisma.appointment.findMany({
+        where: { tenantId: req.tenantId!, teacherId: req.user!.id, status: 'REQUESTED', student: { enrollments: { some: { status: { in: ['ACTIVE', 'BLOCKED'] }, class: { branchId } } } } },
+        include: { requestedBy: { select: { firstName: true, lastName: true } }, student: { include: { user: { select: { firstName: true, lastName: true } } } } },
+        orderBy: { createdAt: 'asc' }, take: 10,
+      }),
     ]);
     const markedStudents = attendance.length;
     const presentStudents = attendance.filter((record) => record.status === 'PRESENT').length;
@@ -61,6 +66,7 @@ router.get('/dashboard', async (req: TenantRequest, res: Response) => {
         blockedStudents: blockedEnrollments.length,
         pendingInvoices: invoices.length,
         outstandingAmount: invoices.reduce((sum, invoice) => sum + Number(invoice.netPayable), 0),
+        pendingAppointments: appointments.length,
       },
       timetable: sessions.map((session) => ({
         id: session.id,
@@ -79,6 +85,13 @@ router.get('/dashboard', async (req: TenantRequest, res: Response) => {
         createdAt: resource.createdAt,
       })),
       pettyCash: pettyCash.map((request) => ({ id: request.id, amount: Number(request.amount), purpose: request.purpose, status: request.status })),
+      appointments: appointments.map((appointment) => ({
+        id: appointment.id,
+        parent: `${appointment.requestedBy.firstName} ${appointment.requestedBy.lastName}`.trim(),
+        student: `${appointment.student.user.firstName} ${appointment.student.user.lastName}`.trim(),
+        preferredTime: appointment.scheduledTime.toISOString(),
+        description: appointment.remarks || 'Parent requested a meeting.',
+      })),
     });
   } catch {
     return res.status(500).json({ error: 'Failed to load the branch dashboard.' });

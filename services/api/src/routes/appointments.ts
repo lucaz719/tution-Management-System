@@ -3,7 +3,7 @@ import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware } from '../middleware/auth';
 import { MockPushNotificationService, MockSmsSender } from '../utils/notifications';
-import { canAccessBranch, isTenantAdmin } from '../utils/access-control';
+import { canAccessBranch, isTenantAdmin, managedBranchIds } from '../utils/access-control';
 
 const router = Router();
 
@@ -32,9 +32,10 @@ async function notifyAppointmentUsers(userIds: string[], title: string, message:
 }
 
 router.post('/request', authMiddleware, async (req: TenantRequest, res: Response) => {
-  const { studentId, teacherId, scheduledTime, remarks, isGroup = false, participantIds = [] } = req.body;
-  if (!studentId || !teacherId || !scheduledTime) {
-    return res.status(400).json({ error: 'Missing required parameters: studentId, teacherId, scheduledTime.' });
+  const { studentId, teacherId: requestedTeacherId, branchId, target = 'TEACHER', scheduledTime, remarks, isGroup = false, participantIds = [] } = req.body;
+  if (!['TEACHER', 'BRANCH_ADMIN'].includes(target)) return res.status(400).json({ error: 'Appointment target must be TEACHER or BRANCH_ADMIN.' });
+  if (!studentId || !scheduledTime || (target === 'TEACHER' && !requestedTeacherId) || (target === 'BRANCH_ADMIN' && !branchId)) {
+    return res.status(400).json({ error: 'Student, appointment recipient, and preferred date and time are required.' });
   }
   try {
     const [student, tenant] = await Promise.all([
@@ -49,13 +50,26 @@ router.post('/request', authMiddleware, async (req: TenantRequest, res: Response
       return res.status(422).json({ error: `Appointments must be scheduled at least ${tenant.appointmentWindowHours} hours in advance.` });
     }
 
-    const assignedTeacherIds = new Set(student.enrollments.map((enrollment) => enrollment.class.teacherId).filter(Boolean));
-    if (!assignedTeacherIds.has(teacherId)) {
-      return res.status(403).json({ error: 'You can only book with teachers assigned to this child.' });
-    }
-    const uniqueParticipants = [...new Set([teacherId, ...(Array.isArray(participantIds) ? participantIds : [])])];
-    if (isGroup && uniqueParticipants.some((id) => !assignedTeacherIds.has(id))) {
-      return res.status(403).json({ error: 'Every group participant must be assigned to this child.' });
+    const assignedTeacherIds = new Set(student.enrollments.map((enrollment) => enrollment.class.teacherId).filter((id): id is string => Boolean(id)));
+    let teacherId = requestedTeacherId as string;
+    let uniqueParticipants: string[];
+    if (target === 'BRANCH_ADMIN') {
+      if (!student.enrollments.some((enrollment) => enrollment.class.branchId === branchId)) {
+        return res.status(403).json({ error: 'This child is not enrolled in the selected branch.' });
+      }
+      const assignedAdmin = await prisma.userRole.findFirst({
+        where: { branchId, role: { name: 'Branch Admin' }, user: { tenantId: req.tenantId!, status: 'ACTIVE' } },
+        select: { userId: true },
+      });
+      if (!assignedAdmin) return res.status(422).json({ error: 'No active Branch Admin is assigned to this branch.' });
+      teacherId = assignedAdmin.userId;
+      uniqueParticipants = [teacherId];
+    } else {
+      if (!assignedTeacherIds.has(teacherId)) return res.status(403).json({ error: 'You can only book with teachers assigned to this child.' });
+      uniqueParticipants = [...new Set([teacherId, ...(Array.isArray(participantIds) ? participantIds : [])])];
+      if (isGroup && uniqueParticipants.some((id) => !assignedTeacherIds.has(id))) {
+        return res.status(403).json({ error: 'Every group participant must be assigned to this child.' });
+      }
     }
     const approvals = Object.fromEntries(uniqueParticipants.map((id) => [id, 'PENDING']));
     const appointment = await prisma.appointment.create({
@@ -66,7 +80,7 @@ router.post('/request', authMiddleware, async (req: TenantRequest, res: Response
         teacherId,
         scheduledTime: scheduledDate,
         remarks: remarks?.trim() || null,
-        isGroup: Boolean(isGroup),
+        isGroup: target === 'BRANCH_ADMIN' ? false : Boolean(isGroup),
         participantIds: uniqueParticipants,
         participantApprovals: approvals,
       },
@@ -80,18 +94,19 @@ router.post('/request', authMiddleware, async (req: TenantRequest, res: Response
 });
 
 router.post('/respond/:appointmentId', authMiddleware, async (req: TenantRequest, res: Response) => {
-  const { action, alternativeSlot, remarks } = req.body;
+  const { action, alternativeSlot, scheduledTime, remarks } = req.body;
   if (!['APPROVE', 'REJECT', 'PROPOSE_ALTERNATIVE'].includes(action)) {
     return res.status(400).json({ error: 'Action must be APPROVE, REJECT, or PROPOSE_ALTERNATIVE.' });
   }
   try {
     const appointment = await prisma.appointment.findFirst({
       where: { id: req.params.appointmentId, tenantId: req.tenantId! },
-      include: { student: { include: { user: true } } },
+      include: { student: { include: { user: true, enrollments: { where: { status: { in: ['ACTIVE', 'BLOCKED'] } }, include: { class: true } } } }, teacher: { include: { userRoles: { include: { role: true } } } } },
     });
     if (!appointment) return res.status(404).json({ error: 'Appointment not found.' });
     const participantIds = Array.isArray(appointment.participantIds) ? appointment.participantIds as string[] : [appointment.teacherId];
-    const staffAccess = isTenantAdmin(req.user!) || req.user!.roles.some((role: any) => role.branchId && canAccessBranch(req.user!, role.branchId));
+    const appointmentBranchIds = [...new Set(appointment.student.enrollments.map((enrollment) => enrollment.class.branchId))];
+    const staffAccess = isTenantAdmin(req.user!) || appointmentBranchIds.some((id) => managedBranchIds(req.user!).includes(id));
     if (!participantIds.includes(req.user!.id) && !staffAccess) {
       return res.status(403).json({ error: 'You are not an invited appointment participant.' });
     }
@@ -130,6 +145,16 @@ router.post('/respond/:appointmentId', authMiddleware, async (req: TenantRequest
       return res.json({ message: 'Appointment rejected.', appointment: updated });
     }
 
+    const recipientIsBranchAdmin = appointment.teacher.userRoles.some((assignment) => assignment.role.name === 'Branch Admin' && appointmentBranchIds.includes(assignment.branchId || ''));
+    if (recipientIsBranchAdmin) {
+      if (appointment.teacherId !== req.user!.id && !isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the assigned Branch Admin may confirm this appointment.' });
+      const confirmedTime = new Date(scheduledTime || alternativeSlot || appointment.scheduledTime);
+      if (Number.isNaN(confirmedTime.getTime()) || confirmedTime.getTime() <= Date.now()) return res.status(422).json({ error: 'Choose a valid future appointment date and time.' });
+      const updated = await prisma.appointment.update({ where: { id: appointment.id }, data: { scheduledTime: confirmedTime, status: 'CONFIRMED', responseRemarks: remarks?.trim() || null, participantApprovals: { [appointment.teacherId]: 'APPROVED' } } });
+      await notifyAppointmentUsers([appointment.requestedById], 'Appointment confirmed', `Your Branch Admin appointment about ${appointment.student.user.firstName} is confirmed for ${confirmedTime.toLocaleString('en-NP', { timeZone: 'Asia/Kathmandu' })}.`);
+      return res.json({ message: 'Appointment confirmed and sent to the parent.', appointment: updated });
+    }
+
     const approvals = { ...((appointment.participantApprovals as Record<string, string> | null) ?? {}) };
     approvals[req.user!.id] = 'APPROVED';
     const allApproved = participantIds.every((id) => approvals[id] === 'APPROVED');
@@ -141,6 +166,26 @@ router.post('/respond/:appointmentId', authMiddleware, async (req: TenantRequest
     return res.json({ message: allApproved ? 'Appointment confirmed.' : 'Participant approval recorded.', appointment: updated });
   } catch (error: any) {
     return res.status(500).json({ error: 'Failed to respond to appointment.', details: error.message });
+  }
+});
+
+router.get('/branch', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const branchId = typeof req.query.branchId === 'string' ? req.query.branchId.trim() : '';
+  if (!branchId || (!isTenantAdmin(req.user!) && !managedBranchIds(req.user!).includes(branchId))) {
+    return res.status(403).json({ error: 'You cannot view appointments for this branch.' });
+  }
+  try {
+    const appointments = await prisma.appointment.findMany({
+      where: {
+        tenantId: req.tenantId!, teacherId: req.user!.id,
+        student: { enrollments: { some: { status: { in: ['ACTIVE', 'BLOCKED'] }, class: { branchId } } } },
+      },
+      include: { requestedBy: { select: { firstName: true, lastName: true, phone: true } }, student: { include: { user: { select: { firstName: true, lastName: true } } } } },
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+    });
+    return res.json({ appointments });
+  } catch {
+    return res.status(500).json({ error: 'Failed to load branch appointments.' });
   }
 });
 

@@ -406,6 +406,14 @@ Docker database volume.
   permission mapping, and added responsive reception-state styling.
 ## Reconciliation notes (2026-08-06)
 
+## Parent to Branch Admin appointments (2026-08-10)
+
+- Parents can request an appointment with the active Branch Admin assigned to their child's branch from `/parent/appointments`, supplying a preferred date/time and reason.
+- The API validates the parent-child link, active branch enrollment, booking window, and Branch Admin assignment before persisting or notifying anyone.
+- Assigned Branch Admins receive a branch-scoped appointment queue at `/branch/appointments`, can accept with a confirmed date/time and response message or reject with a reason, and the parent receives the outcome through the portal plus the configured push/SMS notification flow.
+- The Branch Admin dashboard now includes a pending-appointment KPI and request preview sourced from persisted appointment records.
+- API and web production builds pass. The authenticated integration suite currently stops at the pre-existing teacher-session assertion (`expected 404`, received `409`) before reaching later coverage.
+
 - Completely overhauled the Branch Admin portal. The `BranchAdminDashboard` now acts as a quick-access tool with deep-links to specific modular sections, and `BranchAdminWorkspace` handles all detailed branch operations.
 
 ## Completed Branch Admin web work
