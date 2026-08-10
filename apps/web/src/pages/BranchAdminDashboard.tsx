@@ -192,10 +192,13 @@ export function BranchAdminDashboard() {
       </KPICard>
     </div>
 
-    {data?.appointments.length ? <Card hoverable={false}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 12 }}><div><h3 style={{ fontSize: 17 }}>Pending appointment requests</h3><p style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 13 }}>Parents waiting for a confirmed meeting time.</p></div><Button variant="outline" onClick={() => navigate('/branch/appointments')}>Review all</Button></div>
-      <div style={{ display: 'grid', gap: 8 }}>{data.appointments.map((appointment) => <button key={appointment.id} type="button" onClick={() => navigate('/branch/appointments')} style={{ minHeight: 56, padding: 12, border: '1px solid var(--border)', borderRadius: 8, background: 'var(--color-surface)', color: 'var(--color-text)', textAlign: 'left', cursor: 'pointer' }}><strong>{appointment.student}</strong><span style={{ display: 'block', marginTop: 4, color: 'var(--text-muted)', fontSize: 12 }}>{appointment.parent} · {new Date(appointment.preferredTime).toLocaleString('en-NP')}</span></button>)}</div>
-    </Card> : null}
+    <Card hoverable={false}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
+        <div><h3 style={{ fontSize: '16px', fontWeight: 600 }}>Parent Appointment Requests</h3><p style={{ marginTop: '4px', color: 'var(--text-muted)', fontSize: '13px' }}>Allocate the confirmed date, time, and parent-facing description.</p></div>
+        <Button variant="outline" onClick={() => navigate('/branch/appointments')}>Manage appointments</Button>
+      </div>
+      {isLoading ? <Empty>Loading appointment requests...</Empty> : data?.appointments.length ? <div style={{ display: 'grid', gap: '10px' }}>{data.appointments.map((appointment) => <div key={appointment.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', padding: '12px 0', borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}><div><strong style={{ fontSize: '14px' }}>{appointment.student}</strong><p style={{ marginTop: '3px', color: 'var(--text-muted)', fontSize: '12px' }}>{appointment.parent} · {appointment.description}</p></div><Button variant="outline" onClick={() => navigate('/branch/appointments')}>Review</Button></div>)}</div> : <Empty>No pending appointment requests.</Empty>}
+    </Card>
 
     {/* New Row: Active Students Breakdown & Staff Performance */}
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '18px' }}>

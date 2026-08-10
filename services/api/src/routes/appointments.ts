@@ -86,7 +86,12 @@ router.post('/request', authMiddleware, async (req: TenantRequest, res: Response
       },
       include: { teacher: { select: { firstName: true, lastName: true } } },
     });
-    await notifyAppointmentUsers(uniqueParticipants, 'Appointment requested', `A parent requested an appointment about ${student.user.firstName}.`);
+    const branchIds = [...new Set(student.enrollments.map((enrollment) => enrollment.class.branchId))];
+    const branchAdmins = await prisma.user.findMany({
+      where: { tenantId: req.tenantId!, status: 'ACTIVE', userRoles: { some: { branchId: { in: branchIds }, role: { name: 'Branch Admin' } } } },
+      select: { id: true },
+    });
+    await notifyAppointmentUsers([...uniqueParticipants, ...branchAdmins.map((admin) => admin.id)], 'Appointment requested', `A parent requested an appointment about ${student.user.firstName}.`);
     return res.status(201).json({ message: 'Appointment requested.', appointment, bookingWindowHours: tenant.appointmentWindowHours });
   } catch (error: any) {
     return res.status(500).json({ error: 'Failed to request appointment.', details: error.message });

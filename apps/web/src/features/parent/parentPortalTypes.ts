@@ -86,6 +86,7 @@ export interface ParentAppointment {
   requestedTime: string;
   alternativeTime?: string;
   responseMessage?: string;
+  responseDescription?: string;
   state: AppointmentState;
   group: boolean;
 }

@@ -98,6 +98,7 @@ export interface BranchAppointment {
   responseRemarks: string | null;
   createdAt: string;
   requestedBy: { firstName: string; lastName: string; phone: string | null };
+  teacher?: { firstName: string; lastName: string };
   student: { user: { firstName: string; lastName: string } };
 }
 

@@ -205,6 +205,7 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
       requestedTime: formatDate(appointment.scheduledTime),
       alternativeTime: appointment.alternativeTime ? formatDate(appointment.alternativeTime) : undefined,
       responseMessage: appointment.responseRemarks || undefined,
+      responseDescription: appointment.responseRemarks || undefined,
       state: appointmentState(appointment.status), group: appointment.isGroup,
       };
     });
