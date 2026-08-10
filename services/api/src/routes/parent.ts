@@ -199,9 +199,10 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
     const mappedAppointments = appointments.map((appointment) => ({
       id: appointment.id, childId: student.id,
       teacher: `${appointment.teacher.firstName} ${appointment.teacher.lastName}`,
-      subject: appointment.remarks || 'Student meeting',
+      subject: appointment.responseRemarks || appointment.remarks || 'Student meeting',
       requestedTime: formatDate(appointment.scheduledTime),
       alternativeTime: appointment.alternativeTime ? formatDate(appointment.alternativeTime) : undefined,
+      responseDescription: appointment.responseRemarks || undefined,
       state: appointmentState(appointment.status), group: appointment.isGroup,
     }));
     const mappedLeaves = leaves.map((leave) => ({

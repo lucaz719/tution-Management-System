@@ -82,10 +82,24 @@ export interface BranchAdminDashboardData {
     blockedStudents: number;
     pendingInvoices: number;
     outstandingAmount: number;
+    pendingAppointments: number;
   };
   timetable: Array<{ id: string; time: string | null; title: string; detail: string; room: string; status: string }>;
   resources: Array<{ id: string; label: string; detail: string; status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED'; actionRequired: boolean; createdAt: string }>;
   pettyCash: Array<{ id: string; amount: number; purpose: string; status: 'PENDING' }>;
+  appointments: Array<{ id: string; parent: string; student: string; preferredTime: string; description: string }>;
+}
+
+export interface BranchAppointment {
+  id: string;
+  status: 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'ALTERNATIVE_PROPOSED' | 'CONFIRMED' | 'CANCELLED';
+  scheduledTime: string;
+  remarks: string | null;
+  responseRemarks: string | null;
+  createdAt: string;
+  requestedBy: { firstName: string; lastName: string; phone: string | null };
+  teacher: { firstName: string; lastName: string };
+  student: { user: { firstName: string; lastName: string } };
 }
 
 // Helper to remove token
@@ -543,6 +557,9 @@ export const api = {
   // Branch Admin operations. Authorization and branch scoping are enforced by the API.
   branchAdmin: {
     getDashboard: async (branchId?: string) => request<BranchAdminDashboardData>(`/branch-admin/dashboard${branchId ? `?branchId=${encodeURIComponent(branchId)}` : ''}`),
+    getAppointments: async (branchId: string) => request<{ appointments: BranchAppointment[] }>(`/appointments/branch?branchId=${encodeURIComponent(branchId)}`),
+    respondToAppointment: async (appointmentId: string, payload: { action: 'APPROVE' | 'REJECT'; scheduledTime?: string; remarks: string }) =>
+      request<{ message: string }>(`/appointments/respond/${encodeURIComponent(appointmentId)}`, { method: 'POST', body: JSON.stringify(payload) }),
     decideLeave: async (leaveId: string, action: 'APPROVE' | 'REJECT', remarks?: string) =>
       request<{ message: string; leave: any }>(`/leaves/approve/${leaveId}`, { method: 'POST', body: JSON.stringify({ action, remarks }) }),
     emergencyDeparture: async (payload: { studentId: string; branchId: string; reason: string; collectedBy?: string; departureTime?: string }) =>

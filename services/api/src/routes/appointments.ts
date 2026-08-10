@@ -72,7 +72,12 @@ router.post('/request', authMiddleware, async (req: TenantRequest, res: Response
       },
       include: { teacher: { select: { firstName: true, lastName: true } } },
     });
-    await notifyAppointmentUsers(uniqueParticipants, 'Appointment requested', `A parent requested an appointment about ${student.user.firstName}.`);
+    const branchIds = [...new Set(student.enrollments.map((enrollment) => enrollment.class.branchId))];
+    const branchAdmins = await prisma.user.findMany({
+      where: { tenantId: req.tenantId!, status: 'ACTIVE', userRoles: { some: { branchId: { in: branchIds }, role: { name: 'Branch Admin' } } } },
+      select: { id: true },
+    });
+    await notifyAppointmentUsers([...uniqueParticipants, ...branchAdmins.map((admin) => admin.id)], 'Appointment requested', `A parent requested an appointment about ${student.user.firstName}.`);
     return res.status(201).json({ message: 'Appointment requested.', appointment, bookingWindowHours: tenant.appointmentWindowHours });
   } catch (error: any) {
     return res.status(500).json({ error: 'Failed to request appointment.', details: error.message });
@@ -80,18 +85,19 @@ router.post('/request', authMiddleware, async (req: TenantRequest, res: Response
 });
 
 router.post('/respond/:appointmentId', authMiddleware, async (req: TenantRequest, res: Response) => {
-  const { action, alternativeSlot, remarks } = req.body;
+  const { action, alternativeSlot, scheduledTime, remarks } = req.body;
   if (!['APPROVE', 'REJECT', 'PROPOSE_ALTERNATIVE'].includes(action)) {
     return res.status(400).json({ error: 'Action must be APPROVE, REJECT, or PROPOSE_ALTERNATIVE.' });
   }
   try {
     const appointment = await prisma.appointment.findFirst({
       where: { id: req.params.appointmentId, tenantId: req.tenantId! },
-      include: { student: { include: { user: true } } },
+      include: { student: { include: { user: true, enrollments: { where: { status: { in: ['ACTIVE', 'BLOCKED'] } }, include: { class: true } } } } },
     });
     if (!appointment) return res.status(404).json({ error: 'Appointment not found.' });
     const participantIds = Array.isArray(appointment.participantIds) ? appointment.participantIds as string[] : [appointment.teacherId];
-    const staffAccess = isTenantAdmin(req.user!) || req.user!.roles.some((role: any) => role.branchId && canAccessBranch(req.user!, role.branchId));
+    const appointmentBranchIds = [...new Set(appointment.student.enrollments.map((enrollment) => enrollment.class.branchId))];
+    const staffAccess = isTenantAdmin(req.user!) || appointmentBranchIds.some((branchId) => canAccessBranch(req.user!, branchId));
     if (!participantIds.includes(req.user!.id) && !staffAccess) {
       return res.status(403).json({ error: 'You are not an invited appointment participant.' });
     }
@@ -130,6 +136,21 @@ router.post('/respond/:appointmentId', authMiddleware, async (req: TenantRequest
       return res.json({ message: 'Appointment rejected.', appointment: updated });
     }
 
+    if (staffAccess) {
+      const allocated = new Date(scheduledTime);
+      if (!scheduledTime || Number.isNaN(allocated.getTime()) || allocated.getTime() <= Date.now()) {
+        return res.status(422).json({ error: 'Allocate a valid future appointment date and time.' });
+      }
+      const description = String(remarks || '').trim();
+      if (!description) return res.status(422).json({ error: 'Add a description for the parent.' });
+      const updated = await prisma.appointment.update({
+        where: { id: appointment.id },
+        data: { scheduledTime: allocated, status: 'CONFIRMED', responseRemarks: description },
+      });
+      await notifyAppointmentUsers([appointment.requestedById, appointment.teacherId], 'Appointment confirmed', `Appointment for ${appointment.student.user.firstName} was scheduled for ${allocated.toLocaleString('en-NP', { timeZone: 'Asia/Kathmandu' })}.`);
+      return res.json({ message: 'Appointment accepted and scheduled.', appointment: updated });
+    }
+
     const approvals = { ...((appointment.participantApprovals as Record<string, string> | null) ?? {}) };
     approvals[req.user!.id] = 'APPROVED';
     const allApproved = participantIds.every((id) => approvals[id] === 'APPROVED');
@@ -141,6 +162,30 @@ router.post('/respond/:appointmentId', authMiddleware, async (req: TenantRequest
     return res.json({ message: allApproved ? 'Appointment confirmed.' : 'Participant approval recorded.', appointment: updated });
   } catch (error: any) {
     return res.status(500).json({ error: 'Failed to respond to appointment.', details: error.message });
+  }
+});
+
+router.get('/branch', authMiddleware, async (req: TenantRequest, res: Response) => {
+  try {
+    const branchId = String(req.query.branchId || '').trim();
+    if (!branchId || !canAccessBranch(req.user!, branchId)) {
+      return res.status(403).json({ error: 'You cannot view appointments for this branch.' });
+    }
+    const appointments = await prisma.appointment.findMany({
+      where: {
+        tenantId: req.tenantId!,
+        student: { enrollments: { some: { status: { in: ['ACTIVE', 'BLOCKED'] }, class: { branchId } } } },
+      },
+      include: {
+        teacher: { select: { firstName: true, lastName: true } },
+        requestedBy: { select: { firstName: true, lastName: true, phone: true } },
+        student: { include: { user: { select: { firstName: true, lastName: true } } } },
+      },
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+    });
+    return res.json({ appointments });
+  } catch {
+    return res.status(500).json({ error: 'Failed to load branch appointments.' });
   }
 });
 
