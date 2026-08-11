@@ -672,6 +672,7 @@ model PettyCash {
   receiptProofUrl  String?
   remainingBalance Decimal         @db.Decimal(12, 2)
   approvalChain    Json // Log of transitions: [{role, action, timestamp, comment}]
+  requestItems     Json? // Itemized request: [{name, quantity, unitAmount, totalAmount}]
   policySnapshot   Json?
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt

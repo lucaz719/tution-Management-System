@@ -46,6 +46,7 @@ export interface AccountantWorkspace {
     branchName: string;
     purpose: string;
     amount: number;
+    items: Array<{ name: string; quantity: number; unitAmount: number; totalAmount: number }>;
     status: 'PENDING' | 'APPROVED_LEVEL1' | 'REJECTED' | 'RELEASED' | 'RECEIPT_SUBMITTED' | 'CLOSED';
     receiptProofUrl: string | null;
     approvalChain: Array<{ role?: string; action?: string; timestamp?: string; comment?: string }>;
@@ -158,12 +159,12 @@ export const api = {
       request<{ message: string; invoice: BillingInvoice }>('/finances/billing-ledger/invoices', { method: 'POST', body: JSON.stringify(payload) }),
     createPayroll: async (payload: { staffRecordId: string; month: number; year: number; baseSalary: number; bonuses: number; deductions: number }) =>
       request<{ message: string; payroll: BillingPayroll }>('/finances/billing-ledger/payrolls', { method: 'POST', body: JSON.stringify(payload) }),
-    requestPettyCash: async (payload: { branchId: string; purpose: string; amount: number }) =>
+    requestPettyCash: async (payload: { branchId: string; purpose: string; amount: number; items: Array<{ name: string; quantity: number; unitAmount: number }> }) =>
       request<{ message: string; pettyCash: AccountantWorkspace['pettyCash'][number] }>('/finances/petty-cash/request', {
         method: 'POST',
         body: JSON.stringify(payload),
       }),
-    resubmitPettyCash: async (id: string, payload: { purpose: string; amount: number }) =>
+    resubmitPettyCash: async (id: string, payload: { purpose: string; amount: number; items: Array<{ name: string; quantity: number; unitAmount: number }> }) =>
       request<{ message: string; pettyCash: AccountantWorkspace['pettyCash'][number] }>(`/finances/petty-cash/${id}`, {
         method: 'PUT',
         body: JSON.stringify(payload),

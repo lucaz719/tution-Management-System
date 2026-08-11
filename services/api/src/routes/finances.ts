@@ -13,6 +13,54 @@ import { parsePlainRecord, parseStrictKeys, parseStrictObject, readBoolean, read
 
 const router = Router();
 
+type PettyCashRequestItem = { name: string; quantity: number; unitAmount: number; totalAmount: number };
+
+function normalizePettyCashItems(value: unknown, purpose: string, amount: number): PettyCashRequestItem[] {
+  if (Array.isArray(value)) {
+    const items = value.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
+      const item = entry as Record<string, unknown>;
+      const name = typeof item.name === 'string' ? item.name.trim() : '';
+      const quantity = Number(item.quantity);
+      const unitAmount = Number(item.unitAmount);
+      if (!name || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitAmount) || unitAmount <= 0) return [];
+      return [{ name, quantity, unitAmount, totalAmount: Math.round(quantity * unitAmount * 100) / 100 }];
+    });
+    if (items.length) return items;
+  }
+  return [{ name: purpose, quantity: 1, unitAmount: amount, totalAmount: amount }];
+}
+
+function parsePettyCashItems(value: unknown, legacyPurpose: string, legacyAmount: number) {
+  if (value === undefined) {
+    const items = normalizePettyCashItems(undefined, legacyPurpose, legacyAmount);
+    return { success: true as const, items, total: legacyAmount };
+  }
+  if (!Array.isArray(value) || value.length === 0 || value.length > 50) {
+    return { success: false as const, error: 'Petty cash requests require between 1 and 50 items.' };
+  }
+  const items: PettyCashRequestItem[] = [];
+  for (const [index, entry] of value.entries()) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      return { success: false as const, error: `Item ${index + 1} is invalid.` };
+    }
+    const item = entry as Record<string, unknown>;
+    if (Object.keys(item).some((key) => !['name', 'quantity', 'unitAmount'].includes(key))) {
+      return { success: false as const, error: `Item ${index + 1} contains an unsupported field.` };
+    }
+    const name = typeof item.name === 'string' ? item.name.trim() : '';
+    const quantity = Number(item.quantity);
+    const unitAmount = Number(item.unitAmount);
+    if (!name || name.length > 160) return { success: false as const, error: `Item ${index + 1} needs a name no longer than 160 characters.` };
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10_000) return { success: false as const, error: `Item ${index + 1} quantity must be a positive whole number.` };
+    if (!Number.isFinite(unitAmount) || unitAmount <= 0 || unitAmount > 10_000_000) return { success: false as const, error: `Item ${index + 1} amount must be a positive number.` };
+    items.push({ name, quantity, unitAmount, totalAmount: Math.round(quantity * unitAmount * 100) / 100 });
+  }
+  const total = Math.round(items.reduce((sum, item) => sum + item.totalAmount, 0) * 100) / 100;
+  if (total > 10_000_000) return { success: false as const, error: 'Petty cash request total exceeds the allowed maximum.' };
+  return { success: true as const, items, total };
+}
+
 async function loadInvoicePaymentAccess(req: TenantRequest, invoiceId: string) {
   const invoice = await prisma.invoice.findFirst({
     where: { id: invoiceId, tenantId: req.tenantId! },
@@ -490,6 +538,7 @@ router.get('/accountant-workspace', authMiddleware, async (req: TenantRequest, r
         branchName: item.branch.name,
         purpose: item.purpose,
         amount: num(item.amount),
+        items: normalizePettyCashItems(item.requestItems, item.purpose, num(item.amount)),
         status: item.status,
         receiptProofUrl: item.receiptProofUrl,
         approvalChain: item.approvalChain,
@@ -1114,7 +1163,7 @@ router.post(
   '/petty-cash/request',
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
-    const shape = parseStrictKeys(req.body, ['amount', 'purpose', 'branchId']);
+    const shape = parseStrictKeys(req.body, ['amount', 'purpose', 'branchId', 'items']);
     if (!shape.success) return res.status(400).json({ error: shape.error });
     const amount = readFiniteNumber(shape.data, 'amount', { min: 0.01, max: 10_000_000, message: 'Petty cash amount must be a positive finite number.' });
     const purpose = readTrimmedString(shape.data, 'purpose', { required: true, maxLength: 1_000, message: 'A petty cash purpose is required.' });
@@ -1122,13 +1171,16 @@ router.post(
     if (!amount.success) return res.status(400).json({ error: amount.error });
     if (!purpose.success) return res.status(400).json({ error: purpose.error });
     if (!branchId.success) return res.status(400).json({ error: branchId.error });
+    const requestItems = parsePettyCashItems(shape.data.items, purpose.data, amount.data);
+    if (!requestItems.success) return res.status(400).json({ error: requestItems.error });
+    if (Math.abs(requestItems.total - amount.data) > 0.009) return res.status(400).json({ error: 'Petty cash amount must equal the item total.' });
     const accountantId = req.user!.id;
 
     try {
       if (!hasBranchPermission(req.user!, 'manage_petty_cash', branchId.data)) {
         return res.status(403).json({ error: 'Only the assigned branch Accountant may request petty cash.' });
       }
-      const requestedAmount = amount.data;
+      const requestedAmount = requestItems.total;
       const branch = await prisma.branch.findFirst({ where: { id: branchId.data, tenantId: req.tenantId! } });
       if (!branch) return res.status(404).json({ error: 'Branch not found.' });
       const tenantPolicy = await prisma.tenant.findUniqueOrThrow({ where: { id: req.tenantId! } });
@@ -1158,6 +1210,7 @@ router.post(
                 comment: 'Initial request.',
               },
             ],
+            requestItems: requestItems.items,
             status: 'PENDING',
             policySnapshot: {
               pettyCashCapNpr: tenantPolicy.pettyCashCapNpr,
@@ -1165,7 +1218,7 @@ router.post(
             },
           },
         });
-      return res.status(201).json({ message: 'Petty cash request logged.', pettyCash: pc });
+      return res.status(201).json({ message: 'Petty cash request logged.', pettyCash: { ...pc, items: requestItems.items } });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to request petty cash.', details: error.message });
     }
@@ -1197,7 +1250,7 @@ router.get(
         },
         orderBy: { createdAt: 'desc' },
       });
-      return res.json(requests);
+      return res.json(requests.map((item) => ({ ...item, items: normalizePettyCashItems(item.requestItems, item.purpose, num(item.amount)) })));
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to list petty cash requests.', details: error.message });
     }
@@ -1207,12 +1260,15 @@ router.get(
 // The requesting Accountant may amend only a request explicitly returned for
 // revision. Approval history is retained and the same record is resubmitted.
 router.put('/petty-cash/:id', authMiddleware, async (req: TenantRequest, res: Response) => {
-  const shape = parseStrictKeys(req.body, ['amount', 'purpose']);
+  const shape = parseStrictKeys(req.body, ['amount', 'purpose', 'items']);
   if (!shape.success) return res.status(400).json({ error: shape.error });
   const amount = readFiniteNumber(shape.data, 'amount', { min: 0.01, max: 10_000_000, message: 'Petty cash amount must be a positive finite number.' });
   const purpose = readTrimmedString(shape.data, 'purpose', { required: true, maxLength: 1_000, message: 'A petty cash purpose is required.' });
   if (!amount.success) return res.status(400).json({ error: amount.error });
   if (!purpose.success) return res.status(400).json({ error: purpose.error });
+  const requestItems = parsePettyCashItems(shape.data.items, purpose.data, amount.data);
+  if (!requestItems.success) return res.status(400).json({ error: requestItems.error });
+  if (Math.abs(requestItems.total - amount.data) > 0.009) return res.status(400).json({ error: 'Petty cash amount must equal the item total.' });
 
   try {
     const request = await prisma.pettyCash.findFirst({ where: { id: req.params.id, tenantId: req.tenantId! } });
@@ -1233,7 +1289,7 @@ router.put('/petty-cash/:id', authMiddleware, async (req: TenantRequest, res: Re
       where: { tenantId: req.tenantId!, branchId: request.branchId, id: { not: request.id }, createdAt: { gte: monthStart }, status: { not: 'REJECTED' } },
       _sum: { amount: true },
     });
-    if (num(monthlyUsage._sum.amount) + amount.data > tenantPolicy.pettyCashCapNpr) {
+    if (num(monthlyUsage._sum.amount) + requestItems.total > tenantPolicy.pettyCashCapNpr) {
       return res.status(422).json({ error: 'This revision would exceed the branch monthly petty-cash cap.' });
     }
     const nextChain = [...approvalChain, {
@@ -1241,11 +1297,11 @@ router.put('/petty-cash/:id', authMiddleware, async (req: TenantRequest, res: Re
     }];
     const transition = await prisma.pettyCash.updateMany({
       where: { id: request.id, tenantId: req.tenantId!, accountantId: req.user!.id, status: 'PENDING' },
-      data: { purpose: purpose.data, amount: amount.data, remainingBalance: amount.data, approvalChain: nextChain },
+      data: { purpose: purpose.data, amount: requestItems.total, remainingBalance: requestItems.total, requestItems: requestItems.items, approvalChain: nextChain },
     });
     if (transition.count !== 1) return res.status(409).json({ error: 'The request changed before it could be resubmitted.' });
     const updated = await prisma.pettyCash.findUniqueOrThrow({ where: { id: request.id } });
-    return res.json({ message: 'Petty cash request resubmitted for Level 1 approval.', pettyCash: updated });
+    return res.json({ message: 'Petty cash request resubmitted for Level 1 approval.', pettyCash: { ...updated, items: requestItems.items } });
   } catch (error: any) {
     return res.status(500).json({ error: 'Failed to resubmit petty cash.' });
   }
