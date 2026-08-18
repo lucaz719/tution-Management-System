@@ -11,7 +11,7 @@ import {
 } from '../features/reception/receptionService';
 import '../features/reception/reception.css';
 
-type View = 'roster' | 'appointments' | 'announcements';
+type View = 'roster' | 'academic-attendance' | 'appointments' | 'announcements';
 
 const TIME_FORMAT = new Intl.DateTimeFormat('en-NP', { hour: 'numeric', minute: '2-digit' });
 const DATE_FORMAT = new Intl.DateTimeFormat('en-NP', { weekday: 'long', month: 'long', day: 'numeric' });
@@ -124,6 +124,7 @@ export function StaffReceptionPage() {
         <>
           <div className="reception-tabs" role="tablist" aria-label="Front desk views">
             <Tab id="roster" icon="groups" label="Student check-in" active={view === 'roster'} onSelect={setView} />
+            <Tab id="academic-attendance" icon="fact_check" label="Class attendance" count={data.academicAttendance.length} active={view === 'academic-attendance'} onSelect={setView} />
             <Tab id="appointments" icon="calendar_today" label="Appointments" count={data.appointments.length} active={view === 'appointments'} onSelect={setView} />
             <Tab id="announcements" icon="campaign" label="Announcements" count={data.announcements.length} active={view === 'announcements'} onSelect={setView} />
           </div>
@@ -168,6 +169,8 @@ export function StaffReceptionPage() {
           ))}</div> : <Empty icon="event_busy" title="No appointments today" detail="Booked parent and visitor appointments will appear here." />}
         </section>
       ) : null}
+
+      {view === 'academic-attendance' ? <section className="reception-workspace" role="tabpanel"><div className="reception-toolbar"><div><h3>Today’s academic attendance</h3><p>Read-only attendance submitted by teachers for every branch class.</p></div><span className="read-only-chip"><span className="material-symbols-outlined">visibility</span> Read only</span></div>{data.academicAttendance.length ? <div className="reception-table-wrap"><table className="reception-table"><thead><tr><th>Student</th><th>Class</th><th>Subject</th><th>Teacher</th><th>Status</th></tr></thead><tbody>{data.academicAttendance.map((row) => <tr key={row.id}><td><strong>{row.studentName}</strong></td><td>{row.className}</td><td>{row.subject}</td><td>{row.teacherName}</td><td><span className={`appointment-status appointment-status--${row.status === 'PRESENT' ? 'confirmed' : row.status === 'EXCUSED' ? 'alternative_proposed' : 'rejected'}`}>{row.status}</span></td></tr>)}</tbody></table></div> : <Empty icon="fact_check" title="No class attendance yet" detail="Teacher submissions for today will appear here." />}</section> : null}
 
       {view === 'announcements' ? (
         <section className="reception-workspace" role="tabpanel">

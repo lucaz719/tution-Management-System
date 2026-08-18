@@ -27,6 +27,7 @@ export interface ReceptionToday {
   roster: ReceptionStudent[];
   appointments: ReceptionAppointment[];
   announcements: ReceptionAnnouncement[];
+  academicAttendance: Array<{ id: string; studentName: string; className: string; subject: string; teacherName: string; status: 'PRESENT' | 'ABSENT' | 'EXCUSED' }>;
 }
 
 export async function loadReceptionToday() {

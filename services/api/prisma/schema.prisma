@@ -780,8 +780,55 @@ model SyllabusChapter {
   createdAt  DateTime              @default(now())
   updatedAt  DateTime              @updatedAt
   dailyLogs  DailyLessonLog[]
+  topics     SyllabusTopic[]
 
   @@unique([syllabusId, position])
+}
+
+model SyllabusTopic {
+  id        String                @id @default(uuid())
+  chapterId String
+  chapter   SyllabusChapter       @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  title     String
+  position  Int
+  status    ChapterProgressStatus @default(LEFT)
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+  logs      TopicProgressLog[]
+
+  @@unique([chapterId, position])
+}
+
+model TopicProgressLog {
+  id        String                @id @default(uuid())
+  topicId   String
+  topic     SyllabusTopic         @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  teacherId String
+  classId   String
+  logDate   DateTime              @db.Date
+  status    ChapterProgressStatus
+  notes     String?
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+
+  @@unique([topicId, logDate])
+  @@index([classId, logDate])
+}
+
+model ResultDefinition {
+  id        String   @id @default(uuid())
+  tenantId  String
+  branchId  String
+  classId   String
+  createdBy String
+  title     String
+  subject   String
+  testDate  DateTime @db.Date
+  isOpen    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, branchId, classId, isOpen])
 }
 
 model DailyLessonLog {

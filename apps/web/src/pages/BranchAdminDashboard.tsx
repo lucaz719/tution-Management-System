@@ -11,6 +11,27 @@ import { api, type BranchAdminDashboardData } from '../services/api';
 
 const money = (value: number) => `NPR ${Number(value || 0).toLocaleString('en-NP')}`;
 
+function normalizeDashboard(value: Partial<BranchAdminDashboardData> | null | undefined): BranchAdminDashboardData {
+  const branches = Array.isArray(value?.branches) ? value.branches : [];
+  return {
+    branches,
+    selectedBranch: value?.selectedBranch ?? branches[0] ?? { id: '', name: 'Branch' },
+    generatedAt: value?.generatedAt ?? new Date().toISOString(),
+    metrics: {
+      teacherAttendance: value?.metrics?.teacherAttendance ?? { present: 0, total: 0, rate: null },
+      studentAttendance: value?.metrics?.studentAttendance ?? { present: 0, total: 0, rate: null },
+      blockedStudents: value?.metrics?.blockedStudents ?? 0,
+      pendingInvoices: value?.metrics?.pendingInvoices ?? 0,
+      outstandingAmount: value?.metrics?.outstandingAmount ?? 0,
+      pendingAppointments: value?.metrics?.pendingAppointments ?? 0,
+    },
+    timetable: Array.isArray(value?.timetable) ? value.timetable : [],
+    resources: Array.isArray(value?.resources) ? value.resources : [],
+    pettyCash: Array.isArray(value?.pettyCash) ? value.pettyCash : [],
+    appointments: Array.isArray(value?.appointments) ? value.appointments : [],
+  };
+}
+
 function sessionStatus(status: string): Pick<TimetableListItem, 'status' | 'statusVariant'> {
   if (status === 'PRESENT_CONFIRMED') return { status: 'Completed', statusVariant: 'success' };
   if (status === 'PARTIAL_PRESENCE') return { status: 'Partial', statusVariant: 'gold' };
@@ -65,7 +86,7 @@ export function BranchAdminDashboard() {
     setIsLoading(true);
     setError('');
     try {
-      setData(await api.branchAdmin.getDashboard(branchId));
+      setData(normalizeDashboard(await api.branchAdmin.getDashboard(branchId)));
     } catch (loadError: any) {
       // If 404 (no branch assigned) or 403, show demo data so the dashboard still renders
       if (loadError?.status === 404 || loadError?.status === 403) {
@@ -142,10 +163,10 @@ export function BranchAdminDashboard() {
           <p style={{ marginTop: '4px', color: 'rgba(44, 62, 80, 0.7)', fontSize: '13px' }}>Live attendance, timetable, fee, and operations status for today.</p>
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'end' }}>
-          {data && data.branches.length > 1 && (
+          {(data?.branches?.length ?? 0) > 1 && (
             <label style={{ display: 'grid', gap: '4px', fontSize: '12px' }}>Branch
-              <select value={data.selectedBranch.id} onChange={(event) => void loadBranchData(event.target.value)} disabled={isLoading}>
-                {data.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+              <select value={data?.selectedBranch.id ?? ''} onChange={(event) => void loadBranchData(event.target.value)} disabled={isLoading}>
+                {(data?.branches ?? []).map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
               </select>
             </label>
           )}
