@@ -11,8 +11,9 @@ class StudentAttendanceScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final records = StudentDemoData.attendance;
-    final present =
-        records.where((item) => item.mark == StudentAttendanceMark.present).length;
+    final present = records
+        .where((item) => item.mark == StudentAttendanceMark.present)
+        .length;
     final ratio = records.isEmpty ? 0.0 : present / records.length;
     return StudentScaffold(
       title: 'Attendance',
@@ -131,4 +132,3 @@ class StudentAttendanceScreen extends StatelessWidget {
         StudentAttendanceMark.excused => StudentColors.warning,
       };
 }
-

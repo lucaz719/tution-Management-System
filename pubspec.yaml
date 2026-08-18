@@ -1,0 +1,17 @@
+name: TMS
+description: Task Management System
+publish_to: "none"
+version: 1.0.0
+environment:
+  sdk: ">=3.0.0"
+dependencies:
+  flutter:
+    sdk: flutter
+    # Add dependencies as needed
+    # For now, we'll keep it minimal
+    # Since we're using Flutter, we need to depend on Flutter itself
+  # The Flutter SDK includes all necessary dependencies
+  # We'll add flutter_test as a dev dependency
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

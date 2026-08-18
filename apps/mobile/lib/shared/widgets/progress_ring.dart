@@ -87,8 +87,8 @@ class _ProgressRingState extends State<ProgressRing>
 
   @override
   Widget build(BuildContext context) {
-    final displayText = widget.centerText ??
-        '${(widget.percent * 100).round()}%';
+    final displayText =
+        widget.centerText ?? '${(widget.percent * 100).round()}%';
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -104,8 +104,8 @@ class _ProgressRingState extends State<ProgressRing>
                   percent: widget.percent * _animation.value,
                   strokeWidth: widget.strokeWidth,
                   color: widget.color ?? kColorAccent,
-                  backgroundColor:
-                      widget.backgroundColor ?? kColorText.withOpacity(0.08),
+                  backgroundColor: widget.backgroundColor ??
+                      kColorText.withValues(alpha: 0.08),
                 ),
                 child: Center(
                   child: Text(
@@ -126,7 +126,7 @@ class _ProgressRingState extends State<ProgressRing>
           Text(
             widget.label!,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: kColorText.withOpacity(0.65),
+                  color: kColorText.withValues(alpha: 0.65),
                 ),
             textAlign: TextAlign.center,
           ),

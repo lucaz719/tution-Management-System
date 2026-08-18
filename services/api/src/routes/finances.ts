@@ -13,6 +13,54 @@ import { parsePlainRecord, parseStrictKeys, parseStrictObject, readBoolean, read
 
 const router = Router();
 
+type PettyCashRequestItem = { name: string; quantity: number; unitAmount: number; totalAmount: number };
+
+function normalizePettyCashItems(value: unknown, purpose: string, amount: number): PettyCashRequestItem[] {
+  if (Array.isArray(value)) {
+    const items = value.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
+      const item = entry as Record<string, unknown>;
+      const name = typeof item.name === 'string' ? item.name.trim() : '';
+      const quantity = Number(item.quantity);
+      const unitAmount = Number(item.unitAmount);
+      if (!name || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitAmount) || unitAmount <= 0) return [];
+      return [{ name, quantity, unitAmount, totalAmount: Math.round(quantity * unitAmount * 100) / 100 }];
+    });
+    if (items.length) return items;
+  }
+  return [{ name: purpose, quantity: 1, unitAmount: amount, totalAmount: amount }];
+}
+
+function parsePettyCashItems(value: unknown, legacyPurpose: string, legacyAmount: number) {
+  if (value === undefined) {
+    const items = normalizePettyCashItems(undefined, legacyPurpose, legacyAmount);
+    return { success: true as const, items, total: legacyAmount };
+  }
+  if (!Array.isArray(value) || value.length === 0 || value.length > 50) {
+    return { success: false as const, error: 'Petty cash requests require between 1 and 50 items.' };
+  }
+  const items: PettyCashRequestItem[] = [];
+  for (const [index, entry] of value.entries()) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      return { success: false as const, error: `Item ${index + 1} is invalid.` };
+    }
+    const item = entry as Record<string, unknown>;
+    if (Object.keys(item).some((key) => !['name', 'quantity', 'unitAmount'].includes(key))) {
+      return { success: false as const, error: `Item ${index + 1} contains an unsupported field.` };
+    }
+    const name = typeof item.name === 'string' ? item.name.trim() : '';
+    const quantity = Number(item.quantity);
+    const unitAmount = Number(item.unitAmount);
+    if (!name || name.length > 160) return { success: false as const, error: `Item ${index + 1} needs a name no longer than 160 characters.` };
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10_000) return { success: false as const, error: `Item ${index + 1} quantity must be a positive whole number.` };
+    if (!Number.isFinite(unitAmount) || unitAmount <= 0 || unitAmount > 10_000_000) return { success: false as const, error: `Item ${index + 1} amount must be a positive number.` };
+    items.push({ name, quantity, unitAmount, totalAmount: Math.round(quantity * unitAmount * 100) / 100 });
+  }
+  const total = Math.round(items.reduce((sum, item) => sum + item.totalAmount, 0) * 100) / 100;
+  if (total > 10_000_000) return { success: false as const, error: 'Petty cash request total exceeds the allowed maximum.' };
+  return { success: true as const, items, total };
+}
+
 async function loadInvoicePaymentAccess(req: TenantRequest, invoiceId: string) {
   const invoice = await prisma.invoice.findFirst({
     where: { id: invoiceId, tenantId: req.tenantId! },
@@ -31,10 +79,11 @@ async function loadInvoicePaymentAccess(req: TenantRequest, invoiceId: string) {
   const branchIds = invoice.student.user.userRoles
     .map((assignment) => assignment.branchId)
     .filter((branchId): branchId is string => Boolean(branchId));
+  const billingAccess = billingBranchScopes(req.user!);
   const staffAccess = branchIds.some((branchId) =>
-    hasBranchPermission(req.user!, 'manage_billing', branchId) || hasBranchPermission(req.user!, 'manage_students', branchId),
+    billingAccess.scopes.includes(branchId) || hasBranchPermission(req.user!, 'manage_students', branchId),
   );
-  return ownStudent || ownParent || isTenantAdmin(req.user!) || staffAccess ? invoice : null;
+  return ownStudent || ownParent || billingAccess.isTenantAdmin || staffAccess ? invoice : null;
 }
 
 async function loadStudentBillingAccess(req: TenantRequest, studentId: string) {
@@ -49,10 +98,11 @@ async function loadStudentBillingAccess(req: TenantRequest, studentId: string) {
   const branchIds = student.user.userRoles
     .map((assignment) => assignment.branchId)
     .filter((branchId): branchId is string => Boolean(branchId));
+  const billingAccess = billingBranchScopes(req.user!);
   const allowed = student.userId === req.user!.id
     || student.studentParents.some((link) => link.parent.userId === req.user!.id)
-    || isTenantAdmin(req.user!)
-    || branchIds.some((branchId) => hasBranchPermission(req.user!, 'manage_billing', branchId));
+    || billingAccess.isTenantAdmin
+    || branchIds.some((branchId) => billingAccess.scopes.includes(branchId));
   return allowed ? student : null;
 }
 
@@ -189,13 +239,344 @@ function summarizeInvoices(invoices: Array<{ status: string; netPayable: any; du
   return { totalBilled, totalPaid, totalDue, overdueCount, overdueAmount, invoiceCount: invoices.length };
 }
 
-// Branch ids a branch-admin caller manages (empty for tenant admins = all).
-function billingBranchScopes(user: any): { isTenantAdmin: boolean; scopes: string[] } {
+// Branches are derived from signed permission assignments, not a role-name
+// shortcut. This keeps Accountant and any future finance role branch-scoped.
+function permissionBranchScopes(user: any, permission: string): { isTenantAdmin: boolean; scopes: string[] } {
   const roles = Array.isArray(user?.roles) ? user.roles : [];
   const isTenantAdmin = roles.some((r: any) => r.roleName === 'Tenant Admin' && r.branchId === null);
-  const scopes = roles.filter((r: any) => r.roleName === 'Branch Admin' && r.branchId).map((r: any) => r.branchId);
+  const scopes = [...new Set<string>(roles
+    .filter((r: any) => r.branchId && Array.isArray(r.permissions) && r.permissions.includes(permission))
+    .map((r: any) => String(r.branchId)))];
   return { isTenantAdmin, scopes };
 }
+
+function billingBranchScopes(user: any) {
+  const permissionAccess = permissionBranchScopes(user, 'manage_billing');
+  const roles = Array.isArray(user?.roles) ? user.roles : [];
+  const branchAdminScopes = roles
+    .filter((role: any) => role?.roleName === 'Branch Admin' && role?.branchId)
+    .map((role: any) => String(role.branchId));
+
+  return {
+    isTenantAdmin: permissionAccess.isTenantAdmin,
+    scopes: [...new Set([...permissionAccess.scopes, ...branchAdminScopes])],
+  };
+}
+
+function addMonths(value: Date, count: number): Date {
+  const next = new Date(value);
+  next.setMonth(next.getMonth() + count);
+  return next;
+}
+
+function staffBaseSalary(staff: { contractType: string; salaryStructure: Prisma.JsonValue }): number {
+  const structure = (staff.salaryStructure ?? {}) as { basicSalary?: number; hourlyRate?: number; expectedMonthlyHours?: number };
+  if (staff.contractType === 'HOUR_RATE') {
+    return num(structure.hourlyRate) * num(structure.expectedMonthlyHours);
+  }
+  return num(structure.basicSalary);
+}
+
+// Shared, persisted billing contract for Accountants, Branch Admins and Tenant Admins.
+// Future entries are projections only; invoices and payroll records are created when posted.
+router.get('/billing-ledger', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const access = billingBranchScopes(req.user);
+  if (!access.isTenantAdmin && access.scopes.length === 0) {
+    return res.status(403).json({ error: 'You do not have access to billing records.' });
+  }
+  const branchFilter = access.isTenantAdmin ? {} : { userRoles: { some: { branchId: { in: access.scopes } } } };
+  try {
+    const [students, staff, tenant] = await Promise.all([
+      prisma.student.findMany({
+        where: { user: { tenantId: req.tenantId!, ...branchFilter } },
+        include: {
+          grade: true,
+          user: { include: { userRoles: { include: { branch: true } } } },
+          enrollments: { where: { status: 'ACTIVE' }, include: { course: true } },
+          invoices: { orderBy: { dueDate: 'desc' } },
+        },
+      }),
+      prisma.staffRecord.findMany({
+        where: { user: { tenantId: req.tenantId!, ...branchFilter } },
+        include: {
+          user: { include: { userRoles: { include: { branch: true } } } },
+          payrolls: { orderBy: [{ year: 'desc' }, { month: 'desc' }] },
+        },
+      }),
+      prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { vatRate: true } }),
+    ]);
+
+    const now = new Date();
+    const studentRows = students.map((student) => {
+      const assignment = student.user.userRoles.find((role) => role.branchId && (access.isTenantAdmin || access.scopes.includes(role.branchId)));
+      const gradeFee = student.grade?.billingMode === 'GRADE' ? num(student.grade.monthlyFee) : 0;
+      const courseFee = student.enrollments.reduce((sum, enrollment) => {
+        if (!recurringInvoiceType(student.grade?.billingMode ?? 'GRADE', enrollment.course.isExtraActivity)) return sum;
+        const fee = (enrollment.course.feeStructure ?? {}) as { monthlyBase?: number };
+        const base = num(fee.monthlyBase);
+        return sum + (enrollment.course.isTaxExempt ? base : base * (1 + num(enrollment.course.taxPercentage) / 100));
+      }, 0);
+      const monthlyAmount = Math.round((gradeFee + courseFee) * 100) / 100;
+      const courseStart = student.admissionDate;
+      const courseEnd = addMonths(courseStart, 12);
+      const forecastStart = now > courseStart ? now : courseStart;
+      const projections = Array.from({ length: 12 }, (_, index) => {
+        const cycleStart = new Date(forecastStart.getFullYear(), forecastStart.getMonth() + index + 1, 1);
+        const cycleEnd = new Date(cycleStart.getFullYear(), cycleStart.getMonth() + 1, 0);
+        return { cycleStart, cycleEnd, dueDate: new Date(cycleStart.getFullYear(), cycleStart.getMonth(), 10), amount: monthlyAmount };
+      }).filter((item) => item.cycleStart <= courseEnd);
+      return {
+        studentId: student.id,
+        studentName: `${student.user.firstName} ${student.user.lastName}`.trim(),
+        email: student.user.email,
+        grade: student.grade?.name ?? 'Unassigned',
+        branchId: assignment?.branchId ?? null,
+        branchName: assignment?.branch?.name ?? 'Unassigned',
+        admissionDate: student.admissionDate,
+        courseEnd,
+        monthlyAmount,
+        invoices: student.invoices.map((invoice) => ({
+          id: invoice.id, invoiceType: invoice.invoiceType, amount: num(invoice.amount), discount: num(invoice.discount),
+          fine: num(invoice.fine), netPayable: num(invoice.netPayable), status: invoice.status,
+          overdue: invoiceOverdue(invoice), billingCycleStart: invoice.billingCycleStart,
+          billingCycleEnd: invoice.billingCycleEnd, dueDate: invoice.dueDate, paymentDate: invoice.paymentDate,
+          transactionId: invoice.transactionId, vatRate: num(invoice.vatRateSnapshot), createdAt: invoice.createdAt,
+        })),
+        projections,
+      };
+    });
+
+    const teacherRows = staff.map((record) => {
+      const assignment = record.user.userRoles.find((role) => role.branchId && (access.isTenantAdmin || access.scopes.includes(role.branchId)));
+      const baseSalary = staffBaseSalary(record);
+      const nextMonth = addMonths(new Date(now.getFullYear(), now.getMonth(), 1), 1);
+      return {
+        teacherId: record.id,
+        userId: record.userId,
+        teacherName: `${record.user.firstName} ${record.user.lastName}`.trim(),
+        email: record.user.email,
+        designation: record.designation,
+        contractType: record.contractType,
+        branchId: assignment?.branchId ?? null,
+        branchName: assignment?.branch?.name ?? 'Unassigned',
+        baseSalary,
+        payrolls: record.payrolls.map((payroll) => ({
+          id: payroll.id, month: payroll.month, year: payroll.year, baseSalary: payroll.baseSalary,
+          deductions: payroll.attendanceDeductions, bonuses: payroll.bonuses, netPayable: payroll.netPayable,
+          status: payroll.status, settlementReference: payroll.settlementReference, paymentDate: payroll.paymentDate,
+          createdAt: payroll.createdAt,
+        })),
+        projection: { month: nextMonth.getMonth() + 1, year: nextMonth.getFullYear(), baseSalary, deductions: 0, bonuses: 0, netPayable: baseSalary },
+      };
+    });
+    return res.json({ generatedAt: now, vatRate: num(tenant?.vatRate), students: studentRows, teachers: teacherRows });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Failed to load the shared billing ledger.', details: error.message });
+  }
+});
+
+router.post('/billing-ledger/invoices', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const access = billingBranchScopes(req.user);
+  if (!access.isTenantAdmin && access.scopes.length === 0) {
+    return res.status(403).json({ error: 'You do not have access to create billing records.' });
+  }
+  const shape = parseStrictKeys(req.body, ['studentId', 'amount', 'discount', 'fine', 'invoiceType', 'billingCycleStart', 'billingCycleEnd', 'dueDate']);
+  if (!shape.success) return res.status(400).json({ error: shape.error });
+  const studentId = readTrimmedString(shape.data, 'studentId', { required: true, maxLength: 128, message: 'A valid student is required.' });
+  const amount = readFiniteNumber(shape.data, 'amount', { min: 0.01, max: 100_000_000, message: 'Amount must be greater than zero.' });
+  const discount = readFiniteNumber(shape.data, 'discount', { min: 0, max: 100_000_000, message: 'Discount must be zero or greater.' });
+  const fine = readFiniteNumber(shape.data, 'fine', { min: 0, max: 100_000_000, message: 'Fine must be zero or greater.' });
+  const invoiceType = readTrimmedString(shape.data, 'invoiceType', { required: true, maxLength: 20, message: 'Invoice type is required.' });
+  if (!studentId.success || !amount.success || !discount.success || !fine.success || !invoiceType.success || !['TUITION', 'SUBJECT', 'ACTIVITY'].includes(invoiceType.data)) {
+    return res.status(400).json({ error: 'Valid student, amounts and invoice type are required.' });
+  }
+  const cycleStart = new Date(String(shape.data.billingCycleStart));
+  const cycleEnd = new Date(String(shape.data.billingCycleEnd));
+  const dueDate = new Date(String(shape.data.dueDate));
+  if ([cycleStart, cycleEnd, dueDate].some((date) => Number.isNaN(date.getTime())) || cycleEnd < cycleStart) {
+    return res.status(400).json({ error: 'Valid billing cycle and due dates are required.' });
+  }
+  const student = await loadStudentBillingAccess(req, studentId.data);
+  if (!student) return res.status(404).json({ error: 'Student not found or outside your billing scope.' });
+  const tenant = await prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { panNumber: true, vatRate: true } });
+  const netPayable = Math.round((amount.data - discount.data + fine.data) * 100) / 100;
+  if (netPayable < 0) return res.status(400).json({ error: 'Discount cannot exceed the invoice total.' });
+  const invoice = await prisma.invoice.create({ data: {
+    tenantId: req.tenantId!, studentId: student.id, invoiceType: invoiceType.data as 'TUITION' | 'SUBJECT' | 'ACTIVITY',
+    amount: amount.data, discount: discount.data, fine: fine.data, netPayable, billingCycleStart: cycleStart,
+    billingCycleEnd: cycleEnd, dueDate, status: 'UNPAID', panNumberSnapshot: tenant?.panNumber ?? '', vatRateSnapshot: tenant?.vatRate ?? 0,
+  } });
+  return res.status(201).json({ message: 'Invoice created in the shared ledger.', invoice });
+});
+
+router.post('/billing-ledger/payrolls', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const access = billingBranchScopes(req.user);
+  if (!access.isTenantAdmin && access.scopes.length === 0) {
+    return res.status(403).json({ error: 'You do not have access to create payroll records.' });
+  }
+  const shape = parseStrictKeys(req.body, ['staffRecordId', 'month', 'year', 'baseSalary', 'bonuses', 'deductions']);
+  if (!shape.success) return res.status(400).json({ error: shape.error });
+  const staffRecordId = readTrimmedString(shape.data, 'staffRecordId', { required: true, maxLength: 128, message: 'A valid teacher is required.' });
+  const month = readFiniteNumber(shape.data, 'month', { min: 1, max: 12, message: 'Month must be between 1 and 12.' });
+  const year = readFiniteNumber(shape.data, 'year', { min: 2000, max: 2100, message: 'Year must be valid.' });
+  const baseSalary = readFiniteNumber(shape.data, 'baseSalary', { min: 0, max: 100_000_000, message: 'Base salary must be zero or greater.' });
+  const bonuses = readFiniteNumber(shape.data, 'bonuses', { min: 0, max: 100_000_000, message: 'Bonuses must be zero or greater.' });
+  const deductions = readFiniteNumber(shape.data, 'deductions', { min: 0, max: 100_000_000, message: 'Deductions must be zero or greater.' });
+  if (!staffRecordId.success || !month.success || !year.success || !baseSalary.success || !bonuses.success || !deductions.success || !Number.isInteger(month.data) || !Number.isInteger(year.data)) {
+    return res.status(400).json({ error: 'Valid teacher and payroll amounts are required.' });
+  }
+  const record = await prisma.staffRecord.findFirst({
+    where: {
+      id: staffRecordId.data,
+      user: {
+        tenantId: req.tenantId!,
+        ...(access.isTenantAdmin ? {} : { userRoles: { some: { branchId: { in: access.scopes } } } }),
+      },
+    },
+  });
+  if (!record) return res.status(404).json({ error: 'Teacher not found or outside your billing scope.' });
+  const exists = await prisma.payroll.findFirst({ where: { tenantId: req.tenantId!, staffRecordId: record.id, month: month.data, year: year.data } });
+  if (exists) return res.status(409).json({ error: 'Payroll already exists for this teacher and month.' });
+  const netPayable = Math.round((baseSalary.data + bonuses.data - deductions.data) * 100) / 100;
+  if (netPayable < 0) return res.status(400).json({ error: 'Deductions cannot exceed salary plus bonuses.' });
+  const payroll = await prisma.payroll.create({ data: { tenantId: req.tenantId!, staffRecordId: record.id, month: month.data, year: year.data, baseSalary: baseSalary.data, bonuses: bonuses.data, attendanceDeductions: deductions.data, netPayable, status: 'PENDING' } });
+  return res.status(201).json({ message: 'Payroll created in the shared ledger.', payroll });
+});
+
+// One scoped contract powers the Accountant workspace. It deliberately omits
+// tenant-wide records and returns empty arrays instead of presentation samples.
+router.get('/accountant-workspace', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const billing = permissionBranchScopes(req.user, 'manage_billing');
+  const pettyCash = permissionBranchScopes(req.user, 'manage_petty_cash');
+  const report = permissionBranchScopes(req.user, 'view_reports');
+  const tenantWide = billing.isTenantAdmin || pettyCash.isTenantAdmin || report.isTenantAdmin;
+  const branchIds = [...new Set([...billing.scopes, ...pettyCash.scopes, ...report.scopes])];
+  if (!tenantWide && branchIds.length === 0) {
+    return res.status(403).json({ error: 'You do not have access to branch finance records.' });
+  }
+
+  const invoiceWhere: Prisma.InvoiceWhereInput = {
+    tenantId: req.tenantId!,
+    ...(tenantWide ? {} : { student: { user: { userRoles: { some: { branchId: { in: billing.scopes } } } } } }),
+  };
+  const expenseWhere: Prisma.ExpenseWhereInput = {
+    tenantId: req.tenantId!,
+    ...(tenantWide ? {} : { branchId: { in: report.scopes } }),
+  };
+  const payrollWhere: Prisma.PayrollWhereInput = {
+    tenantId: req.tenantId!,
+    status: 'MANUALLY_PAID',
+    ...(tenantWide ? {} : { staffRecord: { user: { userRoles: { some: { branchId: { in: report.scopes } } } } } }),
+  };
+
+  try {
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    const [branches, invoices, requests, monthlyRequests, expenses, payrolls, tenant] = await Promise.all([
+      prisma.branch.findMany({
+        where: { tenantId: req.tenantId!, ...(tenantWide ? {} : { id: { in: branchIds } }) },
+        select: { id: true, name: true },
+        orderBy: { name: 'asc' },
+      }),
+      prisma.invoice.findMany({
+        where: invoiceWhere,
+        include: { student: { include: { user: { include: { userRoles: { include: { branch: true } } } } } } },
+        orderBy: { dueDate: 'desc' },
+        take: 500,
+      }),
+      prisma.pettyCash.findMany({
+        where: {
+          tenantId: req.tenantId!,
+          ...(tenantWide ? {} : { accountantId: req.user!.id, branchId: { in: pettyCash.scopes } }),
+        },
+        include: { branch: { select: { name: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+      }),
+      prisma.pettyCash.findMany({
+        where: {
+          tenantId: req.tenantId!,
+          branchId: tenantWide ? undefined : { in: pettyCash.scopes },
+          createdAt: { gte: monthStart },
+          status: { not: 'REJECTED' },
+        },
+        select: { branchId: true, amount: true },
+      }),
+      prisma.expense.findMany({ where: expenseWhere, orderBy: { date: 'desc' }, take: 500 }),
+      prisma.payroll.findMany({ where: payrollWhere, take: 500 }),
+      prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { pettyCashCapNpr: true } }),
+    ]);
+
+    const invoiceSummary = summarizeInvoices(invoices);
+    const releasedPettyCash = requests
+      .filter((item) => ['RELEASED', 'RECEIPT_SUBMITTED', 'CLOSED'].includes(item.status))
+      .reduce((sum, item) => sum + num(item.amount), 0);
+    const operatingCosts = expenses.reduce((sum, item) => sum + num(item.amount), 0)
+      + payrolls.reduce((sum, item) => sum + num(item.netPayable), 0)
+      + releasedPettyCash;
+    const allowedBranchIds = new Set(branches.map((branch) => branch.id));
+
+    return res.json({
+      branches,
+      pettyCashCap: num(tenant?.pettyCashCapNpr),
+      pettyCashUsage: branches.map((branch) => ({
+        branchId: branch.id,
+        committed: monthlyRequests.filter((item) => item.branchId === branch.id).reduce((sum, item) => sum + num(item.amount), 0),
+      })),
+      summary: {
+        collected: invoiceSummary.totalPaid,
+        outstanding: invoiceSummary.totalDue,
+        overdueAmount: invoiceSummary.overdueAmount,
+        invoiceCount: invoiceSummary.invoiceCount,
+        openPettyCash: requests.filter((item) => item.status !== 'CLOSED' && item.status !== 'REJECTED').length,
+        awaitingReceipt: requests.filter((item) => item.status === 'RELEASED').length,
+      },
+      pettyCash: requests.map((item) => ({
+        id: item.id,
+        branchId: item.branchId,
+        branchName: item.branch.name,
+        purpose: item.purpose,
+        amount: num(item.amount),
+        items: normalizePettyCashItems(item.requestItems, item.purpose, num(item.amount)),
+        status: item.status,
+        receiptProofUrl: item.receiptProofUrl,
+        approvalChain: item.approvalChain,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+      })),
+      invoices: invoices.map((invoice) => {
+        const branchRole = invoice.student.user.userRoles.find((role) => role.branchId && allowedBranchIds.has(role.branchId));
+        return {
+          id: invoice.id,
+          studentId: invoice.studentId,
+          studentName: `${invoice.student.user.firstName} ${invoice.student.user.lastName}`.trim(),
+          branchId: branchRole?.branchId ?? null,
+          branchName: branchRole?.branch?.name ?? null,
+          amount: num(invoice.amount),
+          discount: num(invoice.discount),
+          netPayable: num(invoice.netPayable),
+          status: invoice.status,
+          overdue: invoiceOverdue(invoice),
+          billingCycleStart: invoice.billingCycleStart,
+          billingCycleEnd: invoice.billingCycleEnd,
+          dueDate: invoice.dueDate,
+          paymentDate: invoice.paymentDate,
+          transactionId: invoice.transactionId,
+        };
+      }),
+      reports: {
+        revenue: invoiceSummary.totalPaid,
+        operatingCosts,
+        netMargin: invoiceSummary.totalPaid - operatingCosts,
+        expenseCount: expenses.length,
+        ledgerEntryCount: invoices.filter((item) => item.status === 'PAID').length + expenses.length + payrolls.length,
+      },
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Failed to load the Accountant workspace.' });
+  }
+});
 
 // Tenant-wide fee overview: collected, outstanding, overdue, current BS period.
 router.get(
@@ -331,9 +712,10 @@ router.post(
       const studentBranchIds = invoice.student.user.userRoles
         .map((assignment) => assignment.branchId)
         .filter((branchId): branchId is string => Boolean(branchId));
+      const billingAccess = billingBranchScopes(req.user!);
       if (
-        !isTenantAdmin(req.user!) &&
-        !studentBranchIds.some((branchId) => hasBranchPermission(req.user!, 'manage_billing', branchId))
+        !billingAccess.isTenantAdmin &&
+        !studentBranchIds.some((branchId) => billingAccess.scopes.includes(branchId))
       ) {
         return res.status(403).json({ error: 'You cannot record payments for this student branch.' });
       }
@@ -781,7 +1163,7 @@ router.post(
   '/petty-cash/request',
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
-    const shape = parseStrictKeys(req.body, ['amount', 'purpose', 'branchId']);
+    const shape = parseStrictKeys(req.body, ['amount', 'purpose', 'branchId', 'items']);
     if (!shape.success) return res.status(400).json({ error: shape.error });
     const amount = readFiniteNumber(shape.data, 'amount', { min: 0.01, max: 10_000_000, message: 'Petty cash amount must be a positive finite number.' });
     const purpose = readTrimmedString(shape.data, 'purpose', { required: true, maxLength: 1_000, message: 'A petty cash purpose is required.' });
@@ -789,16 +1171,29 @@ router.post(
     if (!amount.success) return res.status(400).json({ error: amount.error });
     if (!purpose.success) return res.status(400).json({ error: purpose.error });
     if (!branchId.success) return res.status(400).json({ error: branchId.error });
+    const requestItems = parsePettyCashItems(shape.data.items, purpose.data, amount.data);
+    if (!requestItems.success) return res.status(400).json({ error: requestItems.error });
+    if (Math.abs(requestItems.total - amount.data) > 0.009) return res.status(400).json({ error: 'Petty cash amount must equal the item total.' });
     const accountantId = req.user!.id;
 
     try {
       if (!hasBranchPermission(req.user!, 'manage_petty_cash', branchId.data)) {
         return res.status(403).json({ error: 'Only the assigned branch Accountant may request petty cash.' });
       }
-      const requestedAmount = amount.data;
+      const requestedAmount = requestItems.total;
       const branch = await prisma.branch.findFirst({ where: { id: branchId.data, tenantId: req.tenantId! } });
       if (!branch) return res.status(404).json({ error: 'Branch not found.' });
       const tenantPolicy = await prisma.tenant.findUniqueOrThrow({ where: { id: req.tenantId! } });
+      const monthStart = new Date();
+      monthStart.setDate(1);
+      monthStart.setHours(0, 0, 0, 0);
+      const monthlyUsage = await prisma.pettyCash.aggregate({
+        where: { tenantId: req.tenantId!, branchId: branchId.data, createdAt: { gte: monthStart }, status: { not: 'REJECTED' } },
+        _sum: { amount: true },
+      });
+      if (num(monthlyUsage._sum.amount) + requestedAmount > tenantPolicy.pettyCashCapNpr) {
+        return res.status(422).json({ error: 'This request would exceed the branch monthly petty-cash cap.' });
+      }
       const pc = await prisma.pettyCash.create({
           data: {
             tenantId: req.tenantId!,
@@ -815,6 +1210,7 @@ router.post(
                 comment: 'Initial request.',
               },
             ],
+            requestItems: requestItems.items,
             status: 'PENDING',
             policySnapshot: {
               pettyCashCapNpr: tenantPolicy.pettyCashCapNpr,
@@ -822,7 +1218,7 @@ router.post(
             },
           },
         });
-      return res.status(201).json({ message: 'Petty cash request logged.', pettyCash: pc });
+      return res.status(201).json({ message: 'Petty cash request logged.', pettyCash: { ...pc, items: requestItems.items } });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to request petty cash.', details: error.message });
     }
@@ -834,17 +1230,82 @@ router.get(
   '/petty-cash',
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
+    const branchAdminIds = Array.isArray(req.user?.roles)
+      ? req.user.roles.filter((role: any) => role.roleName === 'Branch Admin' && role.branchId).map((role: any) => role.branchId as string)
+      : [];
+    const accountantIds = permissionBranchScopes(req.user, 'manage_petty_cash').scopes;
+    if (!isTenantAdmin(req.user!) && branchAdminIds.length === 0 && accountantIds.length === 0) {
+      return res.status(403).json({ error: 'You do not have access to petty-cash records.' });
+    }
     try {
       const requests = await prisma.pettyCash.findMany({
-        where: { tenantId: req.tenantId! },
+        where: {
+          tenantId: req.tenantId!,
+          ...(isTenantAdmin(req.user!) ? {} : {
+            OR: [
+              ...(branchAdminIds.length ? [{ branchId: { in: branchAdminIds } }] : []),
+              ...(accountantIds.length ? [{ branchId: { in: accountantIds }, accountantId: req.user!.id }] : []),
+            ],
+          }),
+        },
         orderBy: { createdAt: 'desc' },
       });
-      return res.json(requests);
+      return res.json(requests.map((item) => ({ ...item, items: normalizePettyCashItems(item.requestItems, item.purpose, num(item.amount)) })));
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to list petty cash requests.', details: error.message });
     }
   }
 );
+
+// The requesting Accountant may amend only a request explicitly returned for
+// revision. Approval history is retained and the same record is resubmitted.
+router.put('/petty-cash/:id', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const shape = parseStrictKeys(req.body, ['amount', 'purpose', 'items']);
+  if (!shape.success) return res.status(400).json({ error: shape.error });
+  const amount = readFiniteNumber(shape.data, 'amount', { min: 0.01, max: 10_000_000, message: 'Petty cash amount must be a positive finite number.' });
+  const purpose = readTrimmedString(shape.data, 'purpose', { required: true, maxLength: 1_000, message: 'A petty cash purpose is required.' });
+  if (!amount.success) return res.status(400).json({ error: amount.error });
+  if (!purpose.success) return res.status(400).json({ error: purpose.error });
+  const requestItems = parsePettyCashItems(shape.data.items, purpose.data, amount.data);
+  if (!requestItems.success) return res.status(400).json({ error: requestItems.error });
+  if (Math.abs(requestItems.total - amount.data) > 0.009) return res.status(400).json({ error: 'Petty cash amount must equal the item total.' });
+
+  try {
+    const request = await prisma.pettyCash.findFirst({ where: { id: req.params.id, tenantId: req.tenantId! } });
+    if (!request) return res.status(404).json({ error: 'Petty cash request not found.' });
+    const approvalChain = Array.isArray(request.approvalChain) ? request.approvalChain as any[] : [];
+    const lastAction = approvalChain.at(-1)?.action;
+    if (request.accountantId !== req.user!.id || request.status !== 'PENDING' || lastAction !== 'REVISION') {
+      return res.status(409).json({ error: 'Only your own request returned for revision can be resubmitted.' });
+    }
+    if (!hasBranchPermission(req.user!, 'manage_petty_cash', request.branchId)) {
+      return res.status(403).json({ error: 'You no longer have petty-cash access for this branch.' });
+    }
+    const tenantPolicy = await prisma.tenant.findUniqueOrThrow({ where: { id: req.tenantId! }, select: { pettyCashCapNpr: true } });
+    const monthStart = new Date(request.createdAt);
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    const monthlyUsage = await prisma.pettyCash.aggregate({
+      where: { tenantId: req.tenantId!, branchId: request.branchId, id: { not: request.id }, createdAt: { gte: monthStart }, status: { not: 'REJECTED' } },
+      _sum: { amount: true },
+    });
+    if (num(monthlyUsage._sum.amount) + requestItems.total > tenantPolicy.pettyCashCapNpr) {
+      return res.status(422).json({ error: 'This revision would exceed the branch monthly petty-cash cap.' });
+    }
+    const nextChain = [...approvalChain, {
+      role: 'Accountant', action: 'RESUBMITTED', timestamp: new Date().toISOString(), comment: 'Request revised and resubmitted.',
+    }];
+    const transition = await prisma.pettyCash.updateMany({
+      where: { id: request.id, tenantId: req.tenantId!, accountantId: req.user!.id, status: 'PENDING' },
+      data: { purpose: purpose.data, amount: requestItems.total, remainingBalance: requestItems.total, requestItems: requestItems.items, approvalChain: nextChain },
+    });
+    if (transition.count !== 1) return res.status(409).json({ error: 'The request changed before it could be resubmitted.' });
+    const updated = await prisma.pettyCash.findUniqueOrThrow({ where: { id: request.id } });
+    return res.json({ message: 'Petty cash request resubmitted for Level 1 approval.', pettyCash: { ...updated, items: requestItems.items } });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Failed to resubmit petty cash.' });
+  }
+});
 
 // L1 Approval (Branch Admin)
 router.post(

@@ -39,18 +39,14 @@ class _TeacherTimetableScreenState extends State<TeacherTimetableScreen>
     super.dispose();
   }
 
-  List<TeacherClassSession> _classesForDay(String day) {
-    final allClasses = DemoTeacherData.weeklySchedule();
-    return allClasses;
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Text(
           'My Timetable',
-          style: GoogleFonts.fraunces(fontWeight: FontWeight.w700, fontSize: 22),
+          style:
+              GoogleFonts.fraunces(fontWeight: FontWeight.w700, fontSize: 22),
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
@@ -61,7 +57,7 @@ class _TeacherTimetableScreenState extends State<TeacherTimetableScreen>
           isScrollable: true,
           indicatorColor: kColorAccent,
           labelColor: kColorPrimary,
-          unselectedLabelColor: kColorText.withOpacity(0.55),
+          unselectedLabelColor: kColorText.withValues(alpha: 0.55),
           tabs: _days.map((d) => Tab(text: d)).toList(),
         ),
       ),
@@ -77,12 +73,12 @@ class _TeacherTimetableScreenState extends State<TeacherTimetableScreen>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.event_available_rounded,
-                        size: 48, color: kColorText.withOpacity(0.35)),
+                        size: 48, color: kColorText.withValues(alpha: 0.35)),
                     const SizedBox(height: 12),
                     Text(
                       'No classes on $day',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: kColorText.withOpacity(0.55),
+                            color: kColorText.withValues(alpha: 0.55),
                           ),
                     ),
                   ],
@@ -147,7 +143,7 @@ class _TimetableCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: kColorPrimary.withOpacity(0.08),
+                color: kColorPrimary.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(

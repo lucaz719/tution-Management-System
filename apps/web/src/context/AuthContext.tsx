@@ -36,6 +36,7 @@ function mapSessionUser(sessionUser: any): AuthUser {
     name: sessionUser.name || sessionUser.email,
     role: roleName.toUpperCase().replace(/\s+/g, '_') as AuthUser['role'],
     requiresTwoFactor: false,
+    requiresPasswordChange: sessionUser.requiresPasswordChange === true,
     firstLogin: false,
   };
 }
@@ -140,6 +141,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const roleRedirectPath = useCallback((): string => {
     if (!user) return '/login';
     if (user.requiresTwoFactor) return '/2fa';
+    if (user.requiresPasswordChange) return '/force-change-password';
     if (user.firstLogin && user.role === 'TENANT_ADMIN') return '/setup/tenant';
     if (user.firstLogin && user.role === 'BRANCH_ADMIN') return '/setup/branch';
     if (user.role === 'SUPER_ADMIN') return '/platform/overview';
@@ -160,7 +162,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user,
     token: null,
     isLoading,
-    isAuthenticated: Boolean(user && !user.requiresTwoFactor),
+    isAuthenticated: Boolean(user && !user.requiresTwoFactor && !user.requiresPasswordChange),
     isTwoFactorPending: Boolean(user?.requiresTwoFactor),
     attemptCount,
     login,

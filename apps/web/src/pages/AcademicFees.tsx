@@ -3,7 +3,7 @@ import { Button } from '../components/ui/Button';
 import { KPICard } from '../components/ui/KPICard';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { useToast } from '../components/ui/Toast';
-import { api } from '../services/api';
+import { api, type BillingLedger } from '../services/api';
 import { toBsLabel } from '../utils/nepaliDate';
 
 interface StudentFee {
@@ -56,6 +56,7 @@ export function AcademicFees() {
 
   const [payStudent, setPayStudent] = useState<StudentFee | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [billingProfile, setBillingProfile] = useState<BillingLedger['students'][number] | null>(null);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
   const [payingId, setPayingId] = useState('');
   const [qrModal, setQrModal] = useState<{ id: string; studentName: string; amount: number; month: string } | null>(null);
@@ -93,9 +94,14 @@ export function AcademicFees() {
     setPayStudent(student);
     setInvoicesLoading(true);
     setInvoices([]);
+    setBillingProfile(null);
     try {
-      const list = await api.finances.getStudentInvoices(student.studentId);
+      const [list, ledger] = await Promise.all([
+        api.finances.getStudentInvoices(student.studentId),
+        api.finances.getBillingLedger(),
+      ]);
       setInvoices(list as Invoice[]);
+      setBillingProfile(ledger.students.find((item) => item.studentId === student.studentId) ?? null);
     } catch (error: unknown) {
       showToast(error instanceof Error ? error.message : 'Failed to load invoices.', 'error');
     } finally {
@@ -221,7 +227,6 @@ export function AcademicFees() {
                       <Button
                         variant="outline"
                         onClick={() => void openPayments(s)}
-                        disabled={s.invoiceCount === 0}
                         style={{ minHeight: '34px', height: '34px', padding: '6px 14px', borderColor: 'rgba(21, 96, 189, 0.16)' }}
                       >
                         {s.totalDue > 0 ? 'Collect' : 'View'}
@@ -251,10 +256,29 @@ export function AcademicFees() {
             <div className="people-drawer-body">
               {invoicesLoading ? (
                 <p style={{ color: 'var(--text-muted)', fontSize: '14px', textAlign: 'center', padding: '24px 0' }}>Loading invoices…</p>
-              ) : invoices.length === 0 ? (
-                <p style={{ color: 'var(--text-muted)', fontSize: '14px', textAlign: 'center', padding: '24px 0' }}>No invoices for this student.</p>
               ) : (
-                invoices.map((inv) => (
+                <>
+                  {billingProfile ? (
+                    <section style={{ padding: '14px 16px', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--color-surface)', marginBottom: '14px' }}>
+                      <h3 style={{ fontSize: '15px', margin: 0 }}>Billing plan</h3>
+                      <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '4px 0 12px' }}>
+                        {billingProfile.grade} · estimated monthly billing {money(billingProfile.monthlyAmount)} · course through {new Date(billingProfile.courseEnd).toLocaleDateString('en-NP')}
+                      </p>
+                      {billingProfile.projections.length ? (
+                        <div style={{ display: 'grid', gap: '8px' }}>
+                          {billingProfile.projections.map((projection) => (
+                            <div key={projection.cycleStart} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', paddingTop: '8px', borderTop: '1px solid var(--border)' }}>
+                              <span style={{ fontSize: '12px' }}>{new Date(projection.cycleStart).toLocaleDateString('en-NP', { month: 'short', year: 'numeric' })} · due {new Date(projection.dueDate).toLocaleDateString('en-NP')}</span>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><strong style={{ fontSize: '13px' }}>{money(projection.amount)}</strong><StatusBadge variant="info">Projection</StatusBadge></span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: 0 }}>No future billing cycles remain in the current course window.</p>}
+                    </section>
+                  ) : null}
+                  {invoices.length === 0 ? (
+                    <div className="people-empty" role="status"><span className="material-symbols-outlined" aria-hidden="true">receipt_long</span>No invoices have been posted for this student yet.</div>
+                  ) : invoices.map((inv) => (
                   <div key={inv.id} style={{ padding: '14px 16px', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--color-bg)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
                     <div>
                       <div style={{ fontSize: '15px', fontWeight: 700 }}>{money(inv.netPayable)}</div>
@@ -287,7 +311,8 @@ export function AcademicFees() {
                       </div>
                     )}
                   </div>
-                ))
+                  ))}
+                </>
               )}
             </div>
             <div className="people-drawer-foot">

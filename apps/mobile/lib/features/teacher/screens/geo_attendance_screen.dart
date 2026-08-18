@@ -328,7 +328,7 @@ class _GeoAttendanceScreenState extends State<GeoAttendanceScreen> {
                     Text(
                       'Branch radius: ${_branchRadiusMeters.toInt()}m • Demo coordinates, replace with API',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: kColorText.withOpacity(0.66),
+                            color: kColorText.withValues(alpha: 0.66),
                           ),
                     ),
                     if (_isMarkedIn) ...[

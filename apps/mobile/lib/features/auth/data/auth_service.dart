@@ -51,7 +51,9 @@ class AuthUser {
     return AuthUser(
       id: user['id'] as String? ?? '',
       email: user['email'] as String? ?? '',
-      firstName: user['firstName'] as String? ?? user['name']?.toString().split(' ').first ?? '',
+      firstName: user['firstName'] as String? ??
+          user['name']?.toString().split(' ').first ??
+          '',
       lastName: user['lastName'] as String? ??
           (((user['name']?.toString().split(' ').length ?? 0) > 1)
               ? user['name']!.toString().split(' ').sublist(1).join(' ')
@@ -123,7 +125,8 @@ class AuthService {
         data: {'email': email.trim().toLowerCase()},
       );
     } on DioException catch (e) {
-      throw AuthFailure(_extractMessage(e, 'Failed to send OTP. Please try again.'));
+      throw AuthFailure(
+          _extractMessage(e, 'Failed to send OTP. Please try again.'));
     }
   }
 
@@ -146,7 +149,8 @@ class AuthService {
       final resetToken = data['resetToken'] as String?;
 
       if (resetToken == null || resetToken.isEmpty) {
-        throw const AuthFailure('Verification succeeded but no reset token was returned.');
+        throw const AuthFailure(
+            'Verification succeeded but no reset token was returned.');
       }
 
       return resetToken;
@@ -181,7 +185,8 @@ class AuthService {
         data: {'email': email.trim().toLowerCase()},
       );
     } on DioException catch (e) {
-      throw AuthFailure(_extractMessage(e, 'Failed to send verification code.'));
+      throw AuthFailure(
+          _extractMessage(e, 'Failed to send verification code.'));
     }
   }
 
@@ -216,14 +221,16 @@ class AuthService {
   static Future<AuthUser?> restoreSession() async {
     try {
       final session = await _dio.get('/api/auth/get-session');
-      if (session.data is! Map<String, dynamic> || (session.data as Map)['user'] == null) return null;
+      if (session.data is! Map<String, dynamic> ||
+          (session.data as Map)['user'] == null) {
+        return null;
+      }
       final user = AuthUser.fromJson(session.data as Map<String, dynamic>);
       await ApiClient.saveUser(jsonEncode(user.toJson()));
       return user;
     } on DioException {
       return null;
     }
-
   }
 
   /// Extract a user-friendly error message from a Dio exception.

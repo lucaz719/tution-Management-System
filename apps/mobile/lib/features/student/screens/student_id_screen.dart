@@ -17,7 +17,8 @@ class StudentIdScreen extends StatefulWidget {
   State<StudentIdScreen> createState() => _StudentIdScreenState();
 }
 
-class _StudentIdScreenState extends State<StudentIdScreen> with SingleTickerProviderStateMixin {
+class _StudentIdScreenState extends State<StudentIdScreen>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<double> _animation;
   bool _showFront = true;
@@ -69,18 +70,22 @@ class _StudentIdScreenState extends State<StudentIdScreen> with SingleTickerProv
               GestureDetector(
                 onTap: _flipCard,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   decoration: BoxDecoration(
-                    color: kColorPrimary.withOpacity(0.08),
+                    color: kColorPrimary.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.flip_rounded, size: 18, color: kColorPrimary),
+                      const Icon(Icons.flip_rounded,
+                          size: 18, color: kColorPrimary),
                       const SizedBox(width: 8),
                       Text(
-                        _showFront ? 'Tap Card to Flip to Back Side' : 'Tap Card to Flip to Front Side',
+                        _showFront
+                            ? 'Tap Card to Flip to Back Side'
+                            : 'Tap Card to Flip to Front Side',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: kColorPrimary,
                               fontWeight: FontWeight.w700,
@@ -131,7 +136,8 @@ class _StudentIdScreenState extends State<StudentIdScreen> with SingleTickerProv
                       onPressed: () {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
-                            content: Text('ID Pass saved to Apple / Google Wallet format.'),
+                            content: Text(
+                                'ID Pass saved to Apple / Google Wallet format.'),
                           ),
                         );
                       },
@@ -173,7 +179,7 @@ class _StudentIdScreenState extends State<StudentIdScreen> with SingleTickerProv
           side: const BorderSide(color: Color(0xFFD7DFEA), width: 2),
         ),
         elevation: 6,
-        shadowColor: kColorPrimary.withOpacity(0.2),
+        shadowColor: kColorPrimary.withValues(alpha: 0.2),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -185,7 +191,8 @@ class _StudentIdScreenState extends State<StudentIdScreen> with SingleTickerProv
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.school_rounded, color: Colors.white, size: 28),
+                  const Icon(Icons.school_rounded,
+                      color: Colors.white, size: 28),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -193,16 +200,18 @@ class _StudentIdScreenState extends State<StudentIdScreen> with SingleTickerProv
                       children: [
                         Text(
                           'TMS Tuition Academy',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w800,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w800,
+                                  ),
                         ),
                         Text(
                           'Baneshwor, Kathmandu',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: Colors.white.withOpacity(0.8),
-                              ),
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: Colors.white.withValues(alpha: 0.8),
+                                  ),
                         ),
                       ],
                     ),
@@ -216,13 +225,17 @@ class _StudentIdScreenState extends State<StudentIdScreen> with SingleTickerProv
                 children: [
                   CircleAvatar(
                     radius: 50,
-                    backgroundColor: kColorPrimary.withOpacity(0.1),
-                    child: const Icon(Icons.person_rounded, size: 60, color: kColorPrimary),
+                    backgroundColor: kColorPrimary.withValues(alpha: 0.1),
+                    child: const Icon(Icons.person_rounded,
+                        size: 60, color: kColorPrimary),
                   ),
                   const SizedBox(height: 14),
                   Text(
                     profile.name,
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w700),
+                    style: Theme.of(context)
+                        .textTheme
+                        .headlineMedium
+                        ?.copyWith(fontWeight: FontWeight.w700),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 4),
@@ -234,11 +247,13 @@ class _StudentIdScreenState extends State<StudentIdScreen> with SingleTickerProv
                         ),
                   ),
                   const SizedBox(height: 20),
-                  _IdDetailRow(label: 'Student ID', value: profile.enrollmentId),
+                  _IdDetailRow(
+                      label: 'Student ID', value: profile.enrollmentId),
                   const Divider(height: 16),
-                  _IdDetailRow(label: 'Academic Year', value: profile.academicYear),
+                  _IdDetailRow(
+                      label: 'Academic Year', value: profile.academicYear),
                   const Divider(height: 16),
-                  _IdDetailRow(label: 'Valid Until', value: '2027-03-31'),
+                  const _IdDetailRow(label: 'Valid Until', value: '2027-03-31'),
                   const SizedBox(height: 20),
                   // Barcode & Scannable QR Code Simulation
                   Row(
@@ -251,7 +266,8 @@ class _StudentIdScreenState extends State<StudentIdScreen> with SingleTickerProv
                           border: Border.all(color: Colors.black26),
                           borderRadius: BorderRadius.circular(10),
                         ),
-                        child: const Icon(Icons.qr_code_2_rounded, size: 48, color: kColorPrimary),
+                        child: const Icon(Icons.qr_code_2_rounded,
+                            size: 48, color: kColorPrimary),
                       ),
                       const SizedBox(width: 16),
                       Expanded(
@@ -260,7 +276,10 @@ class _StudentIdScreenState extends State<StudentIdScreen> with SingleTickerProv
                           children: [
                             Text(
                               'VERIFIED ENTRY PASS',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
                                     fontWeight: FontWeight.w800,
                                     color: kColorSuccess,
                                   ),
@@ -296,7 +315,7 @@ class _StudentIdScreenState extends State<StudentIdScreen> with SingleTickerProv
           side: const BorderSide(color: Color(0xFFD7DFEA), width: 2),
         ),
         elevation: 6,
-        shadowColor: kColorPrimary.withOpacity(0.2),
+        shadowColor: kColorPrimary.withValues(alpha: 0.2),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -308,7 +327,8 @@ class _StudentIdScreenState extends State<StudentIdScreen> with SingleTickerProv
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.verified_user_rounded, color: Colors.white, size: 28),
+                  const Icon(Icons.verified_user_rounded,
+                      color: Colors.white, size: 28),
                   const SizedBox(width: 12),
                   Text(
                     'Emergency & Security Info',
@@ -324,11 +344,15 @@ class _StudentIdScreenState extends State<StudentIdScreen> with SingleTickerProv
               padding: const EdgeInsets.all(24),
               child: Column(
                 children: [
-                  _IdDetailRow(label: 'Emergency Contact', value: '+977 9801234567'),
+                  const _IdDetailRow(
+                      label: 'Emergency Contact', value: '+977 9801234567'),
                   const Divider(height: 18),
-                  _IdDetailRow(label: 'Blood Group', value: 'O+ Positive'),
+                  const _IdDetailRow(
+                      label: 'Blood Group', value: 'O+ Positive'),
                   const Divider(height: 18),
-                  _IdDetailRow(label: 'Authorized Branch', value: 'Baneshwor Main Center'),
+                  const _IdDetailRow(
+                      label: 'Authorized Branch',
+                      value: 'Baneshwor Main Center'),
                   const SizedBox(height: 24),
                   Container(
                     padding: const EdgeInsets.all(14),
@@ -338,7 +362,10 @@ class _StudentIdScreenState extends State<StudentIdScreen> with SingleTickerProv
                     ),
                     child: Text(
                       'Terms: This digital card is non-transferable and must be presented upon entering the campus or library. If found, please return to TMS Front Office.',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 11),
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(fontSize: 11),
                       textAlign: TextAlign.center,
                     ),
                   ),
@@ -365,7 +392,7 @@ class _IdDetailRow extends StatelessWidget {
         Text(
           label,
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: kColorText.withOpacity(0.65),
+                color: kColorText.withValues(alpha: 0.65),
               ),
         ),
         Text(

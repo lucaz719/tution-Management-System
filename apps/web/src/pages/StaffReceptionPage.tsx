@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useToast } from '../components/ui/Toast';
+import { ChangePasswordForm } from '../components/ChangePasswordForm';
 import { errorMessage } from '../services/api/client';
 import {
   checkInStudent,
@@ -20,6 +22,8 @@ function appointmentLabel(status: ReceptionAppointment['status']) {
 
 export function StaffReceptionPage() {
   const { showToast } = useToast();
+  const location = useLocation();
+  const isSecurity = location.hash === '#security';
   const [data, setData] = useState<ReceptionToday | null>(null);
   const [view, setView] = useState<View>('roster');
   const [query, setQuery] = useState('');
@@ -55,9 +59,7 @@ export function StaffReceptionPage() {
   const handleCheckIn = async (studentId: string) => {
     setCheckingIn(studentId);
     try {
-      const result = data?.isDemo
-        ? { message: 'Student checked in at the front desk. Demo data was updated locally.', checkedInAt: new Date().toISOString() }
-        : await checkInStudent(studentId);
+      const result = await checkInStudent(studentId);
       setData((current) => current ? {
         ...current,
         roster: current.roster.map((student) => student.id === studentId
@@ -103,19 +105,28 @@ export function StaffReceptionPage() {
         </div>
       </header>
 
-      {data.isDemo ? <div className="reception-demo-note" role="status"><span className="material-symbols-outlined" aria-hidden="true">database</span><div><strong>Demonstration front desk</strong><span>Sample branch data is shown until today’s live roster is available.</span></div></div> : null}
-
       <section className="reception-metrics" aria-label="Today's front desk summary">
         <article><span className="metric-icon metric-icon--blue material-symbols-outlined">how_to_reg</span><div><strong>{checkedInCount}</strong><span>Students checked in</span></div></article>
         <article><span className="metric-icon metric-icon--gold material-symbols-outlined">event_available</span><div><strong>{confirmedAppointments}</strong><span>Confirmed visits</span></div></article>
         <article><span className="metric-icon metric-icon--green material-symbols-outlined">campaign</span><div><strong>{data.announcements.length}</strong><span>Active announcements</span></div></article>
       </section>
 
-      <div className="reception-tabs" role="tablist" aria-label="Front desk views">
-        <Tab id="roster" icon="groups" label="Student check-in" active={view === 'roster'} onSelect={setView} />
-        <Tab id="appointments" icon="calendar_today" label="Appointments" count={data.appointments.length} active={view === 'appointments'} onSelect={setView} />
-        <Tab id="announcements" icon="campaign" label="Announcements" count={data.announcements.length} active={view === 'announcements'} onSelect={setView} />
-      </div>
+      {isSecurity ? (
+        <section className="reception-workspace" role="tabpanel">
+          <div className="reception-toolbar">
+            <div><h3>Security Settings</h3><p>Manage your account password and security settings.</p></div>
+          </div>
+          <div style={{ padding: '24px' }}>
+            <ChangePasswordForm className="reception-workspace" />
+          </div>
+        </section>
+      ) : (
+        <>
+          <div className="reception-tabs" role="tablist" aria-label="Front desk views">
+            <Tab id="roster" icon="groups" label="Student check-in" active={view === 'roster'} onSelect={setView} />
+            <Tab id="appointments" icon="calendar_today" label="Appointments" count={data.appointments.length} active={view === 'appointments'} onSelect={setView} />
+            <Tab id="announcements" icon="campaign" label="Announcements" count={data.announcements.length} active={view === 'announcements'} onSelect={setView} />
+          </div>
 
       {view === 'roster' ? (
         <section className="reception-workspace" role="tabpanel">
@@ -164,6 +175,8 @@ export function StaffReceptionPage() {
           {data.announcements.length ? <div className="announcement-list">{data.announcements.map((item) => <article key={item.id}><span className="material-symbols-outlined">campaign</span><div><h4>{item.title}</h4><p>{item.description || 'No additional details were provided.'}</p></div></article>)}</div> : <Empty icon="campaign" title="No active announcements" detail="There are no institutional notices to relay today." />}
         </section>
       ) : null}
+        </>
+      )}
     </div>
   );
 }

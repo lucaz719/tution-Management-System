@@ -41,7 +41,8 @@ class _StudentTimetableScreenState extends State<StudentTimetableScreen>
       appBar: AppBar(
         title: Text(
           'My Weekly Timetable',
-          style: GoogleFonts.fraunces(fontWeight: FontWeight.w700, fontSize: 22),
+          style:
+              GoogleFonts.fraunces(fontWeight: FontWeight.w700, fontSize: 22),
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
@@ -52,7 +53,7 @@ class _StudentTimetableScreenState extends State<StudentTimetableScreen>
           isScrollable: true,
           indicatorColor: kColorAccent,
           labelColor: kColorPrimary,
-          unselectedLabelColor: kColorText.withOpacity(0.6),
+          unselectedLabelColor: kColorText.withValues(alpha: 0.6),
           tabs: _days.map((day) => Tab(text: day.dayLabel)).toList(),
         ),
       ),
@@ -61,15 +62,19 @@ class _StudentTimetableScreenState extends State<StudentTimetableScreen>
           children: [
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              color: kColorPrimary.withOpacity(0.04),
+              color: kColorPrimary.withValues(alpha: 0.04),
               child: Row(
                 children: [
-                  const Icon(Icons.info_outline_rounded, size: 18, color: kColorPrimary),
+                  const Icon(Icons.info_outline_rounded,
+                      size: 18, color: kColorPrimary),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Tap any session to view course syllabus & class location details.',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: kColorPrimary),
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: kColorPrimary),
                     ),
                   ),
                 ],
@@ -84,12 +89,17 @@ class _StudentTimetableScreenState extends State<StudentTimetableScreen>
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.event_busy_rounded, size: 48, color: kColorText.withOpacity(0.3)),
+                          Icon(Icons.event_busy_rounded,
+                              size: 48,
+                              color: kColorText.withValues(alpha: 0.3)),
                           const SizedBox(height: 12),
                           Text(
                             'No classes scheduled for ${day.dayLabel}.',
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                  color: kColorText.withOpacity(0.55),
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(
+                                  color: kColorText.withValues(alpha: 0.55),
                                 ),
                           ),
                         ],

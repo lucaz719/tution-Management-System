@@ -152,6 +152,43 @@ router.post('/syllabus', authMiddleware, async (req: TenantRequest, res: Respons
   }
 });
 
+router.patch('/syllabus/:syllabusId', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const subject = String(req.body?.subject || '').trim();
+  const chapters = Array.isArray(req.body?.chapters)
+    ? req.body.chapters.map((item: any) => ({ id: item?.id ? String(item.id) : undefined, title: String(item?.title || '').trim() })).filter((item: { title: string }) => item.title)
+    : [];
+  if (!subject || !chapters.length) return res.status(400).json({ error: 'Subject and at least one chapter are required.' });
+  try {
+    const syllabus = await prisma.syllabus.findFirst({
+      where: { id: req.params.syllabusId, createdBy: req.user!.id, class: { teacherId: req.user!.id, course: { tenantId: req.tenantId! } } },
+      include: { chapters: { include: { _count: { select: { dailyLogs: true } } } } },
+    });
+    if (!syllabus) return res.status(404).json({ error: 'Owned syllabus not found.' });
+    const existingIds = new Set(syllabus.chapters.map((chapter) => chapter.id));
+    if (chapters.some((chapter: { id?: string }) => chapter.id && !existingIds.has(chapter.id))) return res.status(422).json({ error: 'One or more chapters do not belong to this syllabus.' });
+    const retainedIds = new Set<string>(chapters.flatMap((chapter: { id?: string }) => chapter.id ? [chapter.id] : []));
+    const loggedRemoval = syllabus.chapters.find((chapter) => !retainedIds.has(chapter.id) && chapter._count.dailyLogs > 0);
+    if (loggedRemoval) return res.status(409).json({ error: `“${loggedRemoval.title}” has daily logs and cannot be removed. Rename it or keep it in the syllabus.` });
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.syllabus.update({ where: { id: syllabus.id }, data: { subject } });
+      await tx.syllabusChapter.deleteMany({ where: { syllabusId: syllabus.id, id: { notIn: [...retainedIds] } } });
+      for (let position = 0; position < chapters.length; position += 1) {
+        const chapter = chapters[position];
+        if (chapter.id) await tx.syllabusChapter.update({ where: { id: chapter.id }, data: { title: chapter.title, position: -(position + 1) } });
+      }
+      for (let position = 0; position < chapters.length; position += 1) {
+        const chapter = chapters[position];
+        if (chapter.id) await tx.syllabusChapter.update({ where: { id: chapter.id }, data: { position: position + 1 } });
+        else await tx.syllabusChapter.create({ data: { syllabusId: syllabus.id, title: chapter.title, position: position + 1 } });
+      }
+      return tx.syllabus.findUnique({ where: { id: syllabus.id }, include: { chapters: { orderBy: { position: 'asc' } }, dailyLogs: { orderBy: { logDate: 'desc' }, take: 20 } } });
+    });
+    return res.json({ message: 'Syllabus updated and shared with enrolled students.', syllabus: updated });
+  } catch (error: any) {
+    return res.status(error.code === 'P2002' ? 409 : 500).json({ error: error.code === 'P2002' ? 'A syllabus already exists for this class and subject.' : 'Failed to update syllabus.', details: error.message });
+  }
+});
+
 router.post('/syllabus/:syllabusId/log', authMiddleware, async (req: TenantRequest, res: Response) => {
   const { chapterId, status, notes, logDate } = req.body;
   if (!chapterId || !['IN_PROGRESS', 'COMPLETED', 'LEFT'].includes(status)) return res.status(400).json({ error: 'Chapter and a valid progress status are required.' });
@@ -168,7 +205,7 @@ router.post('/syllabus/:syllabusId/log', authMiddleware, async (req: TenantReque
 });
 
 router.post('/results', authMiddleware, async (req: TenantRequest, res: Response) => {
-  const { classId, subject, assessment, maximum, passMarks, testDate, resultSheetUrl } = req.body;
+  const { classId, subject, assessment, maximum, passMarks, testDate } = req.body;
   const marks = Array.isArray(req.body?.marks) ? req.body.marks : [];
   const max = Number(maximum); const pass = Number(passMarks);
   if (!classId || !subject?.trim() || !assessment?.trim() || !marks.length || !(max > 0) || pass < 0 || pass > max) return res.status(400).json({ error: 'Class, assessment, valid mark limits, and student marks are required.' });
@@ -182,7 +219,7 @@ router.post('/results', authMiddleware, async (req: TenantRequest, res: Response
     const created = await prisma.$transaction(numeric.map((item: any) => prisma.studentScore.create({ data: {
       tenantId: req.tenantId!, studentId: item.studentId, recordedBy: req.user!.id, subject: subject.trim(), assessment: assessment.trim(),
       score: item.score, maximum: max, passMarks: pass, percentile: Math.round((sorted.filter((value: number) => value <= item.score).length / sorted.length) * 10000) / 100,
-      resultSheetUrl: resultSheetUrl || null, testDate: testDate ? new Date(testDate) : new Date(), publishedAt: null,
+      resultSheetUrl: typeof item.resultSheetUrl === 'string' && item.resultSheetUrl ? item.resultSheetUrl : null, testDate: testDate ? new Date(testDate) : new Date(), publishedAt: null,
     } })));
     return res.status(201).json({ message: 'Result draft saved. Share it when ready.', resultIds: created.map((item) => item.id) });
   } catch (error: any) { return res.status(500).json({ error: 'Failed to save result draft.', details: error.message }); }

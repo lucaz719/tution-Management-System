@@ -36,7 +36,10 @@ class _ParentFeesScreenState extends State<ParentFeesScreen> {
               amount: 'NPR 3,000',
               dueDate: '25 July 2026',
               status: 'Pending',
-              breakdown: [('Monthly Tuition', 'NPR 2,800'), ('Lab & Material Fee', 'NPR 200')],
+              breakdown: [
+                ('Monthly Tuition', 'NPR 2,800'),
+                ('Lab & Material Fee', 'NPR 200')
+              ],
             ),
             (
               month: 'Transport Fee • July 2026',
@@ -50,7 +53,10 @@ class _ParentFeesScreenState extends State<ParentFeesScreen> {
               amount: 'NPR 3,500',
               dueDate: '25 June 2026',
               status: 'Paid',
-              breakdown: [('Monthly Tuition', 'NPR 3,000'), ('Library Membership', 'NPR 500')],
+              breakdown: [
+                ('Monthly Tuition', 'NPR 3,000'),
+                ('Library Membership', 'NPR 500')
+              ],
             ),
           ]
         : [
@@ -74,7 +80,8 @@ class _ParentFeesScreenState extends State<ParentFeesScreen> {
       appBar: AppBar(
         title: Text(
           'Child Fee Portal',
-          style: GoogleFonts.fraunces(fontWeight: FontWeight.w700, fontSize: 22),
+          style:
+              GoogleFonts.fraunces(fontWeight: FontWeight.w700, fontSize: 22),
         ),
       ),
       body: SafeArea(
@@ -102,15 +109,16 @@ class _ParentFeesScreenState extends State<ParentFeesScreen> {
                         Text(
                           'Outstanding Balance',
                           style: GoogleFonts.outfit(
-                            color: Colors.white.withOpacity(0.85),
+                            color: Colors.white.withValues(alpha: 0.85),
                             fontSize: 14,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.2),
+                            color: Colors.white.withValues(alpha: 0.2),
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Text(
@@ -154,11 +162,14 @@ class _ParentFeesScreenState extends State<ParentFeesScreen> {
                     ] else ...[
                       Row(
                         children: [
-                          const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+                          const Icon(Icons.check_circle_rounded,
+                              color: Colors.white, size: 20),
                           const SizedBox(width: 8),
                           Text(
                             'All dues cleared for $_selectedChild!',
-                            style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w600),
+                            style: GoogleFonts.outfit(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600),
                           ),
                         ],
                       )
@@ -171,18 +182,23 @@ class _ParentFeesScreenState extends State<ParentFeesScreen> {
 
             Text(
               'Fee Statements & Invoices',
-              style: GoogleFonts.fraunces(fontSize: 18, fontWeight: FontWeight.w700),
+              style: GoogleFonts.fraunces(
+                  fontSize: 18, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 12),
 
             for (final stmt in statements) ...[
               Card(
                 child: ExpansionTile(
-                  tilePadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                  tilePadding:
+                      const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
                   childrenPadding: const EdgeInsets.fromLTRB(18, 0, 18, 16),
                   title: Text(
                     stmt.month,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleSmall
+                        ?.copyWith(fontWeight: FontWeight.w700),
                   ),
                   subtitle: Padding(
                     padding: const EdgeInsets.only(top: 4),
@@ -201,7 +217,10 @@ class _ParentFeesScreenState extends State<ParentFeesScreen> {
                       children: [
                         Text(
                           'Breakdown Details',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700),
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(fontWeight: FontWeight.w700),
                         ),
                       ],
                     ),
@@ -212,8 +231,13 @@ class _ParentFeesScreenState extends State<ParentFeesScreen> {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(item.$1, style: Theme.of(context).textTheme.bodySmall),
-                            Text(item.$2, style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
+                            Text(item.$1,
+                                style: Theme.of(context).textTheme.bodySmall),
+                            Text(item.$2,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(fontWeight: FontWeight.w600)),
                           ],
                         ),
                       ),

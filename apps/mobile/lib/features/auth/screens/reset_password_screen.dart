@@ -2,14 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:tms_mobile/core/theme/app_colors.dart';
 import 'package:tms_mobile/core/utils/validators.dart';
-import 'package:tms_mobile/features/auth/data/mock_auth_service.dart';
+import 'package:tms_mobile/features/auth/data/auth_service.dart';
 import 'package:tms_mobile/features/auth/screens/login_screen.dart';
 import 'package:tms_mobile/features/auth/widgets/auth_card.dart';
 
 class ResetPasswordScreen extends StatefulWidget {
-  const ResetPasswordScreen({super.key, required this.email});
+  const ResetPasswordScreen({
+    super.key,
+    required this.email,
+    required this.resetToken,
+  });
 
   final String email;
+  final String resetToken;
 
   @override
   State<ResetPasswordScreen> createState() => _ResetPasswordScreenState();
@@ -70,7 +75,10 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
 
     setState(() => _isLoading = true);
     try {
-      await MockAuthService.resetPassword(_passwordController.text);
+      await AuthService.resetPassword(
+        resetToken: widget.resetToken,
+        newPassword: _passwordController.text,
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -112,7 +120,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
             'Create a new password for ${widget.email}.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: kColorText.withOpacity(0.72),
+                  color: kColorText.withValues(alpha: 0.72),
                 ),
           ),
           const SizedBox(height: 24),

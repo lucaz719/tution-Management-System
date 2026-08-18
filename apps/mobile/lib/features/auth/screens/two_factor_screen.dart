@@ -1,24 +1,25 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:tms_mobile/core/providers/auth_provider.dart';
 import 'package:tms_mobile/core/theme/app_colors.dart';
 import 'package:tms_mobile/core/utils/formatters.dart';
-import 'package:tms_mobile/features/auth/data/mock_auth_service.dart';
+import 'package:tms_mobile/features/auth/data/auth_service.dart';
 import 'package:tms_mobile/features/auth/widgets/auth_card.dart';
 import 'package:tms_mobile/features/auth/widgets/otp_input_field.dart';
-import 'package:tms_mobile/features/teacher/screens/teacher_home_screen.dart';
 
-class TwoFactorScreen extends StatefulWidget {
+class TwoFactorScreen extends ConsumerStatefulWidget {
   const TwoFactorScreen({super.key, required this.email});
 
   final String email;
 
   @override
-  State<TwoFactorScreen> createState() => _TwoFactorScreenState();
+  ConsumerState<TwoFactorScreen> createState() => _TwoFactorScreenState();
 }
 
-class _TwoFactorScreenState extends State<TwoFactorScreen> {
+class _TwoFactorScreenState extends ConsumerState<TwoFactorScreen> {
   Timer? _timer;
   bool _trustDevice = true;
   bool _isLoading = false;
@@ -60,13 +61,9 @@ class _TwoFactorScreenState extends State<TwoFactorScreen> {
 
     setState(() => _isLoading = true);
     try {
-      await MockAuthService.verifyTwoFactorCode(_code);
-      if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute<void>(builder: (_) => const TeacherHomeScreen()),
-        (route) => false,
-      );
+      await ref.read(authProvider.notifier).verify2FA(_code);
     } on AuthFailure catch (error) {
+      if (!mounted) return;
       setState(() => _failedAttempts++);
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(error.message)));
@@ -80,8 +77,9 @@ class _TwoFactorScreenState extends State<TwoFactorScreen> {
   Future<void> _resendCode() async {
     setState(() => _isLoading = true);
     try {
-      await MockAuthService.sendTwoFactorCode();
+      await AuthService.sendTwoFactorCode(widget.email);
       _startTimer();
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('A new verification code has been sent.')),
       );
@@ -94,8 +92,9 @@ class _TwoFactorScreenState extends State<TwoFactorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final attemptsColor =
-        _failedAttempts >= 2 ? kColorWarning : kColorText.withOpacity(0.72);
+    final attemptsColor = _failedAttempts >= 2
+        ? kColorWarning
+        : kColorText.withValues(alpha: 0.72);
 
     return AuthCard(
       onBack: () => Navigator.of(context).pop(),
@@ -123,7 +122,7 @@ class _TwoFactorScreenState extends State<TwoFactorScreen> {
             widget.email,
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: kColorText.withOpacity(0.68),
+                  color: kColorText.withValues(alpha: 0.68),
                 ),
           ),
           const SizedBox(height: 24),

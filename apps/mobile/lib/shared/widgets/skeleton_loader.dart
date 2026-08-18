@@ -54,7 +54,7 @@ class _SkeletonLoaderState extends State<SkeletonLoader> {
         gradient: LinearGradient(
           begin: _highlight ? Alignment.topLeft : Alignment.bottomRight,
           end: _highlight ? Alignment.bottomRight : Alignment.topLeft,
-          colors: <Color>[
+          colors: const <Color>[
             TmsAppColors.surface,
             TmsAppColors.divider,
             TmsAppColors.surface,

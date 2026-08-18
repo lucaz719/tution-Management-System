@@ -17,7 +17,7 @@ class StudentCertificatesScreen extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(StudentSpace.md),
             decoration: BoxDecoration(
-              color: StudentColors.success.withOpacity(.08),
+              color: StudentColors.success.withValues(alpha: .08),
               borderRadius: BorderRadius.circular(StudentRadius.card),
             ),
             child: const Row(
@@ -47,8 +47,7 @@ class StudentCertificatesScreen extends StatelessWidget {
                           width: 48,
                           height: 48,
                           decoration: BoxDecoration(
-                            color:
-                                StudentColors.primary.withOpacity(.08),
+                            color: StudentColors.primary.withValues(alpha: .08),
                             borderRadius:
                                 BorderRadius.circular(StudentRadius.control),
                           ),

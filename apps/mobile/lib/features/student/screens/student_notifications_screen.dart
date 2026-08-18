@@ -29,7 +29,7 @@ class StudentNotificationsScreen extends StatelessWidget {
           return Card(
             color: notice.isRead
                 ? StudentColors.background
-                : StudentColors.primary.withOpacity(.04),
+                : StudentColors.primary.withValues(alpha: .04),
             child: InkWell(
               borderRadius: BorderRadius.circular(StudentRadius.card),
               onTap: () => context.go(notice.route),
@@ -56,12 +56,14 @@ class StudentNotificationsScreen extends StatelessWidget {
                         children: [
                           Text(
                             notice.title,
-                            style:
-                                Theme.of(context).textTheme.titleMedium?.copyWith(
-                                      fontWeight: notice.isRead
-                                          ? FontWeight.w600
-                                          : FontWeight.w800,
-                                    ),
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(
+                                  fontWeight: notice.isRead
+                                      ? FontWeight.w600
+                                      : FontWeight.w800,
+                                ),
                           ),
                           const SizedBox(height: StudentSpace.xxs),
                           Text(notice.message),

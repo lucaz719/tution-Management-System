@@ -24,7 +24,7 @@ String formatShortTime(DateTime value) {
       value.hour == 0 ? 12 : (value.hour > 12 ? value.hour - 12 : value.hour);
   final suffix = value.hour >= 12 ? 'PM' : 'AM';
   final minute = value.minute.toString().padLeft(2, '0');
-  return '$hour:$minute${suffix}';
+  return '$hour:$minute$suffix';
 }
 
 String formatTimestamp(DateTime value) {

@@ -108,7 +108,7 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
       prisma.leave.findMany({ where: { tenantId: req.tenantId!, userId: student.userId }, orderBy: { updatedAt: 'desc' }, take: 30 }),
       prisma.appointment.findMany({
         where: { tenantId: req.tenantId!, studentId: student.id, requestedById: req.user!.id },
-        include: { teacher: { select: { firstName: true, lastName: true } } },
+        include: { teacher: { include: { userRoles: { include: { role: true } } } } },
         orderBy: { createdAt: 'desc' },
       }),
       prisma.parentMessage.findMany({
@@ -196,14 +196,19 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
       })),
       ...scoreRemarks,
     ];
-    const mappedAppointments = appointments.map((appointment) => ({
+    const mappedAppointments = appointments.map((appointment) => {
+      const isBranchAdminAppointment = appointment.teacher.userRoles.some((assignment) => assignment.role.name === 'Branch Admin' && branchIds.includes(assignment.branchId || ''));
+      return {
       id: appointment.id, childId: student.id,
-      teacher: `${appointment.teacher.firstName} ${appointment.teacher.lastName}`,
+      teacher: isBranchAdminAppointment ? `Branch Admin · ${appointment.teacher.firstName} ${appointment.teacher.lastName}` : `${appointment.teacher.firstName} ${appointment.teacher.lastName}`,
       subject: appointment.remarks || 'Student meeting',
       requestedTime: formatDate(appointment.scheduledTime),
       alternativeTime: appointment.alternativeTime ? formatDate(appointment.alternativeTime) : undefined,
+      responseMessage: appointment.responseRemarks || undefined,
+      responseDescription: appointment.responseRemarks || undefined,
       state: appointmentState(appointment.status), group: appointment.isGroup,
-    }));
+      };
+    });
     const mappedLeaves = leaves.map((leave) => ({
       id: leave.id, childId: student.id,
       dates: leave.startDate.getTime() === leave.endDate.getTime() ? formatDate(leave.startDate) : `${formatDate(leave.startDate)} – ${formatDate(leave.endDate)}`,
@@ -245,7 +250,7 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
       })),
       ...appointments.map((appointment) => ({
         id: `appointment-${appointment.id}`, childId: student.id, title: `Appointment ${appointmentState(appointment.status).toLowerCase()}`,
-        message: `Appointment with ${appointment.teacher.firstName} ${appointment.teacher.lastName} on ${formatDate(appointment.scheduledTime)}.`,
+        message: `Appointment with ${appointment.teacher.userRoles.some((assignment) => assignment.role.name === 'Branch Admin') ? 'the Branch Admin' : `${appointment.teacher.firstName} ${appointment.teacher.lastName}`} on ${formatDate(appointment.scheduledTime)}.`,
         time: formatDate(appointment.updatedAt), occurredAt: appointment.updatedAt.toISOString(), icon: 'event',
         destination: 'appointments', channels: ['Push', 'SMS'], urgent: false, unread: appointment.updatedAt.getTime() >= Date.now() - 7 * 86400000,
       })),

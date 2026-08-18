@@ -2,6 +2,107 @@
 // Tenant scope is authoritative from the signed session on the API.
 import { request } from './api/client';
 
+export interface BillingInvoice {
+  id: string; invoiceType: 'ADMISSION' | 'TUITION' | 'SUBJECT' | 'ACTIVITY'; amount: number; discount: number; fine: number;
+  netPayable: number; status: string; overdue: boolean; billingCycleStart: string; billingCycleEnd: string; dueDate: string;
+  paymentDate: string | null; transactionId: string | null; vatRate: number; createdAt: string;
+}
+
+export interface BillingPayroll {
+  id: string; month: number; year: number; baseSalary: number; deductions: number; bonuses: number; netPayable: number;
+  status: string; settlementReference: string | null; paymentDate: string | null; createdAt: string;
+}
+
+export interface BillingLedger {
+  generatedAt: string;
+  vatRate: number;
+  students: Array<{
+    studentId: string; studentName: string; email: string; grade: string; branchId: string | null; branchName: string;
+    admissionDate: string; courseEnd: string; monthlyAmount: number; invoices: BillingInvoice[];
+    projections: Array<{ cycleStart: string; cycleEnd: string; dueDate: string; amount: number }>;
+  }>;
+  teachers: Array<{
+    teacherId: string; userId: string; teacherName: string; email: string; designation: string; contractType: string;
+    branchId: string | null; branchName: string; baseSalary: number; payrolls: BillingPayroll[];
+    projection: { month: number; year: number; baseSalary: number; deductions: number; bonuses: number; netPayable: number };
+  }>;
+}
+
+export interface AccountantWorkspace {
+  branches: Array<{ id: string; name: string }>;
+  pettyCashCap: number;
+  pettyCashUsage: Array<{ branchId: string; committed: number }>;
+  summary: {
+    collected: number;
+    outstanding: number;
+    overdueAmount: number;
+    invoiceCount: number;
+    openPettyCash: number;
+    awaitingReceipt: number;
+  };
+  pettyCash: Array<{
+    id: string;
+    branchId: string;
+    branchName: string;
+    purpose: string;
+    amount: number;
+    items: Array<{ name: string; quantity: number; unitAmount: number; totalAmount: number }>;
+    status: 'PENDING' | 'APPROVED_LEVEL1' | 'REJECTED' | 'RELEASED' | 'RECEIPT_SUBMITTED' | 'CLOSED';
+    receiptProofUrl: string | null;
+    approvalChain: Array<{ role?: string; action?: string; timestamp?: string; comment?: string }>;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  invoices: Array<{
+    id: string;
+    studentId: string;
+    studentName: string;
+    branchId: string | null;
+    branchName: string | null;
+    amount: number;
+    discount: number;
+    netPayable: number;
+    status: string;
+    overdue: boolean;
+    billingCycleStart: string;
+    billingCycleEnd: string;
+    dueDate: string;
+    paymentDate: string | null;
+    transactionId: string | null;
+  }>;
+  reports: { revenue: number; operatingCosts: number; netMargin: number; expenseCount: number; ledgerEntryCount: number };
+}
+
+export interface BranchAdminDashboardData {
+  branches: Array<{ id: string; name: string }>;
+  selectedBranch: { id: string; name: string };
+  generatedAt: string;
+  metrics: {
+    teacherAttendance: { present: number; total: number; rate: number | null };
+    studentAttendance: { present: number; total: number; rate: number | null };
+    blockedStudents: number;
+    pendingInvoices: number;
+    outstandingAmount: number;
+    pendingAppointments: number;
+  };
+  timetable: Array<{ id: string; time: string | null; title: string; detail: string; room: string; status: string }>;
+  resources: Array<{ id: string; label: string; detail: string; status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED'; actionRequired: boolean; createdAt: string }>;
+  pettyCash: Array<{ id: string; amount: number; purpose: string; status: 'PENDING' }>;
+  appointments: Array<{ id: string; parent: string; student: string; preferredTime: string; description: string }>;
+}
+
+export interface BranchAppointment {
+  id: string;
+  status: 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'ALTERNATIVE_PROPOSED' | 'CONFIRMED' | 'CANCELLED';
+  scheduledTime: string;
+  remarks: string | null;
+  responseRemarks: string | null;
+  createdAt: string;
+  requestedBy: { firstName: string; lastName: string; phone: string | null };
+  teacher?: { firstName: string; lastName: string };
+  student: { user: { firstName: string; lastName: string } };
+}
+
 // Helper to remove token
 export function removeAuthToken() {
   localStorage.removeItem('tms_tenant_id');
@@ -42,10 +143,37 @@ export const api = {
         body: JSON.stringify({ resetToken, newPassword }),
       });
     },
+    changePassword: async (currentPassword: string, newPassword: string) => {
+      return request<{ success: boolean }>('/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+    },
   },
 
   // Finances
   finances: {
+    getAccountantWorkspace: async () => request<AccountantWorkspace>('/finances/accountant-workspace'),
+    getBillingLedger: async () => request<BillingLedger>('/finances/billing-ledger'),
+    createInvoice: async (payload: { studentId: string; amount: number; discount: number; fine: number; invoiceType: 'TUITION' | 'SUBJECT' | 'ACTIVITY'; billingCycleStart: string; billingCycleEnd: string; dueDate: string }) =>
+      request<{ message: string; invoice: BillingInvoice }>('/finances/billing-ledger/invoices', { method: 'POST', body: JSON.stringify(payload) }),
+    createPayroll: async (payload: { staffRecordId: string; month: number; year: number; baseSalary: number; bonuses: number; deductions: number }) =>
+      request<{ message: string; payroll: BillingPayroll }>('/finances/billing-ledger/payrolls', { method: 'POST', body: JSON.stringify(payload) }),
+    requestPettyCash: async (payload: { branchId: string; purpose: string; amount: number; items: Array<{ name: string; quantity: number; unitAmount: number }> }) =>
+      request<{ message: string; pettyCash: AccountantWorkspace['pettyCash'][number] }>('/finances/petty-cash/request', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    resubmitPettyCash: async (id: string, payload: { purpose: string; amount: number; items: Array<{ name: string; quantity: number; unitAmount: number }> }) =>
+      request<{ message: string; pettyCash: AccountantWorkspace['pettyCash'][number] }>(`/finances/petty-cash/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
+    submitPettyCashReceipt: async (id: string, receiptProofUrl: string) =>
+      request<{ message: string; pettyCash: AccountantWorkspace['pettyCash'][number] }>(`/finances/petty-cash/upload-receipt/${id}`, {
+        method: 'POST',
+        body: JSON.stringify({ receiptProofUrl }),
+      }),
     getPL: async () => {
       return request<{
         revenue: number;
@@ -147,7 +275,7 @@ export const api = {
       return request<{ message: string; created: number; billingPeriod: string; skipped: number }>('/finances/generate-invoices', {
         method: 'POST',
       });
-    }
+    },
   },
 
   // Teacher workspace
@@ -163,6 +291,8 @@ export const api = {
       request<any>(`/teacher/class/${classId}/attendance`, { method: 'POST', body: JSON.stringify({ date, records }) }),
     createSyllabus: async (payload: { classId: string; subject: string; chapters: string[] }) =>
       request<any>('/teacher/syllabus', { method: 'POST', body: JSON.stringify(payload) }),
+    updateSyllabus: async (syllabusId: string, payload: { subject: string; chapters: Array<{ id?: string; title: string }> }) =>
+      request<any>(`/teacher/syllabus/${syllabusId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
     updateSyllabusLog: async (syllabusId: string, payload: { chapterId: string; status: 'IN_PROGRESS' | 'COMPLETED' | 'LEFT'; notes?: string; logDate?: string }) =>
       request<any>(`/teacher/syllabus/${syllabusId}/log`, { method: 'POST', body: JSON.stringify(payload) }),
     createHomework: async (payload: { classId: string; subject: string; title: string; description?: string; contentUrl?: string; deadline: string }) =>
@@ -241,6 +371,9 @@ export const api = {
     },
     getProfile: async (userId: string) => {
       return request<any>(`/users/${userId}/profile`);
+    },
+    resetPassword: async (userId: string) => {
+      return request<{ temporaryPassword: string }>(`/users/${userId}/reset-password`, { method: 'POST' });
     },
     getAnalytics: async (userId: string) => {
       return request<{
@@ -424,6 +557,10 @@ export const api = {
 
   // Branch Admin operations. Authorization and branch scoping are enforced by the API.
   branchAdmin: {
+    getDashboard: async (branchId?: string) => request<BranchAdminDashboardData>(`/branch-admin/dashboard${branchId ? `?branchId=${encodeURIComponent(branchId)}` : ''}`),
+    getAppointments: async (branchId: string) => request<{ appointments: BranchAppointment[] }>(`/appointments/branch?branchId=${encodeURIComponent(branchId)}`),
+    respondToAppointment: async (appointmentId: string, payload: { action: 'APPROVE' | 'REJECT'; scheduledTime?: string; remarks: string }) =>
+      request<{ message: string }>(`/appointments/respond/${encodeURIComponent(appointmentId)}`, { method: 'POST', body: JSON.stringify(payload) }),
     decideLeave: async (leaveId: string, action: 'APPROVE' | 'REJECT', remarks?: string) =>
       request<{ message: string; leave: any }>(`/leaves/approve/${leaveId}`, { method: 'POST', body: JSON.stringify({ action, remarks }) }),
     emergencyDeparture: async (payload: { studentId: string; branchId: string; reason: string; collectedBy?: string; departureTime?: string }) =>

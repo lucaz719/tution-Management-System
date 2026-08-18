@@ -35,33 +35,91 @@ class _ParentAttendanceScreenState extends State<ParentAttendanceScreen> {
 
     final records = isAarav
         ? [
-            ('Fri, Jul 18', 'Present', 'On-time arrival (08:45 AM)', AttendanceStatus.present),
-            ('Thu, Jul 17', 'Present', 'On-time arrival (08:50 AM)', AttendanceStatus.present),
-            ('Wed, Jul 16', 'Absent', 'Medical leave submitted & verified', AttendanceStatus.absent),
-            ('Tue, Jul 15', 'Present', 'On-time arrival (08:42 AM)', AttendanceStatus.present),
-            ('Mon, Jul 14', 'Excused', 'Approved family event leave', AttendanceStatus.excused),
-            ('Fri, Jul 11', 'Present', 'Bus delay recorded (+10 min)', AttendanceStatus.present),
+            (
+              'Fri, Jul 18',
+              'Present',
+              'On-time arrival (08:45 AM)',
+              AttendanceStatus.present
+            ),
+            (
+              'Thu, Jul 17',
+              'Present',
+              'On-time arrival (08:50 AM)',
+              AttendanceStatus.present
+            ),
+            (
+              'Wed, Jul 16',
+              'Absent',
+              'Medical leave submitted & verified',
+              AttendanceStatus.absent
+            ),
+            (
+              'Tue, Jul 15',
+              'Present',
+              'On-time arrival (08:42 AM)',
+              AttendanceStatus.present
+            ),
+            (
+              'Mon, Jul 14',
+              'Excused',
+              'Approved family event leave',
+              AttendanceStatus.excused
+            ),
+            (
+              'Fri, Jul 11',
+              'Present',
+              'Bus delay recorded (+10 min)',
+              AttendanceStatus.present
+            ),
           ]
         : [
-            ('Fri, Jul 18', 'Present', 'On-time arrival (08:40 AM)', AttendanceStatus.present),
-            ('Thu, Jul 17', 'Present', 'On-time arrival (08:44 AM)', AttendanceStatus.present),
-            ('Wed, Jul 16', 'Present', 'On-time arrival (08:48 AM)', AttendanceStatus.present),
-            ('Tue, Jul 15', 'Absent', 'Sick leave - Doctor note provided', AttendanceStatus.absent),
-            ('Mon, Jul 14', 'Present', 'On-time arrival (08:41 AM)', AttendanceStatus.present),
+            (
+              'Fri, Jul 18',
+              'Present',
+              'On-time arrival (08:40 AM)',
+              AttendanceStatus.present
+            ),
+            (
+              'Thu, Jul 17',
+              'Present',
+              'On-time arrival (08:44 AM)',
+              AttendanceStatus.present
+            ),
+            (
+              'Wed, Jul 16',
+              'Present',
+              'On-time arrival (08:48 AM)',
+              AttendanceStatus.present
+            ),
+            (
+              'Tue, Jul 15',
+              'Absent',
+              'Sick leave - Doctor note provided',
+              AttendanceStatus.absent
+            ),
+            (
+              'Mon, Jul 14',
+              'Present',
+              'On-time arrival (08:41 AM)',
+              AttendanceStatus.present
+            ),
           ];
 
     return Scaffold(
       appBar: AppBar(
         title: Text(
           'Child Attendance',
-          style: GoogleFonts.fraunces(fontWeight: FontWeight.w700, fontSize: 22),
+          style:
+              GoogleFonts.fraunces(fontWeight: FontWeight.w700, fontSize: 22),
         ),
         actions: [
           IconButton(
             icon: Icon(_viewMode == AttendanceViewMode.list
                 ? Icons.calendar_month_rounded
                 : Icons.format_list_bulleted_rounded),
-            tooltip: _viewMode == AttendanceViewMode.list ? 'Calendar View' : 'List View',
+            tooltip: _viewMode == AttendanceViewMode.list
+                ? 'Calendar View'
+                : 'List View',
             onPressed: () {
               setState(() {
                 _viewMode = _viewMode == AttendanceViewMode.list
@@ -93,7 +151,8 @@ class _ParentAttendanceScreenState extends State<ParentAttendanceScreen> {
                       percent: attendanceRate,
                       size: 84,
                       strokeWidth: 8,
-                      color: attendanceRate >= 0.9 ? kColorSuccess : kColorWarning,
+                      color:
+                          attendanceRate >= 0.9 ? kColorSuccess : kColorWarning,
                     ),
                     const SizedBox(width: 20),
                     Expanded(
@@ -113,9 +172,18 @@ class _ParentAttendanceScreenState extends State<ParentAttendanceScreen> {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              _StatBadge(label: 'Present', count: '$presentDays d', color: kColorSuccess),
-                              _StatBadge(label: 'Absent', count: '$absentDays d', color: kColorError),
-                              _StatBadge(label: 'Excused', count: '$excusedDays d', color: kColorWarning),
+                              _StatBadge(
+                                  label: 'Present',
+                                  count: '$presentDays d',
+                                  color: kColorSuccess),
+                              _StatBadge(
+                                  label: 'Absent',
+                                  count: '$absentDays d',
+                                  color: kColorError),
+                              _StatBadge(
+                                  label: 'Excused',
+                                  count: '$excusedDays d',
+                                  color: kColorWarning),
                             ],
                           )
                         ],
@@ -132,11 +200,15 @@ class _ParentAttendanceScreenState extends State<ParentAttendanceScreen> {
               children: [
                 Text(
                   'Recent Activity Log',
-                  style: GoogleFonts.fraunces(fontSize: 18, fontWeight: FontWeight.w700),
+                  style: GoogleFonts.fraunces(
+                      fontSize: 18, fontWeight: FontWeight.w700),
                 ),
                 Text(
                   'July 2026',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(fontWeight: FontWeight.w600),
                 ),
               ],
             ),
@@ -146,20 +218,23 @@ class _ParentAttendanceScreenState extends State<ParentAttendanceScreen> {
               for (final record in records) ...[
                 Card(
                   child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
                     leading: Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: record.$4.chipVariant == StatusChipVariant.success
-                            ? kColorSuccess.withOpacity(0.12)
+                        color: record.$4.chipVariant ==
+                                StatusChipVariant.success
+                            ? kColorSuccess.withValues(alpha: 0.12)
                             : record.$4.chipVariant == StatusChipVariant.error
-                                ? kColorError.withOpacity(0.12)
-                                : kColorWarning.withOpacity(0.12),
+                                ? kColorError.withValues(alpha: 0.12)
+                                : kColorWarning.withValues(alpha: 0.12),
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
                         record.$4.icon,
-                        color: record.$4.chipVariant == StatusChipVariant.success
+                        color: record.$4.chipVariant ==
+                                StatusChipVariant.success
                             ? kColorSuccess
                             : record.$4.chipVariant == StatusChipVariant.error
                                 ? kColorError
@@ -169,7 +244,10 @@ class _ParentAttendanceScreenState extends State<ParentAttendanceScreen> {
                     ),
                     title: Text(
                       record.$1,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w700),
                     ),
                     subtitle: Text(record.$3),
                     trailing: StatusChip(
@@ -195,7 +273,8 @@ class _ParentAttendanceScreenState extends State<ParentAttendanceScreen> {
                       GridView.builder(
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 7,
                           mainAxisSpacing: 8,
                           crossAxisSpacing: 8,
@@ -207,16 +286,16 @@ class _ParentAttendanceScreenState extends State<ParentAttendanceScreen> {
                           final isAbs = day == 16;
                           final isExc = day == 14;
 
-                          Color bgColor = kColorSuccess.withOpacity(0.15);
+                          Color bgColor = kColorSuccess.withValues(alpha: 0.15);
                           Color textColor = kColorSuccess;
                           if (isWeekend) {
                             bgColor = kColorSurface;
-                            textColor = kColorText.withOpacity(0.4);
+                            textColor = kColorText.withValues(alpha: 0.4);
                           } else if (isAbs) {
-                            bgColor = kColorError.withOpacity(0.15);
+                            bgColor = kColorError.withValues(alpha: 0.15);
                             textColor = kColorError;
                           } else if (isExc) {
-                            bgColor = kColorWarning.withOpacity(0.15);
+                            bgColor = kColorWarning.withValues(alpha: 0.15);
                             textColor = kColorWarning;
                           }
 
@@ -251,7 +330,8 @@ class _ParentAttendanceScreenState extends State<ParentAttendanceScreen> {
 }
 
 class _StatBadge extends StatelessWidget {
-  const _StatBadge({required this.label, required this.count, required this.color});
+  const _StatBadge(
+      {required this.label, required this.count, required this.color});
   final String label;
   final String count;
   final Color color;
@@ -262,7 +342,8 @@ class _StatBadge extends StatelessWidget {
       children: [
         Text(
           count,
-          style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: 15, color: color),
+          style: GoogleFonts.outfit(
+              fontWeight: FontWeight.w700, fontSize: 15, color: color),
         ),
         Text(
           label,

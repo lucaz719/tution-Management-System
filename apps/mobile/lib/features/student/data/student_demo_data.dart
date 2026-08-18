@@ -235,4 +235,3 @@ abstract final class StudentDemoData {
     ),
   ];
 }
-

@@ -99,7 +99,7 @@ class StudentStatusPill extends StatelessWidget {
           vertical: StudentSpace.xs,
         ),
         decoration: BoxDecoration(
-          color: color.withOpacity(.10),
+          color: color.withValues(alpha: .10),
           borderRadius: BorderRadius.circular(StudentRadius.pill),
         ),
         child: Row(

@@ -47,7 +47,8 @@ class _TeacherLeaveScreenState extends State<TeacherLeaveScreen> {
       appBar: AppBar(
         title: Text(
           'Leave Requests',
-          style: GoogleFonts.fraunces(fontWeight: FontWeight.w700, fontSize: 22),
+          style:
+              GoogleFonts.fraunces(fontWeight: FontWeight.w700, fontSize: 22),
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
@@ -61,12 +62,12 @@ class _TeacherLeaveScreenState extends State<TeacherLeaveScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.event_available_rounded,
-                        size: 48, color: kColorText.withOpacity(0.35)),
+                        size: 48, color: kColorText.withValues(alpha: 0.35)),
                     const SizedBox(height: 12),
                     Text(
                       'No leave requests yet',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: kColorText.withOpacity(0.55),
+                            color: kColorText.withValues(alpha: 0.55),
                           ),
                     ),
                   ],
@@ -124,14 +125,18 @@ class _TeacherLeaveScreenState extends State<TeacherLeaveScreen> {
               ),
               const SizedBox(height: 20),
               DropdownButtonFormField<String>(
-                value: typeController.text,
+                initialValue: typeController.text,
                 decoration: const InputDecoration(labelText: 'Leave Type'),
                 items: const [
-                  DropdownMenuItem(value: 'Casual Leave', child: Text('Casual Leave')),
-                  DropdownMenuItem(value: 'Sick Leave', child: Text('Sick Leave')),
-                  DropdownMenuItem(value: 'Early Out', child: Text('Early Out')),
+                  DropdownMenuItem(
+                      value: 'Casual Leave', child: Text('Casual Leave')),
+                  DropdownMenuItem(
+                      value: 'Sick Leave', child: Text('Sick Leave')),
+                  DropdownMenuItem(
+                      value: 'Early Out', child: Text('Early Out')),
                 ],
-                onChanged: (value) => typeController.text = value ?? 'Casual Leave',
+                onChanged: (value) =>
+                    typeController.text = value ?? 'Casual Leave',
               ),
               const SizedBox(height: 16),
               TextField(
@@ -182,8 +187,7 @@ class _LeaveCard extends StatelessWidget {
   const _LeaveCard({required this.leave});
   final _LeaveRecord leave;
 
-  String _formatDate(DateTime d) =>
-      '${d.day}/${d.month}/${d.year}';
+  String _formatDate(DateTime d) => '${d.day}/${d.month}/${d.year}';
 
   @override
   Widget build(BuildContext context) {
@@ -230,7 +234,7 @@ class _LeaveCard extends StatelessWidget {
             Text(
               dateRange,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: kColorText.withOpacity(0.65),
+                    color: kColorText.withValues(alpha: 0.65),
                   ),
             ),
             const SizedBox(height: 4),

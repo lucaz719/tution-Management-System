@@ -118,14 +118,14 @@ ThemeData buildStudentTheme(ThemeData base) {
       elevation: 0,
       backgroundColor: StudentColors.background,
       surfaceTintColor: Colors.transparent,
-      indicatorColor: StudentColors.primary.withOpacity(.10),
-      labelTextStyle: MaterialStateProperty.resolveWith(
+      indicatorColor: StudentColors.primary.withValues(alpha: .10),
+      labelTextStyle: WidgetStateProperty.resolveWith(
         (states) => GoogleFonts.roboto(
           fontSize: 11,
-          fontWeight: states.contains(MaterialState.selected)
+          fontWeight: states.contains(WidgetState.selected)
               ? FontWeight.w700
               : FontWeight.w500,
-          color: states.contains(MaterialState.selected)
+          color: states.contains(WidgetState.selected)
               ? StudentColors.primary
               : StudentColors.mutedText,
         ),

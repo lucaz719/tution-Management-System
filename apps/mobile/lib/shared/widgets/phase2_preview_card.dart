@@ -34,18 +34,19 @@ class Phase2PreviewCard extends StatelessWidget {
                     child: BackdropFilter(
                       filter: ImageFilter.blur(sigmaX: 2.2, sigmaY: 2.2),
                       child: Container(
-                        color: Colors.white.withOpacity(0.32),
+                        color: Colors.white.withValues(alpha: 0.32),
                       ),
                     ),
                   ),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                     decoration: BoxDecoration(
                       color: TmsAppColors.accent,
                       borderRadius: BorderRadius.circular(999),
                       boxShadow: <BoxShadow>[
                         BoxShadow(
-                          color: TmsAppColors.accent.withOpacity(0.22),
+                          color: TmsAppColors.accent.withValues(alpha: 0.22),
                           blurRadius: 16,
                           offset: const Offset(0, 6),
                         ),

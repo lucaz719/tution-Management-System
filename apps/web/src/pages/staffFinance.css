@@ -222,6 +222,24 @@
 .accountant-receipt-summary small { color: var(--text-muted); }
 .accountant-receipt-summary strong { font-size: 13px; }
 .accountant-modal .accountant-policy-note { margin: 0; }
+/* New Premium Billing UI Tokens */
+.accountant-header { display: flex; justify-content: space-between; align-items: flex-end; gap: var(--sp-4); margin-bottom: var(--sp-4); }
+.accountant-header-title h2 { font-family: var(--font-display); font-size: 24px; font-weight: 600; letter-spacing: -0.02em; }
+.accountant-header-title p { margin-top: 4px; color: var(--accountant-muted); font-size: 13.5px; }
+.accountant-header-actions { display: flex; gap: var(--sp-3); }
+.accountant-button { padding: 9px 18px; border: 1px solid var(--accountant-border); border-radius: var(--radius-md); font-weight: 600; font-size: 13.5px; color: var(--color-primary-dark); background: linear-gradient(180deg, var(--color-surface), color-mix(in srgb, var(--color-surface) 95%, var(--color-primary))); cursor: pointer; box-shadow: 0 2px 4px color-mix(in srgb, var(--color-primary) 5%, transparent); transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
+.accountant-button:hover { border-color: var(--color-primary); box-shadow: 0 4px 8px color-mix(in srgb, var(--color-primary) 12%, transparent); transform: translateY(-1px); }
+.accountant-controls { padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-4); border: 1px solid var(--accountant-border); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--color-surface) 60%, transparent); backdrop-filter: blur(12px); display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; box-shadow: 0 4px 12px color-mix(in srgb, var(--color-primary-dark) 3%, transparent); }
+.accountant-tabs { display: inline-flex; background: color-mix(in srgb, var(--accountant-border) 40%, transparent); padding: 4px; border-radius: var(--radius-md); gap: 2px; }
+.accountant-tabs button { padding: 7px 16px; border: 0; border-radius: calc(var(--radius-md) - 2px); background: transparent; color: var(--accountant-muted); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s ease-out; }
+.accountant-tabs button[aria-selected="true"] { background: var(--color-surface); color: var(--color-primary); box-shadow: 0 2px 4px color-mix(in srgb, var(--color-primary-dark) 5%, transparent); }
+.accountant-tabs button:hover:not([aria-selected="true"]) { color: var(--accountant-ink); }
+.accountant-table-scroll { border-radius: var(--radius-lg); overflow: hidden; box-shadow: 0 4px 16px color-mix(in srgb, var(--color-primary-dark) 4%, transparent); }
+.accountant-table { width: 100%; border-collapse: collapse; background: var(--color-surface); }
+.accountant-table th { background: color-mix(in srgb, var(--color-primary) 3%, var(--color-surface)); padding: 14px var(--sp-4); border-bottom: 2px solid color-mix(in srgb, var(--accountant-border) 60%, transparent); color: var(--accountant-muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; text-align: left; }
+.accountant-table td { padding: 14px var(--sp-4); border-bottom: 1px solid var(--accountant-border); font-size: 13px; vertical-align: middle; transition: background 0.15s ease; }
+.accountant-table tbody tr:hover td { background: color-mix(in srgb, var(--color-primary) 2%, transparent); }
+
 @media (hover: hover) {
   .accountant-primary-button, .accountant-secondary-button, .accountant-text-button, .accountant-icon-button, .accountant-add-line, .accountant-work-list button { transition: color 100ms var(--ease-silk), background-color 100ms var(--ease-silk), border-color 100ms var(--ease-silk), transform 100ms var(--ease-silk); }
 }

@@ -14,9 +14,17 @@ class ApiClient {
   static final ApiClient _instance = ApiClient._();
   static ApiClient get instance => _instance;
 
-  // Point to the Express backend. For Android emulator use 10.0.2.2
-  // instead of localhost. For physical device, use your machine's LAN IP.
-  static const String _baseUrl = 'http://10.0.2.2:3001';
+  /// Set per build using `--dart-define=API_BASE_URL=<url>`.
+  ///
+  /// The debug default targets the Android emulator. Release builds must
+  /// provide an HTTPS endpoint explicitly; a package must never be released
+  /// with an emulator URL or clear-text API traffic.
+  static const String _configuredBaseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: kDebugMode ? 'http://10.0.2.2:3001' : '',
+  );
+
+  static String get baseUrl => _configuredBaseUrl;
 
   static const String userKey = 'tms_auth_user';
   static const String tenantKey = 'tms_tenant_id';
@@ -28,8 +36,18 @@ class ApiClient {
   Future<void> init() async {
     if (_initialized) return;
 
+    final endpoint = Uri.tryParse(_configuredBaseUrl);
+    if (endpoint == null || !endpoint.hasScheme || !endpoint.hasAuthority) {
+      throw StateError(
+        'API_BASE_URL must be an absolute URL. Provide it with --dart-define.',
+      );
+    }
+    if (!kDebugMode && endpoint.scheme != 'https') {
+      throw StateError('Release builds require an HTTPS API_BASE_URL.');
+    }
+
     dio = Dio(BaseOptions(
-      baseUrl: _baseUrl,
+      baseUrl: _configuredBaseUrl,
       connectTimeout: const Duration(seconds: 15),
       receiveTimeout: const Duration(seconds: 15),
       contentType: 'application/json',
@@ -66,7 +84,8 @@ class ApiClient {
 /// Clears local user state when the server rejects the session.
 class _AuthInterceptor extends Interceptor {
   @override
-  Future<void> onError(DioException err, ErrorInterceptorHandler handler) async {
+  Future<void> onError(
+      DioException err, ErrorInterceptorHandler handler) async {
     if (err.response?.statusCode == 401) {
       // Session expired or token invalidated
       await ApiClient.clearAuth();

@@ -30,8 +30,8 @@ Read these files before starting:
 
 Important: `.memory` and current code override older progress documents. In particular:
 
-- Social-media management was removed by product decision. Do not add social-media screens, navigation, API calls, or settings.
-- Messaging, appointments, broadcasts, student performance, and staff performance currently return HTTP `501`. Do not present these as working features.
+- Social-media management is included per PRD v2.0. Tenant Admin is responsible for approving and publishing posts created by Branch Admins.
+- Messaging, appointments, broadcasts, student performance, and staff performance are now in scope per PRD v2.0 (previously returning HTTP 501).
 - connectIPS is inbound payment collection only. Refunds and payroll payments happen outside TMS and are only reconciled in TMS.
 - The API supports the development `SUPER_ADMIN`, but the current web role types and router do not register it. Use the API-based provisioning flow in the local-setup runbook until that separate frontend gap is fixed.
 
@@ -262,6 +262,7 @@ Implement these as separate focused pages.
 | `/tenant/resource-logs` | Maintenance task oversight | `GET /api/resources/tasks` |
 | `/tenant/certificates` (add navigation if approved) | Master certificate template | `POST /api/certificates/templates` |
 | `/tenant/academic-calendar` (add navigation if approved) | Tenant-wide events and payment calendar | `POST/GET /api/academic-events`, `GET /api/academic-events/payments` |
+| `/tenant/social-media` | Social media post approval and publishing | `GET /api/social-media/posts`, `POST /api/social-media/posts/:id/approve` |
 
 Required UX:
 
@@ -269,6 +270,7 @@ Required UX:
 - Template form based only on fields supported by the certificate endpoint.
 - Tenant-wide event form with a clear institution-wide badge.
 - Branch users must experience tenant-wide events as read-only; API authorization is authoritative.
+- Social media approval queue for posts submitted by Branch Admins, and platform API credentials management.
 
 Backend limitations:
 
@@ -281,7 +283,7 @@ Keep `/tenant/rbac-roles` and `/tenant/integrations` unavailable until explicit 
 
 - Current roles are fixed business roles; do not build a UI that implies arbitrary permission editing.
 - An integrations page may document connectIPS/NepalPay status, but it must never expose credentials, certificates, secrets, or private keys.
-- Do not add social-media integrations.
+- Implement social media integrations for API credentials (Facebook, Instagram, TikTok, LinkedIn) as per PRD v2.0.
 
 ## 7. Blocked or intentionally unavailable
 
@@ -289,10 +291,9 @@ The developer may design disabled/coming-later states, but must not claim these 
 
 | Area | Current backend state |
 |---|---|
-| `/tenant/messages` | Persistent chat/broadcast endpoints return `501` |
-| `/tenant/appointments` | Persistent appointment endpoints return `501` |
-| Student/staff performance management | Performance endpoints return `501` |
-| Social media | Removed from product and code |
+| `/tenant/messages` | Persistent chat/broadcast endpoints to be implemented (PRD v2.0) |
+| `/tenant/appointments` | Persistent appointment endpoints to be implemented (PRD v2.0) |
+| Student/staff performance management | Performance endpoints to be implemented (PRD v2.0) |
 | Automated refund transfer | Out of scope; manual external refund plus TMS reconciliation |
 | Automated salary transfer | Out of scope; external salary payment plus TMS reconciliation |
 

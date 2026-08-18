@@ -29,7 +29,7 @@ class StudentFeesScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                StudentStatusPill(
+                const StudentStatusPill(
                   label: 'Blocked',
                   icon: Icons.lock_rounded,
                   color: StudentColors.accent,
@@ -125,9 +125,10 @@ class StudentFeesScreen extends StatelessWidget {
                       ),
                       Text(
                         'NPR ${current.netPayable.toStringAsFixed(0)}',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              color: StudentColors.primaryDark,
-                            ),
+                        style:
+                            Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  color: StudentColors.primaryDark,
+                                ),
                       ),
                     ],
                   ),
@@ -162,8 +163,7 @@ class StudentFeesScreen extends StatelessWidget {
               child: ListTile(
                 minTileHeight: 72,
                 title: Text(invoice.cycle),
-                subtitle:
-                    Text('NPR ${invoice.netPayable.toStringAsFixed(0)}'),
+                subtitle: Text('NPR ${invoice.netPayable.toStringAsFixed(0)}'),
                 trailing: StudentStatusPill(
                   label: _stateLabel(invoice.state),
                   icon: _stateIcon(invoice.state),

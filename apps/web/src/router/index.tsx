@@ -16,6 +16,7 @@ import type { UserRole } from '../features/auth/types';
 const LoginPage = lazy(() => import('../pages/auth/LoginPage').then((module) => ({ default: module.LoginPage })));
 const ForgotPasswordPage = lazy(() => import('../pages/auth/ForgotPasswordPage').then((module) => ({ default: module.ForgotPasswordPage })));
 const ResetPasswordPage = lazy(() => import('../pages/auth/ResetPasswordPage').then((module) => ({ default: module.ResetPasswordPage })));
+const ForceChangePasswordPage = lazy(() => import('../pages/auth/ForceChangePasswordPage').then((module) => ({ default: module.ForceChangePasswordPage })));
 const TwoFactorPage = lazy(() => import('../pages/auth/TwoFactorPage').then((module) => ({ default: module.TwoFactorPage })));
 const TenantSetupWizard = lazy(() => import('../pages/setup/TenantSetupWizard').then((module) => ({ default: module.TenantSetupWizard })));
 const BranchSetupWizard = lazy(() => import('../pages/setup/BranchSetupWizard').then((module) => ({ default: module.BranchSetupWizard })));
@@ -30,6 +31,9 @@ const TenantResourcesPage = lazy(() => import('../pages/TenantOperationsPages').
 const TenantCalendarPage = lazy(() => import('../pages/TenantOperationsPages').then((module) => ({ default: module.TenantCalendarPage })));
 const TenantHrPage = lazy(() => import('../pages/TenantOperationsPages').then((module) => ({ default: module.TenantHrPage })));
 const TenantAdmissionsPage = lazy(() => import('../pages/TenantOperationsPages').then((module) => ({ default: module.TenantAdmissionsPage })));
+const TenantSocialMediaPage = lazy(() => import('../pages/TenantOperationsPages').then((module) => ({ default: module.TenantSocialMediaPage })));
+const TenantCertificatesPage = lazy(() => import('../pages/TenantOperationsPages').then((module) => ({ default: module.TenantCertificatesPage })));
+const TenantLeaveRequestsPage = lazy(() => import('../pages/TenantOperationsPages').then((module) => ({ default: module.TenantLeaveRequestsPage })));
 const PeopleDirectory = lazy(() => import('../pages/PeopleDirectory').then((module) => ({ default: module.PeopleDirectory })));
 const AcademicCourses = lazy(() => import('../pages/AcademicCourses').then((module) => ({ default: module.AcademicCourses })));
 const AcademicTimetables = lazy(() => import('../pages/AcademicTimetables').then((module) => ({ default: module.AcademicTimetables })));
@@ -47,6 +51,7 @@ const StaffReceptionPage = lazy(() => import('../pages/StaffReceptionPage').then
 const StaffTasksPage = lazy(() => import('../pages/StaffTasksPage').then((module) => ({ default: module.StaffTasksPage })));
 const SuperAdminDashboard = lazy(() => import('../pages/SuperAdminDashboard').then((module) => ({ default: module.SuperAdminDashboard })));
 const SuperAdminTenants = lazy(() => import('../pages/SuperAdminTenants').then((module) => ({ default: module.SuperAdminTenants })));
+const SecurityPage = lazy(() => import('../pages/SecurityPage').then((module) => ({ default: module.SecurityPage })));
 
 function RequireAuth() {
   const { isAuthenticated, isLoading, isTwoFactorPending } = useAuth();
@@ -78,7 +83,11 @@ function RequireRole({ allowedRoles }: { allowedRoles: UserRole[] }) {
     return <Navigate to="/login" replace />;
   }
 
-  if (!allowedRoles.includes(user.role)) {
+  if (user.requiresPasswordChange && window.location.pathname !== '/force-change-password') {
+    return <Navigate to="/force-change-password" replace />;
+  }
+
+  if (allowedRoles.length > 0 && !allowedRoles.includes(user.role)) {
     return <Navigate to={roleRedirectPath()} replace />;
   }
 
@@ -133,7 +142,7 @@ function AuthenticatedLayout() {
 }
 
 function RedirectIfAuth() {
-  const { isAuthenticated, isLoading, isTwoFactorPending, roleRedirectPath } = useAuth();
+  const { isAuthenticated, isLoading, isTwoFactorPending, roleRedirectPath, user } = useAuth();
 
   if (isLoading) {
     return <FullPageSpinner />;
@@ -141,6 +150,10 @@ function RedirectIfAuth() {
 
   if (isTwoFactorPending) {
     return <Navigate to="/2fa" replace />;
+  }
+
+  if (user?.requiresPasswordChange) {
+    return <Navigate to="/force-change-password" replace />;
   }
 
   if (isAuthenticated) {
@@ -213,6 +226,10 @@ const router = createBrowserRouter([
     ],
   },
   {
+    path: '/force-change-password',
+    element: <Suspense fallback={<FullPageSpinner />}><ForceChangePasswordPage /></Suspense>,
+  },
+  {
     element: <RequireTwoFactor />,
     children: [
       { path: '/2fa', element: <Suspense fallback={<FullPageSpinner />}><TwoFactorPage /></Suspense> },
@@ -238,6 +255,7 @@ const router = createBrowserRouter([
               { path: '/platform/billing', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard view="billing" /></Suspense> },
               { path: '/platform/audit', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard view="audit" /></Suspense> },
               { path: '/platform/tenants', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminTenants /></Suspense> },
+              { path: '/platform/security', element: <Suspense fallback={<FullPageSpinner />}><SecurityPage /></Suspense> },
             ],
           },
           {
@@ -261,6 +279,10 @@ const router = createBrowserRouter([
               { path: '/tenant/hr-management', element: <Suspense fallback={<FullPageSpinner />}><TenantHrPage /></Suspense> },
               { path: '/tenant/resource-logs', element: <Suspense fallback={<FullPageSpinner />}><TenantResourcesPage /></Suspense> },
               { path: '/tenant/academic-calendar', element: <Suspense fallback={<FullPageSpinner />}><TenantCalendarPage /></Suspense> },
+              { path: '/tenant/social-media', element: <Suspense fallback={<FullPageSpinner />}><TenantSocialMediaPage /></Suspense> },
+              { path: '/tenant/certificates', element: <Suspense fallback={<FullPageSpinner />}><TenantCertificatesPage /></Suspense> },
+              { path: '/tenant/leave-requests', element: <Suspense fallback={<FullPageSpinner />}><TenantLeaveRequestsPage /></Suspense> },
+              { path: '/tenant/security', element: <Suspense fallback={<FullPageSpinner />}><SecurityPage /></Suspense> },
               { path: '/tenant/*', element: <RoleWorkspacePlaceholder role="tenant-admin" /> },
             ],
           },
@@ -268,7 +290,7 @@ const router = createBrowserRouter([
             element: <RequireRole allowedRoles={['BRANCH_ADMIN']} />,
             children: [
               { path: '/branch/dashboard', element: <Suspense fallback={<FullPageSpinner />}><BranchAdminDashboard /></Suspense> },
-              { path: '/branch/people', element: <Suspense fallback={<FullPageSpinner />}><PeopleDirectory /></Suspense> },
+              { path: '/branch/staff', element: <Suspense fallback={<FullPageSpinner />}><PeopleDirectory /></Suspense> },
               { path: '/branch/*', element: <Suspense fallback={<FullPageSpinner />}><BranchAdminWorkspace /></Suspense> },
             ],
           },

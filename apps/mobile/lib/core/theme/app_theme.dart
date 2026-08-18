@@ -44,8 +44,8 @@ ThemeData buildTmsTheme() {
       ),
       bodyLarge: GoogleFonts.outfit(fontSize: 16, color: kColorText),
       bodyMedium: GoogleFonts.outfit(fontSize: 14, color: kColorText),
-      bodySmall:
-          GoogleFonts.outfit(fontSize: 12, color: kColorText.withOpacity(0.74)),
+      bodySmall: GoogleFonts.outfit(
+          fontSize: 12, color: kColorText.withValues(alpha: 0.74)),
     ),
     cardTheme: CardThemeData(
       color: kColorBg,
@@ -80,12 +80,13 @@ ThemeData buildTmsTheme() {
         borderRadius: BorderRadius.circular(16),
         borderSide: const BorderSide(color: kColorError, width: 2),
       ),
-      labelStyle: GoogleFonts.outfit(color: kColorText.withOpacity(0.75)),
-      helperStyle: GoogleFonts.outfit(color: kColorText.withOpacity(0.72)),
+      labelStyle: GoogleFonts.outfit(color: kColorText.withValues(alpha: 0.75)),
+      helperStyle:
+          GoogleFonts.outfit(color: kColorText.withValues(alpha: 0.72)),
     ),
     checkboxTheme: CheckboxThemeData(
-      fillColor: MaterialStateProperty.resolveWith(
-        (states) => states.contains(MaterialState.selected)
+      fillColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.selected)
             ? kColorPrimaryLight
             : Colors.transparent,
       ),
@@ -117,15 +118,15 @@ ThemeData buildTmsTheme() {
       ),
     ),
     navigationBarTheme: NavigationBarThemeData(
-      indicatorColor: kColorAccent.withOpacity(0.16),
-      labelTextStyle: MaterialStateProperty.resolveWith(
+      indicatorColor: kColorAccent.withValues(alpha: 0.16),
+      labelTextStyle: WidgetStateProperty.resolveWith(
         (states) => GoogleFonts.outfit(
-          fontWeight: states.contains(MaterialState.selected)
+          fontWeight: states.contains(WidgetState.selected)
               ? FontWeight.w700
               : FontWeight.w500,
-          color: states.contains(MaterialState.selected)
+          color: states.contains(WidgetState.selected)
               ? kColorPrimary
-              : kColorText.withOpacity(0.7),
+              : kColorText.withValues(alpha: 0.7),
         ),
       ),
     ),

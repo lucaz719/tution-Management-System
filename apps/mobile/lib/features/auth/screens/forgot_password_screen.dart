@@ -5,7 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:tms_mobile/core/theme/app_colors.dart';
 import 'package:tms_mobile/core/utils/formatters.dart';
 import 'package:tms_mobile/core/utils/validators.dart';
-import 'package:tms_mobile/features/auth/data/mock_auth_service.dart';
+import 'package:tms_mobile/features/auth/data/auth_service.dart';
 import 'package:tms_mobile/features/auth/screens/reset_password_screen.dart';
 import 'package:tms_mobile/features/auth/widgets/auth_card.dart';
 import 'package:tms_mobile/features/auth/widgets/otp_input_field.dart';
@@ -62,7 +62,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
     setState(() => _isLoading = true);
     try {
-      await MockAuthService.sendPasswordOtp(_emailController.text);
+      await AuthService.sendPasswordOtp(_emailController.text);
       _startTimer();
       setState(() => _step = _ForgotPasswordStep.otp);
       _showMessage('OTP sent successfully.');
@@ -82,12 +82,17 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
     setState(() => _isLoading = true);
     try {
-      await MockAuthService.verifyPasswordOtp(_otpCode);
+      final resetToken = await AuthService.verifyPasswordOtp(
+        email: _emailController.text,
+        otp: _otpCode,
+      );
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(
-          builder: (_) =>
-              ResetPasswordScreen(email: _emailController.text.trim()),
+          builder: (_) => ResetPasswordScreen(
+            email: _emailController.text.trim(),
+            resetToken: resetToken,
+          ),
         ),
       );
     } on AuthFailure catch (error) {
@@ -102,7 +107,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   Future<void> _resendOtp() async {
     setState(() => _isLoading = true);
     try {
-      await MockAuthService.sendPasswordOtp(_emailController.text);
+      await AuthService.sendPasswordOtp(_emailController.text);
       _startTimer();
       _showMessage('A new OTP has been sent.');
     } on AuthFailure catch (error) {
@@ -155,7 +160,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
             'Enter your email address and we’ll send a one-time code to continue.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: kColorText.withOpacity(0.72),
+                  color: kColorText.withValues(alpha: 0.72),
                 ),
           ),
           const SizedBox(height: 28),

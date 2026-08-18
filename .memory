@@ -1,10 +1,31 @@
 # TMS Working Memory
 
-Last reconciled: 2026-08-02
+Last reconciled: 2026-08-18
 Repository: `https://github.com/lucazsoft/tution-Management-System/`
-Branch: `main`
-Repository baseline: `bba14be janitor ui/ux` (2026-07-31)
-Worktree at reconciliation: clean
+Branch: `feature/global-tms-7roles-implementation`
+Repository baseline: `4783370 teacher portal update` (2026-08-05)
+Worktree at reconciliation: merging
+
+## Reconciliation notes (2026-08-18)
+
+- Resolved conflicts and concluded merge of branch `main` into `feature/global-tms-7roles-implementation` to unify the multi-portal systems, mobile adaptive UI, and backend services.
+- The working tree features a complete 7-role integration covering Student, Parent, Teacher, Branch Admin, Tenant Admin, Receptionist, and Accountant portals.
+- Verified that all shared structures (e.g. `SharedBillingWorkspace`, NepalPay integrations, and Better Auth configuration) compile and build correctly across frontend/backend workspaces.
+
+## Reconciliation notes (2026-08-09)
+
+- The working tree currently contains substantial uncommitted portal, security,
+  and finance changes. Preserve unrelated edits and do not treat the repository
+  baseline or prior clean-worktree statement as current.
+- Billing and payroll are now consolidated behind the persisted, permission-
+  scoped `/api/finances/billing-ledger` contract. The Branch Admin and
+  Accountant portals render the same `SharedBillingWorkspace`; Tenant Admin
+  reporting reads the same ledger tenant-wide.
+- The local web development server is running on port `5173`. The API on port
+  `3001` is served by the Compose `api` container, not by a local Node process.
+  After finance-route changes, rebuild it with
+  `docker compose up -d --build api`; otherwise the browser can receive a 404
+  from an older API image even though the frontend bundle is current.
 
 ## Documentation authority
 
@@ -30,7 +51,22 @@ facts change.
   not treat them as a live-health assertion after this reconciliation date;
   verify the stack before relying on it.
 
-## Current runtime (last verified 2026-07-30)
+## Reconciliation notes (2026-08-05)
+
+- Commit `f1fbb85 feat(api): enforce strict course and HR validation` was the
+  last commit that updated this file. It is pushed and remains an ancestor of
+  `origin/main`.
+- This reconciliation incorporates the 13 subsequent commits from `0f9cc56`
+  through `4783370`. Local `main` and `origin/main` both pointed to `4783370`
+  before this memory-only update began.
+- The intervening history adds or expands the Parent/Branch Admin workflow,
+  Teacher portal and learning models, sample Teacher data, Accountant portal,
+  Student portal, Tenant Admin surfaces, Receptionist workflow, documentation,
+  and related API/schema changes.
+- Runtime and validation statements remain dated records. Re-run the relevant
+  commands before treating them as a current production-readiness assertion.
+
+## Current runtime (last verified 2026-08-09)
 
 - Docker Desktop is running with the WSL 2 Linux engine.
 - PostgreSQL 16 is healthy for this Compose project at `localhost:5433`.
@@ -39,7 +75,9 @@ facts change.
 - API is healthy at `http://localhost:3001/api/health`.
 - Web is healthy at `http://localhost:5173`.
 - The `migrate` container exits with code 0 after applying migrations; this is expected.
-- All 15 Prisma migrations apply successfully from an empty database.
+- All 24 Prisma migrations through
+  `20260803170000_teacher_portal_learning_workflows` apply successfully from an
+  empty database.
 - `.env.docker` is local-only and explicitly ignored by Git.
 - `.env.docker.example` is the safe tracked template.
 - A real local tenant named `Frontend Dev Academy` and its `Main Center` branch
@@ -57,6 +95,11 @@ facts change.
 - Direct `npm run dev` from `services/api` does not load the repository-root
   `.env`. Prefer the healthy Compose API, which receives its required auth and
   database environment through Compose.
+- On 2026-08-09 the Compose API image was rebuilt from the current source and
+  reported healthy. An unauthenticated request to
+  `/api/finances/billing-ledger` returned `401 Authentication required`, which
+  verifies that the route exists and is protected. Before the rebuild, the old
+  image returned `404 Cannot GET /api/finances/billing-ledger`.
 - `PLATFORM_ADMIN_ENABLED=false` after provisioning. Re-enable it only when a
   new local tenant must be provisioned, then disable it again.
 
@@ -288,34 +331,50 @@ Docker database volume.
 
 ## Teacher portal implementation
 
-- Rebuilt the Teacher workspace as a mobile-first, StyleSeed-aligned portal
-  across `/teacher/dashboard`, `/teacher/timetable`, `/teacher/attendance`,
-  `/teacher/daily-update-log`, `/teacher/homework`, `/teacher/results`,
-  `/teacher/profile`, and `/teacher/leave-requests`.
-- Preserved the live Teacher dashboard, geo-attendance IN/OUT, and daily-update
-  API calls. Geolocation failures, missing scheduled branches, outside-geofence
-  server rejection, and pending-update attendance gates are surfaced as explicit
-  error states; no teacher-side override is offered.
-- Added scheduled per-slot branch/geofence context and a separate personalized
-  class stream so multi-branch and regular/personalized sessions are not merged.
-- Added a teacher-visible attendance-stamp timeline that keeps IN, OUT,
-  AUTO-OUT, and RE-IN events separate, including the Branch Admin notification
-  explanation for an auto-departure.
-- Added the mandatory daily update workflow with separate fields for material
-  covered, issues/observations, and homework. A complete IN/OUT session remains
-  labelled `Present — Update Pending` until the live update is submitted.
-- Added the assigned-class student roster UX. Fee-blocked students have the
-  Present option disabled, while approved-leave students are pre-marked
-  `Absent (Excused)` and cannot be casually overwritten.
-- Added homework distribution, score-entry/analytics explanation, teacher-only
-  performance breakdown, own attendance history, leave balances, and casual,
-  early-out, and long-sick request views.
-- Workflows without complete list/write API contracts use realistic scoped
-  preview data and explicitly report validation-only status rather than claiming
-  persistence.
+- Rebuilt the authenticated, role-restricted Teacher workspace across
+  `/teacher/dashboard`, `/teacher/timetable`, `/teacher/geo-attendance`,
+  `/teacher/attendance`, `/teacher/syllabus`, `/teacher/daily-update-log`,
+  `/teacher/homework`, `/teacher/results`, `/teacher/profile`,
+  `/teacher/leave-requests`, and `/teacher/salary-slips`. The wildcard route now
+  renders `TeacherPortal`; it no longer falls through to the generic dashboard
+  placeholder.
+- Renamed the first navigation item to Teacher Dashboard. Today's classes are
+  shown in My Timetable above the complete weekly teaching schedule rather than
+  being presented as the dashboard itself.
+- Geo Attendance is deliberately a separate future module. The current page
+  clearly states that location is not collected there; live Mark IN/OUT controls
+  were removed from the dashboard pending the future rollout.
+- Added the teacher-scoped `GET /api/teacher/workspace` aggregate for identity,
+  attendance statistics/stamps, assigned classes and rosters, sessions,
+  syllabi, homework, results, leave history, performance, and payroll history.
+- Added live class-attendance submission for assigned classes. Server validation
+  rejects foreign roster entries and fee-blocked Present states, normalizes
+  overlapping approved student leave to Excused, and atomically replaces that
+  teacher's session attendance sheet.
+- Added persisted `Syllabus`, `SyllabusChapter`, and `DailyLessonLog` models with
+  `IN_PROGRESS`, `COMPLETED`, and `LEFT` status. Teachers create a subject plan
+  and update daily chapter progress; enrolled students receive the read-only
+  syllabus and progress notes in their Student portal.
+- Homework creation now uses the existing assigned-class backend and supports
+  text instructions plus an optional small data-URL attachment in the current
+  secure preview implementation.
+- Results now support class-wide draft creation with full marks, pass marks,
+  obtained marks, automatic class percentile, optional result sheet, and an
+  explicit `publishedAt` boundary. Student results remain hidden until shared.
+  Result History groups rows by assessment/date and provides one Share All
+  action for every remaining draft in the selected grade/class, while retaining
+  Share One for exceptions.
+- Added Teacher profile/employment detail, own performance summary, unmerged
+  attendance-stamp history, leave submission/history, upcoming salary, and
+  salary-slip history. Payroll remains read-only and teacher-scoped.
+- Added realistic sample data for empty or partially seeded Teacher accounts.
+  Live API records take precedence, and a visible Sample Data Preview banner
+  identifies any demonstration content.
 - Added accessible labels, semantic controls, visible focus treatment, loading,
   error, empty/locked states, 40px-or-larger touch targets, mobile safe-area
   spacing, responsive layouts, and reduced-motion handling.
+- Added migration `20260803170000_teacher_portal_learning_workflows` and the
+  build/QA document `documents/TEACHER_PORTAL_WEB_FUNCTIONAL_SPEC.md`.
 - Added `apps/web/tests/teacher-smoke.js` for authenticated teacher verification
   of the fee-blocked/approved-leave roster states and unmerged AUTO-OUT/RE-IN
   history. Its authenticated assertions require `TMS_TEACHER_EMAIL` and
@@ -330,6 +389,49 @@ Docker database volume.
   `apps/web/src/features/teacher/teacherPortalData.ts`,
   `apps/web/src/features/teacher/teacherPortalTypes.ts`, and
   `apps/web/tests/teacher-smoke.js`.
+
+## Portal work incorporated after `f1fbb85`
+
+- Parent/Branch Admin: hardened Parent provisioning so a Parent must be linked
+  to a tenant/branch Student, added appointment participant notifications,
+  student-leave notifications, branch override/social-draft support, and the
+  associated `20260803150000_branch_admin_overrides_and_social` migration.
+- Accountant: expanded `StaffFinancePage` into a responsive finance workspace
+  with improved page shell, invoice/payment handling, audit-oriented copy and
+  styles. The handoff is in
+  `documents/frontend-handoffs/ACCOUNTANT_PORTAL_CHANGES.md`.
+- Student: added richer portal data contracts and views, including the
+  teacher-shared syllabus/progress stream, published result metadata, improved
+  responsive styling, and a generated Student portal change PDF under
+  `output/pdf/`.
+- Tenant Admin: added the academic-calendar feature, tenant portal fixture/API
+  support, dashboard refinements, and expanded operational pages. These files
+  currently include intentional mock-backed presentation data where live list
+  contracts are not yet available.
+- Receptionist: expanded the reception service and API route, improved role
+  permission mapping, and added responsive reception-state styling.
+## Reconciliation notes (2026-08-06)
+
+## Parent to Branch Admin appointments (2026-08-10)
+
+- Parents can request an appointment with the active Branch Admin assigned to their child's branch from `/parent/appointments`, supplying a preferred date/time and reason.
+- The API validates the parent-child link, active branch enrollment, booking window, and Branch Admin assignment before persisting or notifying anyone.
+- Assigned Branch Admins receive a branch-scoped appointment queue at `/branch/appointments`, can accept with a confirmed date/time and response message or reject with a reason, and the parent receives the outcome through the portal plus the configured push/SMS notification flow.
+- The Branch Admin dashboard now includes a pending-appointment KPI and request preview sourced from persisted appointment records.
+- API and web production builds pass. The authenticated integration suite currently stops at the pre-existing teacher-session assertion (`expected 404`, received `409`) before reaching later coverage.
+
+- Completely overhauled the Branch Admin portal. The `BranchAdminDashboard` now acts as a quick-access tool with deep-links to specific modular sections, and `BranchAdminWorkspace` handles all detailed branch operations.
+
+## Completed Branch Admin web work
+
+- **Modular Workspace**: Re-organized the Branch Admin portal to handle a massive list of modules inside `BranchAdminWorkspace.tsx` via URL matching (`useLocation().pathname`).
+- **Dashboard as Quick Access**: Transformed `BranchAdminDashboard` widgets to deep-link directly into specific workspace sections via `open_in_new` icons.
+- **Resilient Dashboard**: Added fallback mock data for `BranchAdminDashboard` to prevent 404/403 errors when a branch isn't explicitly assigned or API fails.
+- **Comprehensive Student Management**: Created `BranchStudentsView` listing students with full profiles, initials/avatar, billing history, future billing projections (taking 1-year course duration into account), extra classes, and complete CRUD operations (Add, Edit, Delete).
+- **Comprehensive Teacher Management**: Created `BranchTeachersView` listing teachers with full profiles, payroll history, 1-month ahead payroll projections, assigned regular and extra classes, timetable management, and full CRUD.
+- **Robust Fee & Billing**: Overhauled `FeeBillingView` to handle billing records for students, teachers, courses, and discounts with full CRUD functionality.
+- **Rich Prototyping (Mock Data)**: Populated realistic mock data across all 15 views in `BranchAdminWorkspace.tsx` to ensure the portal is fully interactive visually. This includes `ResourceTasks` (pending tasks list), `LeaveRequestsView`, `PersonalizedClassesView`, `Drafting` (social media history), `AttendanceView`, `HomeworkView`, `ResultsView`, `CertificatesView`, `TimetableView`, and `PettyCashView`.
+- **Bug Fixes**: Addressed React hooks errors (`useLocation`, `useAction`) and missing imports that were breaking routing and form actions.
 
 ## Integration coverage completed
 
@@ -408,7 +510,89 @@ Additional defects fixed during the full route pass:
 - Nepali date library default/named ESM export shapes are normalized, restoring
   executable billing overview/reporting.
 
+## Shared billing and payroll ledger (2026-08-09)
+
+- Added authenticated `GET /api/finances/billing-ledger`. Tenant Admin receives
+  tenant-wide data; Accountants are scoped by signed `manage_billing` branch
+  assignments; an assigned `Branch Admin` role itself grants billing access only
+  to that role's branch, even when its permission array omits `manage_billing`.
+- Added persisted `POST /api/finances/billing-ledger/invoices` and
+  `POST /api/finances/billing-ledger/payrolls`. They use the same tenant/branch
+  billing scope as ledger reads; invoice payment recording and student invoice
+  access also recognize assigned Branch Admin scope. Writes go through Prisma
+  and therefore appear across all authorized role portals after refresh.
+  Duplicate teacher/month payrolls are rejected with `409`.
+- The ledger returns complete posted invoice details: invoice type, base amount,
+  discount, fine, net payable, VAT snapshot, cycle dates, due date, payment
+  date/reference, overdue derivation, status, and creation time.
+- Student projections derive monthly tuition from the assigned grade plus
+  eligible active course/activity fees and show future cycles only within the
+  one-year course window derived from admission date. Projections are labelled
+  as forecasts and are not persisted as debts or payable invoices.
+- Teacher history uses persisted Payroll records. The next-month projection is
+  derived from the active staff salary structure; bonuses and deductions remain
+  zero until payroll is posted. Fixed salaries use `basicSalary`; hourly
+  contracts use `hourlyRate * expectedMonthlyHours` when configured.
+- Added typed client contracts in `apps/web/src/services/api.ts` and the shared
+  UI at `apps/web/src/components/finance/SharedBillingWorkspace.tsx`.
+  `BranchAdminWorkspace.tsx` and `StaffFinancePage.tsx` both render this shared
+  component, preventing role-specific billing behavior from drifting.
+- Tenant Admin P&L/reporting now reads the same persisted billing ledger and
+  displays all branch invoice/payroll records plus derived institution tuition,
+  payroll, collection, and margin projections. The obsolete in-memory global
+  ledger calls are no longer used by active portal code.
+- Tenant Admin `/tenant/fees` keeps the student `View` action enabled even when
+  `invoiceCount` is zero. Opening the drawer loads the shared ledger profile in
+  parallel with posted invoices, shows the student's billing plan and future
+  projections, and renders an explicit no-invoice-history state when applicable.
+- Research basis: subscription schedules/upcoming amounts remain projections
+  until an invoice is created; posted invoices remain historical financial
+  records. This follows the lifecycle distinction documented by Stripe Billing.
+
+Validation completed for this change:
+
+```powershell
+npm run build --workspace @tms/api
+npm run test:billing --workspace @tms/api
+npx webpack --mode production  # from apps/web
+docker compose up -d --build api
+docker compose ps api
+```
+
+- API TypeScript build passed.
+- Existing billing-rule tests passed.
+- Webpack production compilation passed with the existing main-bundle size
+  warnings (approximately 407 KiB).
+- The full `npm run build --workspace web` remains blocked by four unrelated
+  existing TypeScript errors: two unsupported `Button` variant values in
+  `BranchAdminDashboard.tsx`, and two Teacher security-view type mismatches in
+  `TeacherPortal.tsx`. No shared-billing files appeared in that error list.
+- `git diff --check` currently reports pre-existing trailing whitespace in
+  `apps/web/src/pages/PeopleDirectory.tsx`; no billing-file whitespace errors
+  were reported.
+
 ## Validation status
+
+### Portal reconciliation — 2026-08-05
+
+- During the 2026-08-03 through 2026-08-05 portal implementation sessions,
+  `npm run build --workspace @tms/api` and
+  `npm run build --workspace apps/web` passed through the final Teacher
+  result bulk-share change.
+- `npm run test:access --workspace @tms/api` and
+  `npm run test:request-validation --workspace @tms/api` passed during that
+  implementation window. Web lint exited successfully with existing warnings.
+- Prisma reported 24 migrations current through the Teacher learning-workflow
+  migration. The API health endpoint returned `UP`, and an unauthenticated
+  `/api/teacher/workspace` request correctly returned 401.
+- Recent authenticated Teacher browser screenshot/smoke verification was not
+  completed because no controllable browser session and no usable demo Teacher
+  password were available. Do not infer a current passing screenshot run from
+  the older command history below.
+- The Webpack main bundle is approximately 403 KiB and remains above its
+  recommended size.
+- These are dated implementation records, not checks re-run as part of this
+  documentation-only reconciliation.
 
 ### ConnectIPS backend readiness — 2026-08-02
 
@@ -448,7 +632,7 @@ on the Compose PostgreSQL instance at host port 5433.
 
 Known non-blocking warnings:
 
-- Webpack main bundle is approximately 394 KiB and exceeds its recommended size.
+- Webpack main bundle is approximately 403 KiB and exceeds its recommended size.
 - `npm audit --omit=dev` reports 3 production advisories:
   - `body-parser`: 1 low; a non-breaking fix may be available.
   - React Router: 2 moderate; remediation requires a controlled breaking upgrade.
@@ -460,27 +644,38 @@ Known non-blocking warnings:
 
 ## Remaining work, in priority order
 
-1. Continue rolling shared strict input schemas across remaining write endpoints.
+Completed 2026-08-05: removed remaining sample/mock-backed portal presentation data and replaced it with live, permission-scoped contracts for Tenant, Student, Teacher, Receptionist, Accountant, and Branch Admin surfaces. Loading, empty, error, and permission states now fail closed. Accountant and Branch Admin dashboards use scoped aggregates, petty-cash lists enforce requester/branch ownership, and the configured per-branch monthly cap is enforced for requests and revisions.
+
+2. Replace the Teacher homework/result small data-URL attachment preview with
+   production-grade authenticated object storage, file validation, malware
+   scanning, retention rules, and authorized download URLs.
+3. Implement Geo Attendance as its own Teacher module when the location,
+   geofence, grace-period, background tracking, privacy, and device-permission
+   contracts are approved. The current future-state page must not collect
+   location prematurely.
+4. Provision or reset a local Teacher credential and run the authenticated
+   Teacher smoke plus full-page screenshot QA in a controllable browser.
+5. Continue rolling shared strict input schemas across remaining write endpoints.
    Finance payment/petty-cash, user provisioning, all attendance mutations,
    tenant policy settings, bounded bulk-student import records, course/class/
    enrollment writes, and HR writes are complete. Next prioritize leave, homework,
    resource, and calendar write contracts. JSON body limits, browser-security
    headers, safe 400/413/5xx errors, and authentication endpoint rate limiting
    are in place.
-2. Add the accepted tenant-scoped list/detail contracts documented in
+6. Add the accepted tenant-scoped list/detail contracts documented in
    `TENANT_ADMIN_API_GAPS.md` for refunds, long-sick leaves, staff exits,
    certificate templates, and calendar lifecycle.
-3. Enforce calendar immutability/update/delete policy from the Tenant Admin PRD.
-4. Complete monthly petty-cash cap reservation/balance behavior and expose
+7. Enforce calendar immutability/update/delete policy from the Tenant Admin PRD.
+8. Complete monthly petty-cash cap reservation/balance behavior and expose
    receipt upload details needed by the Tenant Admin history screen.
-5. Complete connectIPS browser return/status polling UX and validate with real
+9. Complete connectIPS browser return/status polling UX and validate with real
    NCHL UAT credentials.
-6. Add invoice/refund detail queues, NepalPay QR UI, and audit-history screens
+10. Add invoice/refund detail queues, NepalPay QR UI, and audit-history screens
    once their discovery/detail contracts are available.
-7. Replace remaining Tenant Admin-facing `any` contracts in legacy pages and
+11. Replace remaining Tenant Admin-facing `any` contracts in legacy pages and
    split the remaining monolithic `services/api.ts` domains.
-8. Resolve production dependency advisories and Node engine compatibility.
-9. Run final role-by-role, cross-tenant, cross-branch, backup/restore, HTTPS,
+12. Resolve production dependency advisories and Node engine compatibility.
+13. Run final role-by-role, cross-tenant, cross-branch, backup/restore, HTTPS,
     cookie, CORS, and rollback testing before production.
 
 ## connectIPS and finance constraints

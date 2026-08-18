@@ -70,7 +70,7 @@ class _ResultsView extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(StudentSpace.md),
             decoration: BoxDecoration(
-              color: StudentColors.primary.withOpacity(.08),
+              color: StudentColors.primary.withValues(alpha: .08),
               borderRadius: BorderRadius.circular(StudentRadius.card),
             ),
             child: const Row(
@@ -104,7 +104,8 @@ class _ResultCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final aboveAverage = result.percentage >= result.classAverage / result.maximum * 100;
+    final aboveAverage =
+        result.percentage >= result.classAverage / result.maximum * 100;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(StudentSpace.md),
@@ -147,7 +148,9 @@ class _ResultCard extends StatelessWidget {
             Row(
               children: [
                 StudentStatusPill(
-                  label: aboveAverage ? 'Above class average' : 'Below class average',
+                  label: aboveAverage
+                      ? 'Above class average'
+                      : 'Below class average',
                   icon: aboveAverage
                       ? Icons.trending_up_rounded
                       : Icons.trending_down_rounded,
@@ -190,7 +193,7 @@ class _HomeworkView extends StatelessWidget {
                   color: (item.dueAt.isBefore(DateTime.now())
                           ? StudentColors.error
                           : StudentColors.primary)
-                      .withOpacity(.10),
+                      .withValues(alpha: .10),
                   borderRadius: BorderRadius.circular(StudentRadius.control),
                 ),
                 child: Icon(
@@ -229,9 +232,11 @@ class _InsightsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final insights = StudentDemoData.insights;
-    final strongest = [...insights]..sort((a, b) => b.average.compareTo(a.average));
-    final weakest = [...insights]..sort((a, b) => a.average.compareTo(b.average));
+    const insights = StudentDemoData.insights;
+    final strongest = [...insights]
+      ..sort((a, b) => b.average.compareTo(a.average));
+    final weakest = [...insights]
+      ..sort((a, b) => a.average.compareTo(b.average));
     return ListView(
       padding: const EdgeInsets.all(StudentSpace.md),
       children: [

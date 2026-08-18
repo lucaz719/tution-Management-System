@@ -132,8 +132,7 @@ class StudentInvoice {
   final List<StudentInvoiceLine> lines;
   final String? qrReference;
 
-  double get netPayable =>
-      lines.fold(0, (total, line) => total + line.amount);
+  double get netPayable => lines.fold(0, (total, line) => total + line.amount);
 }
 
 class StudentCertificate {
@@ -185,4 +184,3 @@ class StudentNotice {
   final String route;
   final bool isRead;
 }
-

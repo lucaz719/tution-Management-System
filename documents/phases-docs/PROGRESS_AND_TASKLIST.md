@@ -4,7 +4,8 @@
 > **Repository:** `d:\lochan\Projects\TMS`  
 > **Roles Documented:** 01 to 09 (Super Admin, Tenant Admin, Branch Admin, Teacher, Accountant, Receptionist, Janitor/Cleaner, Student, Parent/Guardian)  
 > **Phases Covered:** Phase 1 (Core Foundation), Phase 2 (Academic & Operations), Phase 3 (ERP & Finance), Phase 4 (Enterprise Scaling & AI)  
-> **Last Verified:** July 28, 2026  
+> **Last Verified:** August 13, 2026
+> **Mobile verification:** August 13, 2026 — source review plus `flutter analyze` and `flutter test` in `apps/mobile`.
 
 ---
 
@@ -21,10 +22,59 @@
 | **Role 07: Janitor / Cleaner**| 75% | 🟡 In-Progress | Auto-assigned maintenance tasks & overdue escalations |
 | **Role 08: Student** | 85% | 🟢 Operational | Timetable, results analytics, digital ID & Nepal Pay QR |
 | **Role 09: Parent / Guardian** | 85% | 🟢 Operational | Child switcher, teacher messaging & advance leave |
+| **Mobile application release readiness** | **15%** | 🔴 Blocked / foundation only | UI exists for Teacher, Student, and Parent, but compilation, production data, session, offline, and release work remain |
 | **Phase 1: Core Foundation** | 100% | ✅ Completed | Monorepo, auth, multi-tenant RBAC & basic dashboards |
 | **Phase 2: Academic & Ops** | 70% | 🟡 Active | Homework, grade analytics, real-time chat & certificates |
 | **Phase 3: ERP & Finance** | 20% | ⏳ Planned | Payroll calculation, double-entry ledger & petty cash L2 |
 | **Phase 4: Scaling & AI** | 10% | ⏳ Planned | AI financial forecasting & social media auto-publish |
+
+---
+
+## 📱 Mobile App — Verified Update, Phases & Task List
+
+**Scope:** `apps/mobile` Flutter application (Teacher, Student, and Parent first; Android and iOS).
+**Planning baseline:** `documents/phases-docs/MOBILE_APP_DEVELOPMENT_TASKLIST.md`.
+**Important:** the role and platform percentages above describe the broader system, including web/API work. They must not be read as evidence that matching Flutter journeys are production-ready.
+
+### Verified current state
+
+- Flutter foundation is present: Flutter/Riverpod/GoRouter/Dio, shared theme/widgets, auth screens, adaptive helpers, and partial Teacher, Student, and Parent portals.
+- The initial compilation blockers and analyzer findings have been repaired: `dart format .`, `flutter analyze`, and `flutter test` all pass (**12 tests**, verified 2026-08-13). This is a code-quality gate only; the app is not yet release-ready.
+- The API client uses a hard-coded Android-emulator HTTP URL and an in-memory cookie jar. It has no release environment configuration or secure persistent session decision.
+- Several screens use `MockPortalData`, `student_demo_data.dart`, or `MockAuthService`; routes only cover Teacher, Student, and Parent; offline storage/sync, push notifications, file flows, integration tests, and release tooling are absent.
+- The Flutter README remains the starter template. Existing unit/model tests are useful beginnings but do not verify production role journeys.
+
+### Delivery phases
+
+| Phase | Outcome | Main tasks | Estimate* |
+| --- | --- | --- | --- |
+| **M0 — Stabilize** | A clean, testable Flutter baseline | Fix compilation and broken adaptive components; restore login/router/model references; run formatter, analyzer, and existing tests; document the actual supported platforms. | 3–5 working days |
+| **M1 — Production foundation** | Secure staging-connected app shell | MOB-001–008: role matrix, `--dart-define` environments, Better Auth completion, secure session policy, route/RBAC guards, typed network/error layer, CI and release checklist. | 2 weeks |
+| **M2 — Student journeys** | API-backed Student MVP | MOB-101–104: timetable, academic records, attendance, invoices/payment return, certificates, digital ID, calendar, and notification inbox; remove production fixture data. | 2–3 weeks |
+| **M3 — Parent and Teacher journeys** | API-backed Parent/Teacher MVP | MOB-105–109: authorized child switcher, child-scoped finance/academics, leave/appointments/messages where APIs exist, teacher scheduling, server-validated geo-attendance, daily updates, roster, homework, scores, and leave. | 3 weeks |
+| **M4 — Mobile capabilities** | Reliable cross-device experience | MOB-007 (offline implementation), MOB-110, MOB-201–206: sync/conflicts, push, files, adaptive audit, accessibility/localization, performance, privacy-safe observability. | 2–3 weeks |
+| **M5 — Release verification** | Signed, supportable release candidate | MOB-301–306: unit/widget/integration/security/device tests, staging UAT, Android/iOS signing, store assets, phased rollout, rollback/support runbook. | 2 weeks |
+
+\*Estimates assume one experienced Flutter engineer, a stable staging API with named backend support, and timely product decisions. Testing begins in M0 and continues throughout; M5 is the final dedicated hardening period.
+
+### Immediate task list (next 5 working days)
+
+- [x] **M0.1 — Repair the build:** corrected `core/adaptive/widgets` imports and invalid widget APIs; restored missing symbols/constructors; removed invalid `const` usage. Verified with `flutter test` (12 passing, 2026-08-13).
+- [x] **M0.2 — Establish a green local quality gate:** `dart format .`, `flutter analyze`, and `flutter test` pass locally (12 tests, verified 2026-08-13). CI automation remains part of M1 / MOB-008.
+- [x] **M0.3 — Complete the auth-path audit:** migrated forgot-password, OTP verification, password reset, 2FA verification, and 2FA resend to `AuthService` / `AuthNotifier`; removed `MockAuthService`. `flutter analyze` and `flutter test` pass (12 tests, verified 2026-08-13). Backend/staging end-to-end authentication remains a separate M1 acceptance test.
+- [ ] **M0.4 — Create the environment contract (in progress):** added `--dart-define=API_BASE_URL=<url>` configuration. Debug defaults to the Android emulator endpoint; non-debug builds reject missing/non-HTTPS endpoints. Android permits clear-text traffic only for debug builds. Android SDK 36, platform/build tools, licenses, and JDK 17 are configured for Flutter (verified 2026-08-13). The Gradle heap was reduced from 8 GB to 2 GB to fit the build machine. **Current APK blocker:** the system drive has no free space; two orphaned Android Studio installer downloads total about 3 GB in `%LOCALAPPDATA%\Temp\WinGet\Google.AndroidStudio.2026.1.3.7\` and must be removed before retrying. Remaining owner decisions: staging/production API URLs, Android/iOS bundle identifiers, supported OS matrix, and release-signing custody.
+- [ ] **M0.5 — Agree and enforce the initial role scope (in progress):** Teacher, Student, and Parent are the supported mobile roles. Added a client route guard that redirects cross-role deep links to the signed-in user’s own portal; `dart analyze` passes (2026-08-14). Still required: disabled/deactivated-user behavior, explicit 401/403 UI states, and the product decision for remaining roles (web-only vs constrained mobile experience).
+- [ ] **M0.6 — Publish mobile operating documentation:** replace the Flutter starter README and add mobile API-contract and device-test sections to the relevant docs.
+
+### Time to proceed
+
+With the assumptions above, a credible **Teacher/Student/Parent MVP is 7–8 weeks** (M0–M3, with continuous tests). A **release-ready Android and iOS app is 10–12 weeks** (M0–M5). Add **2–4 weeks** if offline-first sync, push notifications, file uploads, or additional staff roles must ship in the first release, or if required APIs/contracts are not ready.
+
+### Completion gates
+
+- Do not mark a mobile workflow complete because a screen renders; it is complete only when it uses authorized server data, handles loading/empty/error/offline states, passes its tests, and has been verified on a target device.
+- Do not claim offline-first, push notification, payment confirmation, or secure session persistence until the related mobile dependencies, implementation, and integration tests exist.
+- Update this section and `MOBILE_APP_DEVELOPMENT_TASKLIST.md` after each phase with test output, known gaps, and the next owner.
 
 ---
 

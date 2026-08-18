@@ -72,7 +72,7 @@ class StudentCalendarScreen extends StatelessWidget {
                         width: 52,
                         height: 58,
                         decoration: BoxDecoration(
-                          color: _typeColor(event.type).withOpacity(.10),
+                          color: _typeColor(event.type).withValues(alpha: .10),
                           borderRadius:
                               BorderRadius.circular(StudentRadius.control),
                         ),
@@ -102,8 +102,7 @@ class StudentCalendarScreen extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(event.title,
-                                style:
-                                    Theme.of(context).textTheme.titleMedium),
+                                style: Theme.of(context).textTheme.titleMedium),
                             const SizedBox(height: StudentSpace.xxs),
                             Text(
                               event.details,

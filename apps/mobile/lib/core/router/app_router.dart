@@ -43,7 +43,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       if (isLoading) return null;
 
       // Public routes that don't require auth.
-      const publicRoutes = ['/login', '/forgot-password', '/reset-password', '/2fa'];
+      const publicRoutes = [
+        '/login',
+        '/forgot-password',
+        '/reset-password',
+        '/2fa'
+      ];
       final isPublicRoute = publicRoutes.contains(location);
 
       // If 2FA is pending, force the user to /2fa.
@@ -59,6 +64,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // If logged in and on a public route → redirect to role home.
       if (isLoggedIn && isPublicRoute) {
         return authState.roleRedirectPath;
+      }
+
+      // A valid session is not permission to browse another role's portal.
+      // Server authorization remains authoritative for data, while this guard
+      // prevents an invalid deep link from rendering an unrelated UI first.
+      if (isLoggedIn) {
+        final allowedPrefix = switch (authState.user?.role) {
+          'TEACHER' => '/teacher/',
+          'STUDENT' => '/student/',
+          'PARENT' => '/parent/',
+          _ => null,
+        };
+        if (allowedPrefix == null || !location.startsWith(allowedPrefix)) {
+          return authState.roleRedirectPath;
+        }
       }
 
       return null;
@@ -79,15 +99,19 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/reset-password',
         builder: (BuildContext context, GoRouterState state) {
-          final email = state.extra as String? ?? '';
-          return ResetPasswordScreen(email: email);
+          final args = state.extra as Map<String, String>?;
+          return ResetPasswordScreen(
+            email: args?['email'] ?? '',
+            resetToken: args?['resetToken'] ?? '',
+          );
         },
       ),
       GoRoute(
         path: '/2fa',
         builder: (BuildContext context, GoRouterState state) {
           final email = state.extra as String? ??
-              ref.read(authProvider).user?.email ?? '';
+              ref.read(authProvider).user?.email ??
+              '';
           return TwoFactorScreen(email: email);
         },
       ),

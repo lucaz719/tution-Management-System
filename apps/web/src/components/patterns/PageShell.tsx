@@ -16,6 +16,7 @@ export interface PageShellProps {
   userAvatar?: string;
   onLogout: () => void;
   navItems?: NavItem[];
+  defaultSidebarCollapsed?: boolean;
   children: React.ReactNode;
 }
 
@@ -27,6 +28,7 @@ export function PageShell({
   userAvatar,
   onLogout,
   navItems = [],
+  defaultSidebarCollapsed = false,
   children
 }: PageShellProps) {
   const location = useLocation();
@@ -36,7 +38,7 @@ export function PageShell({
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     return (document.documentElement.getAttribute('data-theme') as 'light' | 'dark') || 'light';
   });
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(defaultSidebarCollapsed);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -116,6 +118,7 @@ export function PageShell({
             className="topbar-toggle-btn mobile-only" 
             onClick={() => setIsMobileOpen(!isMobileOpen)}
             aria-label="Toggle navigation menu"
+            aria-expanded={isMobileOpen}
           >
             <span className="material-symbols-outlined">menu</span>
           </button>
@@ -125,6 +128,7 @@ export function PageShell({
             className="topbar-toggle-btn desktop-only" 
             onClick={() => setIsCollapsed(!isCollapsed)}
             aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-expanded={!isCollapsed}
           >
             <span className="material-symbols-outlined">
               {isCollapsed ? 'menu_open' : 'menu'}

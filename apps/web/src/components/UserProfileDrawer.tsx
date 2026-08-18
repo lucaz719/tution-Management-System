@@ -28,20 +28,23 @@ interface Profile {
       grade: string | null;
       gradeTuition: number;
       monthlyFee: number;
-      enrollments: Array<{ id: string; courseName: string; className: string; status: string }>;
+      enrollments: Array<{ id: string; courseName: string; className: string; status: string; extraFee?: number; billingHistory?: { paid: number; due: number } }>;
       fees: { totalBilled: number; totalPaid: number; totalDue: number; overdueCount: number; invoices: Array<{ id: string; netPayable: number; status: string; dueDate: string }> };
+      futureBilling?: { projectedAnnualFee: number; nextInvoiceDate: string };
       attendance: Record<string, number>;
     };
     parent?: {
       children: Array<{ studentId: string; name: string; activeEnrollments: number; totalPaid: number; totalDue: number; overdueCount: number }>;
     };
     teacher?: {
-      assignedClasses: Array<{ className: string; courseName: string; branchName: string; gradeName: string | null; enrollmentCount: number }>;
+      assignedClasses: Array<{ className: string; courseName: string; branchName: string; gradeName: string | null; enrollmentCount: number; syllabusProgress?: number }>;
       gradesTaught: string[];
       totalSessions: number;
       pendingUpdates: number;
+      payroll?: { totalPaid: number; lastMonthPaid: number; nextMonthProjected: number; extraClassesPayroll?: number; history: Array<{ month: string; amount: number; status: string }> };
+      timetable?: Array<{ id: string; day: string; time: string; subject: string; room: string }>;
     };
-    staff?: { designation: string; contractType: string; joiningDate: string };
+    staff?: { designation: string; contractType: string; joiningDate: string; performanceScore?: number; hrAlerts?: Array<{ type: string; message: string; severity: 'warning' | 'error' | 'info' }> };
   };
 }
 
@@ -81,6 +84,8 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
   const [activities, setActivities] = useState<Array<{ id: string; name: string; classes: Array<{ id: string; name: string }> }>>([]);
   const [enrollCourse, setEnrollCourse] = useState('');
   const [enrollClass, setEnrollClass] = useState('');
+  const [resetModalOpen, setResetModalOpen] = useState(false);
+  const [tempPassword, setTempPassword] = useState('');
 
   const openEnroll = async () => {
     setEnrollOpen(true);
@@ -179,6 +184,20 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
     } finally { setBusy(false); }
   };
 
+  const handleResetPassword = async () => {
+    if (!profile) return;
+    if (!window.confirm(`Are you sure you want to reset the password for ${profile.name}?`)) return;
+    setBusy(true);
+    try {
+      const response = await api.people.resetPassword(userId);
+      setTempPassword(response.temporaryPassword);
+      setResetModalOpen(true);
+      showToast('Password reset successfully.', 'success');
+    } catch (error: unknown) {
+      showToast(error instanceof Error ? error.message : 'Failed to reset password.', 'error');
+    } finally { setBusy(false); }
+  };
+
   const unenroll = async (enrollmentId: string) => {
     setBusy(true);
     try {
@@ -252,6 +271,21 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                       <>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Designation</span><span>{profile.detail.staff.designation}</span></div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Contract</span><span>{profile.detail.staff.contractType}</span></div>
+                        {profile.detail.staff.performanceScore !== undefined && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: 'var(--text-muted)' }}>Performance Score</span>
+                            <span style={{ color: 'var(--color-success)', fontWeight: 700 }}>{profile.detail.staff.performanceScore}/100</span>
+                          </div>
+                        )}
+                        {profile.detail.staff.hrAlerts && profile.detail.staff.hrAlerts.length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px' }}>
+                            {profile.detail.staff.hrAlerts.map((alert, idx) => (
+                              <div key={idx} style={{ padding: '8px', borderRadius: '6px', fontSize: '12px', background: alert.severity === 'error' ? 'var(--color-error-soft)' : alert.severity === 'warning' ? 'var(--color-warning-soft)' : 'var(--color-info-soft)', color: alert.severity === 'error' ? 'var(--color-error)' : alert.severity === 'warning' ? 'var(--color-warning)' : 'var(--color-info)' }}>
+                                <strong>{alert.type}:</strong> {alert.message}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </>
                     ) : null}
                   </div>
@@ -265,6 +299,9 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                     ) : null}
                     <Button variant="outline" onClick={startEdit} disabled={busy} style={{ minHeight: '36px', height: '36px' }}>
                       <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>edit</span> Edit
+                    </Button>
+                    <Button variant="outline" onClick={() => void handleResetPassword()} disabled={busy} style={{ minHeight: '36px', height: '36px', color: 'var(--color-primary)' }}>
+                      <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>lock_reset</span> Reset Password
                     </Button>
                     <Button variant="outline" onClick={() => void toggleActive()} disabled={busy} style={{ minHeight: '36px', height: '36px', color: profile.status === 'ACTIVE' ? 'var(--color-error)' : 'var(--color-success)', borderColor: profile.status === 'ACTIVE' ? 'rgba(230,57,70,0.4)' : 'rgba(0,171,102,0.4)' }}>
                       {profile.status === 'ACTIVE' ? 'Deactivate' : 'Reactivate'}
@@ -328,6 +365,24 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                       <FeeStat label="Paid" value={money(profile.detail.student.fees.totalPaid)} tone="paid" />
                       <FeeStat label="Due" value={money(profile.detail.student.fees.totalDue)} tone="due" />
                     </div>
+
+                    {profile.detail.student.futureBilling ? (
+                      <div style={{ ...rowCard, marginTop: '10px', background: 'rgba(21, 96, 189, 0.04)' }}>
+                        <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 600 }}>1-Year Future Billing Projection</div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+                          <span style={{ fontSize: '16px', fontWeight: 700, color: 'var(--color-primary)' }}>{money(profile.detail.student.futureBilling.projectedAnnualFee)}</span>
+                          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Next Invoice: {profile.detail.student.futureBilling.nextInvoiceDate}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ ...rowCard, marginTop: '10px', background: 'rgba(21, 96, 189, 0.04)' }}>
+                        <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 600 }}>1-Year Future Billing Projection</div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+                          <span style={{ fontSize: '16px', fontWeight: 700, color: 'var(--color-primary)' }}>{money(profile.detail.student.monthlyFee * 12)}</span>
+                          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Calculated automatically</span>
+                        </div>
+                      </div>
+                    )}
                     {profile.detail.student.fees.invoices.length > 0 ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
                         {profile.detail.student.fees.invoices.map((inv) => (
@@ -382,6 +437,11 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                             <div>
                               <div style={{ fontSize: '13.5px', fontWeight: 700 }}>{e.courseName}</div>
                               <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{e.className}</div>
+                              {e.billingHistory ? (
+                                <div style={{ fontSize: '11px', color: 'var(--color-success)', marginTop: '2px' }}>
+                                  Paid: {money(e.billingHistory.paid)} {e.billingHistory.due > 0 ? <span style={{ color: 'var(--color-error)' }}>· Due: {money(e.billingHistory.due)}</span> : ''}
+                                </div>
+                              ) : null}
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                               <StatusBadge variant={e.status === 'ACTIVE' ? 'success' : e.status === 'BLOCKED' ? 'error' : 'info'}>{e.status}</StatusBadge>
@@ -422,11 +482,67 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                           <div>
                             <div style={{ fontSize: '13.5px', fontWeight: 700 }}>{c.className}</div>
                             <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{c.courseName} · {c.branchName}</div>
+                            {c.syllabusProgress !== undefined ? (
+                              <div style={{ fontSize: '11px', color: 'var(--color-primary)', marginTop: '2px', fontWeight: 600 }}>
+                                Syllabus Progress: {c.syllabusProgress}%
+                              </div>
+                            ) : null}
                           </div>
                           <StatusBadge variant="info">{c.enrollmentCount} enrolled</StatusBadge>
                         </div>
                       ))
                     )}
+                  </div>
+
+                  {/* Teacher Payroll & Billing */}
+                  <div style={{ marginTop: '16px' }}>
+                    <div style={sectionTitle}>Payroll & Billing</div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <FeeStat label="Total Paid" value={money(profile.detail.teacher.payroll?.totalPaid ?? 0)} tone="paid" />
+                      <FeeStat label="Last Month" value={money(profile.detail.teacher.payroll?.lastMonthPaid ?? 0)} />
+                    </div>
+                    
+                    <div style={{ ...rowCard, marginTop: '10px', background: 'rgba(21, 96, 189, 0.04)' }}>
+                      <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 600 }}>Next Month Projected Payroll</div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+                        <span style={{ fontSize: '16px', fontWeight: 700, color: 'var(--color-primary)' }}>{money(profile.detail.teacher.payroll?.nextMonthProjected ?? 0)}</span>
+                        {profile.detail.teacher.payroll?.extraClassesPayroll ? (
+                          <span style={{ fontSize: '12px', color: 'var(--color-success)' }}>Includes {money(profile.detail.teacher.payroll.extraClassesPayroll)} for extra classes</span>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Teacher Timetable */}
+                  <div style={{ marginTop: '16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                      <div style={sectionTitle as React.CSSProperties}>Timetable</div>
+                      <Button variant="outline" onClick={() => showToast('Timetable add functionality mock', 'info')} style={{ minHeight: '30px', height: '30px', padding: '4px 12px', fontSize: '12.5px' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>add</span> Add Session
+                      </Button>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {profile.detail.teacher.timetable && profile.detail.teacher.timetable.length > 0 ? (
+                        profile.detail.teacher.timetable.map((session) => (
+                          <div key={session.id} style={{ ...rowCard, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                              <div style={{ fontSize: '13.5px', fontWeight: 700 }}>{session.subject}</div>
+                              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{session.day} · {session.time} · Room {session.room}</div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '4px' }}>
+                              <button type="button" onClick={() => showToast('Timetable edit mock', 'info')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-primary)', display: 'grid', placeItems: 'center', padding: '4px' }}>
+                                <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>edit</span>
+                              </button>
+                              <button type="button" onClick={() => { if(window.confirm('Delete session?')) { showToast('Session deleted (mock)', 'success') } }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-error)', display: 'grid', placeItems: 'center', padding: '4px' }}>
+                                <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>delete</span>
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>No timetable sessions assigned.</p>
+                      )}
+                    </div>
                   </div>
                 </div>
               ) : null}
@@ -437,6 +553,33 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
 
       {showAnalytics ? (
         <StudentAnalytics userId={userId} fetcher={api.people.getAnalytics} onClose={() => setShowAnalytics(false)} />
+      ) : null}
+
+      {resetModalOpen && tempPassword ? (
+        <div className="auth-dialog-overlay" role="dialog" aria-modal="true" style={{ zIndex: 100000 }}>
+          <div className="auth-dialog">
+            <span className="material-symbols-outlined" style={{ fontSize: '42px', color: 'var(--color-success)' }}>
+              check_circle
+            </span>
+            <h3 className="auth-dialog-title">Password Reset Successful</h3>
+            <p className="auth-dialog-body" style={{ marginBottom: '16px' }}>
+              The password for <strong>{profile?.name}</strong> has been reset. Please copy and share this temporary password securely. The user will be required to change it on their next login.
+            </p>
+            <div style={{ padding: '16px', background: 'var(--bg-background)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', textAlign: 'center', marginBottom: '24px' }}>
+              <div style={{ fontSize: '24px', fontWeight: 700, fontFamily: 'monospace', letterSpacing: '2px', color: 'var(--text-foreground)' }}>
+                {tempPassword}
+              </div>
+            </div>
+            <div className="auth-dialog-actions" style={{ flexDirection: 'row', gap: '12px' }}>
+              <Button onClick={() => { navigator.clipboard.writeText(tempPassword); showToast('Password copied to clipboard', 'success'); }} style={{ flex: 1 }}>
+                Copy Password
+              </Button>
+              <Button variant="outline" onClick={() => { setResetModalOpen(false); setTempPassword(''); }} style={{ flex: 1 }}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </>
   );
