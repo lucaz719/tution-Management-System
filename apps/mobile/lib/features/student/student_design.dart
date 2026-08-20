@@ -118,7 +118,7 @@ ThemeData buildStudentTheme(ThemeData base) {
       elevation: 0,
       backgroundColor: StudentColors.background,
       surfaceTintColor: Colors.transparent,
-      indicatorColor: StudentColors.primary.withValues(alpha: .10),
+      indicatorColor: StudentColors.primary.withOpacity(.10),
       labelTextStyle: WidgetStateProperty.resolveWith(
         (states) => GoogleFonts.roboto(
           fontSize: 11,

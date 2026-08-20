@@ -23,12 +23,12 @@ final ThemeData tmsTheme = ThemeData(
 
   // Typography – matches the web UI
   textTheme: const TextTheme(
-    headline1: GoogleFonts.fraunces(
+    displayLarge: GoogleFonts.fraunces(
       fontSize: 24,
       fontWeight: FontWeight.w600,
       color: Color(0xFF1B1F3B),
     ),
-    bodyText1: GoogleFonts.roboto(
+    bodyLarge: GoogleFonts.roboto(
       fontSize: 16,
       color: Color(0xFF1B1F3B),
     ),

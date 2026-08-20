@@ -34,7 +34,7 @@
 
 **Scope:** `apps/mobile` Flutter application (Teacher, Student, and Parent first; Android and iOS).
 **Planning baseline:** `documents/phases-docs/MOBILE_APP_DEVELOPMENT_TASKLIST.md`.
-**Important:** the role and platform percentages above describe the broader system, including web/API work. They must not be read as evidence that matching Flutter journeys are production-ready.
+**Important:** the role and platform percentages above describe the broader system, including web/API work. They must not be read as eviden.ce that matching Flutter journeys are production-ready.
 
 ### Verified current state
 
@@ -62,8 +62,8 @@
 - [x] **M0.1 — Repair the build:** corrected `core/adaptive/widgets` imports and invalid widget APIs; restored missing symbols/constructors; removed invalid `const` usage. Verified with `flutter test` (12 passing, 2026-08-13).
 - [x] **M0.2 — Establish a green local quality gate:** `dart format .`, `flutter analyze`, and `flutter test` pass locally (12 tests, verified 2026-08-13). CI automation remains part of M1 / MOB-008.
 - [x] **M0.3 — Complete the auth-path audit:** migrated forgot-password, OTP verification, password reset, 2FA verification, and 2FA resend to `AuthService` / `AuthNotifier`; removed `MockAuthService`. `flutter analyze` and `flutter test` pass (12 tests, verified 2026-08-13). Backend/staging end-to-end authentication remains a separate M1 acceptance test.
-- [ ] **M0.4 — Create the environment contract (in progress):** added `--dart-define=API_BASE_URL=<url>` configuration. Debug defaults to the Android emulator endpoint; non-debug builds reject missing/non-HTTPS endpoints. Android permits clear-text traffic only for debug builds. Android SDK 36, platform/build tools, licenses, and JDK 17 are configured for Flutter (verified 2026-08-13). The Gradle heap was reduced from 8 GB to 2 GB to fit the build machine. **Current APK blocker:** the system drive has no free space; two orphaned Android Studio installer downloads total about 3 GB in `%LOCALAPPDATA%\Temp\WinGet\Google.AndroidStudio.2026.1.3.7\` and must be removed before retrying. Remaining owner decisions: staging/production API URLs, Android/iOS bundle identifiers, supported OS matrix, and release-signing custody.
-- [ ] **M0.5 — Agree and enforce the initial role scope (in progress):** Teacher, Student, and Parent are the supported mobile roles. Added a client route guard that redirects cross-role deep links to the signed-in user’s own portal; `dart analyze` passes (2026-08-14). Still required: disabled/deactivated-user behavior, explicit 401/403 UI states, and the product decision for remaining roles (web-only vs constrained mobile experience).
+- [ ] **M0.4 — Create the environment contract (in progress):** added `--dart-define=API_BASE_URL=<url>` configuration. Debug defaults to the Android emulator endpoint; non-debug builds reject missing/non-HTTPS endpoints. Android permits clear-text traffic only for debug builds. Android SDK 36, platform/build tools, licenses, and JDK 17 are configured for Flutter (verified 2026-08-13). Remaining owner decisions: staging/production API URLs, Android/iOS bundle identifiers, supported OS matrix, and release-signing custody. The initial APK build is fetching required NDK dependencies.
+- [ ] **M0.5 — Agree the initial role scope:** release Teacher, Student, and Parent first; explicitly choose web-only or a constrained experience for the remaining roles.
 - [ ] **M0.6 — Publish mobile operating documentation:** replace the Flutter starter README and add mobile API-contract and device-test sections to the relevant docs.
 
 ### Time to proceed
