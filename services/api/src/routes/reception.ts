@@ -34,7 +34,7 @@ router.get('/today', authMiddleware, async (req: TenantRequest, res: Response) =
   const { start, end } = todayRange();
 
   try {
-    const [branch, enrollments, checkIns, appointments, announcements] = await Promise.all([
+    const [branch, enrollments, checkIns, appointments, announcements, academicAttendance] = await Promise.all([
       prisma.branch.findFirst({ where: { id: branchId, tenantId: req.tenantId! }, select: { name: true } }),
       prisma.enrollment.findMany({
         where: { status: 'ACTIVE', class: { branchId } },
@@ -64,6 +64,7 @@ router.get('/today', authMiddleware, async (req: TenantRequest, res: Response) =
         },
         select: { id: true, title: true, description: true }, orderBy: { startDate: 'asc' },
       }),
+      prisma.studentAttendance.findMany({ where: { date: { gte: start, lt: end }, class: { branchId, course: { tenantId: req.tenantId! } } }, include: { student: { include: { user: { select: { firstName: true, lastName: true } } } }, class: { include: { course: { select: { name: true } }, assignedTeacher: { select: { firstName: true, lastName: true } } } } }, orderBy: [{ class: { name: 'asc' } }, { student: { user: { firstName: 'asc' } } }] }),
     ]);
     if (!branch) return res.status(404).json({ error: 'Assigned branch was not found.' });
 
@@ -100,6 +101,7 @@ router.get('/today', authMiddleware, async (req: TenantRequest, res: Response) =
         destination: `${item.teacher.firstName} ${item.teacher.lastName}`.trim(),
       })),
       announcements,
+      academicAttendance: academicAttendance.map((row) => ({ id: row.id, studentName: `${row.student.user.firstName} ${row.student.user.lastName}`.trim(), className: row.class.name, subject: row.class.course.name, teacherName: row.class.assignedTeacher ? `${row.class.assignedTeacher.firstName} ${row.class.assignedTeacher.lastName}`.trim() : 'Unassigned', status: row.status })),
     });
   } catch {
     return res.status(500).json({ error: 'Failed to load the front-desk workspace.' });

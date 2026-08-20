@@ -5,12 +5,14 @@ export type EventKind = 'Holiday' | 'Exam' | 'Ceremony' | 'Fee due';
 
 export interface StudentSession {
   id: string;
+  day?: string;
   time: string;
   endTime: string;
   subject: string;
   teacher: string;
   room: string;
   type: CourseType;
+  className?: string;
 }
 
 export interface HomeworkItem {
@@ -46,7 +48,7 @@ export interface StudentSyllabus {
   className: string;
   subject: string;
   teacherName?: string;
-  chapters: Array<{ id: string; title: string; position: number; status: 'IN_PROGRESS' | 'COMPLETED' | 'LEFT' }>;
+  chapters: Array<{ id: string; title: string; position: number; status: 'IN_PROGRESS' | 'COMPLETED' | 'LEFT'; topics: Array<{ id: string; title: string; position: number; status: 'IN_PROGRESS' | 'COMPLETED' | 'LEFT'; logs: Array<{ id: string; status: string; notes?: string; logDate: string }> }> }>;
   dailyLogs: Array<{ id: string; chapterId: string; status: string; notes?: string; logDate: string }>;
 }
 
@@ -147,6 +149,7 @@ export interface StudentPortalDataset {
   generatedAt: string;
   studentProfile: StudentProfile;
   todaySessions: StudentSession[];
+  weeklySessions: StudentSession[];
   homework: HomeworkItem[];
   results: TestResult[];
   insights: SubjectInsight[];

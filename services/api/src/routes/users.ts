@@ -185,51 +185,54 @@ router.get('/me', authMiddleware, async (req: TenantRequest, res: Response) => {
   }
 });
 
-// Admission creates inactive Student/Parent accounts and an admission invoice.
-// Credentials are released only through the activation endpoint after payment.
+// Admission atomically creates active Student/Parent accounts, links the family,
+// creates the admission invoice, and returns one-time credentials.
 router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Response) => {
-  const admissionShape = parseStrictKeys(req.body, ['branchId', 'gradeId', 'student', 'parent']);
+  const admissionShape = parseStrictKeys(req.body, ['branchId', 'gradeId', 'classId', 'student', 'parent']);
   if (!admissionShape.success) return res.status(400).json({ error: admissionShape.error });
   const caller = req.user as UserPayload;
   const tenantAdmin = isTenantAdmin(caller);
   const scopes = branchAdminScopes(caller);
   const branchId = typeof admissionShape.data.branchId === 'string' ? admissionShape.data.branchId.trim() : '';
   const gradeId = typeof admissionShape.data.gradeId === 'string' ? admissionShape.data.gradeId.trim() : '';
+  const classId = typeof admissionShape.data.classId === 'string' ? admissionShape.data.classId.trim() : '';
   if (!tenantAdmin && !scopes.includes(branchId)) {
     return res.status(403).json({ error: 'Only the Tenant Admin or assigned Branch Admin may create admissions.' });
   }
 
   const studentFields = validateNewUserBody(admissionShape.data.student);
   const parentFields = validateNewUserBody(admissionShape.data.parent);
-  if (!branchId || !gradeId || !studentFields || !parentFields) {
+  if (!branchId || !gradeId || !classId || !studentFields || !parentFields) {
     return res.status(400).json({
-      error: 'branchId, gradeId, and complete student and parent identity details are required.',
+      error: 'branchId, gradeId, regular class, and complete student and parent identity details are required.',
     });
   }
 
-  const [branch, grade, existing] = await Promise.all([
+  const [branch, grade, regularClass, existing] = await Promise.all([
     prisma.branch.findFirst({ where: { id: branchId, tenantId: req.tenantId! } }),
     prisma.grade.findFirst({ where: { id: gradeId, tenantId: req.tenantId! } }),
+    prisma.class.findFirst({ where: { id: classId, branchId, course: { tenantId: req.tenantId!, gradeId, type: 'REGULAR' } }, include: { course: true } }),
     prisma.user.findFirst({
       where: { email: { in: [studentFields.email, parentFields.email] } },
       select: { email: true },
     }),
   ]);
-  if (!branch || !grade) return res.status(404).json({ error: 'Branch or grade was not found in your institution.' });
+  if (!branch || !grade || !regularClass) return res.status(404).json({ error: 'Branch, grade, or matching regular class was not found in your institution.' });
   if (studentFields.email === parentFields.email) {
     return res.status(400).json({ error: 'Student and parent must use different email addresses.' });
   }
   if (existing) return res.status(409).json({ error: `An account already exists for ${existing.email}.` });
-  if (grade.admissionFee <= 0) {
-    return res.status(422).json({ error: 'Configure a positive admission fee for this grade before admitting students.' });
-  }
 
   const [studentRoleId, parentRoleId] = await Promise.all([
     ensureTenantRole(req.tenantId!, 'Student'),
     ensureTenantRole(req.tenantId!, 'Parent'),
   ]);
-  const hiddenStudentPassword = await bcrypt.hash(generateTempPassword(), 10);
-  const hiddenParentPassword = await bcrypt.hash(generateTempPassword(), 10);
+  const studentPassword = generateTempPassword();
+  const parentPassword = generateTempPassword();
+  const [studentPasswordHash, parentPasswordHash] = await Promise.all([
+    bcrypt.hash(studentPassword, 10),
+    bcrypt.hash(parentPassword, 10),
+  ]);
   const now = new Date();
   const dueDate = new Date(now);
   dueDate.setDate(dueDate.getDate() + 7);
@@ -244,12 +247,12 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
           firstName: studentFields.firstName,
           lastName: studentFields.lastName,
           phone: studentFields.phone,
-          passwordHash: hiddenStudentPassword,
-          status: 'INACTIVE',
+          passwordHash: studentPasswordHash,
+          status: 'ACTIVE',
         },
       });
       await tx.account.create({
-        data: { accountId: studentUser.id, providerId: 'credential', userId: studentUser.id, password: hiddenStudentPassword },
+        data: { accountId: studentUser.id, providerId: 'credential', userId: studentUser.id, password: studentPasswordHash },
       });
       await tx.userRole.create({ data: { userId: studentUser.id, roleId: studentRoleId, branchId } });
       const student = await tx.student.create({
@@ -258,9 +261,10 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
           gradeId,
           admissionDate: now,
           emergencyContact: studentFields.phone || parentFields.phone,
-          admissionStatus: 'PENDING_PAYMENT',
+          admissionStatus: 'ACTIVE',
         },
       });
+      await tx.enrollment.create({ data: { studentId: student.id, courseId: regularClass.courseId, classId: regularClass.id, status: 'ACTIVE', admissionDate: now } });
 
       const parentUser = await tx.user.create({
         data: {
@@ -270,12 +274,12 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
           firstName: parentFields.firstName,
           lastName: parentFields.lastName,
           phone: parentFields.phone,
-          passwordHash: hiddenParentPassword,
-          status: 'INACTIVE',
+          passwordHash: parentPasswordHash,
+          status: 'ACTIVE',
         },
       });
       await tx.account.create({
-        data: { accountId: parentUser.id, providerId: 'credential', userId: parentUser.id, password: hiddenParentPassword },
+        data: { accountId: parentUser.id, providerId: 'credential', userId: parentUser.id, password: parentPasswordHash },
       });
       await tx.userRole.create({ data: { userId: parentUser.id, roleId: parentRoleId, branchId } });
       const parent = await tx.parent.create({ data: { userId: parentUser.id } });
@@ -294,22 +298,27 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
           billingCycleStart: now,
           billingCycleEnd: now,
           dueDate,
-          status: 'UNPAID',
+          status: grade.admissionFee > 0 ? 'UNPAID' : 'PAID',
         },
       });
       return { student, parent, invoice };
     });
 
     return res.status(201).json({
-      message: 'Admission created. Student and parent logins remain disabled until the admission invoice is paid.',
+      message: 'Admission completed. Student and parent accounts are ready to use.',
       admission: {
         studentId: result.student.id,
         parentId: result.parent.id,
         branchId,
         gradeId,
+        classId: regularClass.id,
         status: result.student.admissionStatus,
         invoiceId: result.invoice.id,
         admissionFee: result.invoice.netPayable,
+      },
+      credentials: {
+        student: { email: studentFields.email, temporaryPassword: studentPassword },
+        parent: { email: parentFields.email, temporaryPassword: parentPassword },
       },
     });
   } catch (error: any) {
@@ -388,7 +397,7 @@ router.get('/', authMiddleware, async (req: TenantRequest, res: Response) => {
       orderBy: { createdAt: 'desc' },
       include: {
         userRoles: { include: { role: true, branch: true } },
-        student: { select: { id: true, grade: { select: { id: true, name: true } } } },
+        student: { select: { id: true, grade: { select: { id: true, name: true } }, studentParents: { select: { parent: { select: { user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } } } } } } } },
       },
     });
 
@@ -397,10 +406,12 @@ router.get('/', authMiddleware, async (req: TenantRequest, res: Response) => {
         id: u.id,
         name: `${u.firstName} ${u.lastName}`,
         email: u.email,
+        phone: u.phone,
         status: u.status,
         gradeId: u.student?.grade?.id ?? null,
         gradeName: u.student?.grade?.name ?? null,
         studentId: u.student?.id ?? null,
+        parents: u.student?.studentParents.map((link) => ({ id: link.parent.user.id, name: `${link.parent.user.firstName} ${link.parent.user.lastName}`.trim(), email: link.parent.user.email, phone: link.parent.user.phone })) ?? [],
         roles: u.userRoles.map((ur) => ({
           role: ur.role.name,
           branchId: ur.branchId,
@@ -466,7 +477,7 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
               include: {
                 assignedTeacher: { select: { firstName: true, lastName: true } },
                 branch: { select: { name: true, address: true } },
-                syllabi: { include: { chapters: { orderBy: { position: 'asc' } }, dailyLogs: { orderBy: { logDate: 'desc' }, take: 20 } } },
+                syllabi: { include: { chapters: { orderBy: { position: 'asc' }, include: { topics: { orderBy: { position: 'asc' }, include: { logs: { orderBy: { logDate: 'desc' }, take: 20 } } } } }, dailyLogs: { orderBy: { logDate: 'desc' }, take: 20 } } },
               },
             },
           },
@@ -561,6 +572,18 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
           type: courseTypeLabel(enrollment.course.type),
         }));
     }).sort((a, b) => a.time.localeCompare(b.time));
+    const weeklySessions = student.enrollments.flatMap((enrollment) => {
+      const schedule = Array.isArray(enrollment.class.schedule) ? enrollment.class.schedule as Array<Record<string, unknown>> : [];
+      return schedule.map((slot, index) => ({
+        id: `${enrollment.classId}-${index}`, day: String(slot.day || ''),
+        time: typeof slot.start === 'string' ? slot.start : typeof slot.startTime === 'string' ? slot.startTime : '—',
+        endTime: typeof slot.end === 'string' ? slot.end : typeof slot.endTime === 'string' ? slot.endTime : '—',
+        subject: enrollment.course.name,
+        teacher: enrollment.class.assignedTeacher ? `${enrollment.class.assignedTeacher.firstName} ${enrollment.class.assignedTeacher.lastName}` : 'Teacher not assigned',
+        room: typeof slot.room === 'string' && slot.room ? slot.room : enrollment.class.name,
+        className: enrollment.class.name, type: courseTypeLabel(enrollment.course.type),
+      }));
+    });
 
     const homework = homeworkRows.map((row) => {
       const ownSubmission = row.submissions.find((submission) => submission.studentId === student.id);
@@ -615,7 +638,7 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
     const syllabi = student.enrollments.flatMap((enrollment) => enrollment.class.syllabi.map((syllabus) => ({
       id: syllabus.id, className: enrollment.class.name, subject: syllabus.subject,
       teacherName: enrollment.class.assignedTeacher ? `${enrollment.class.assignedTeacher.firstName} ${enrollment.class.assignedTeacher.lastName}`.trim() : undefined,
-      chapters: syllabus.chapters.map((chapter) => ({ id: chapter.id, title: chapter.title, position: chapter.position, status: chapter.status })),
+      chapters: syllabus.chapters.map((chapter) => ({ id: chapter.id, title: chapter.title, position: chapter.position, status: chapter.status, topics: chapter.topics.map((topic) => ({ id: topic.id, title: topic.title, position: topic.position, status: topic.status, logs: topic.logs.map((log) => ({ id: log.id, status: log.status, notes: log.notes, logDate: formatDate(log.logDate) })) })) })),
       dailyLogs: syllabus.dailyLogs.map((log) => ({ id: log.id, chapterId: log.chapterId, status: log.status, notes: log.notes, logDate: formatDate(log.logDate) })),
     })));
 
@@ -781,6 +804,7 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
         },
       },
       todaySessions,
+      weeklySessions,
       homework,
       results,
       insights,

@@ -32,14 +32,14 @@ router.get('/workspace', authMiddleware, async (req: TenantRequest, res: Respons
   const user = req.user as UserPayload;
   const { start, end } = dayBounds();
   try {
-    const [classes, stamps, sessions, staff, leaves, scores] = await Promise.all([
+    const [classes, stamps, sessions, staff, leaves, scores, resultDefinitions] = await Promise.all([
       prisma.class.findMany({
         where: { teacherId: user.id, course: { tenantId: req.tenantId! } },
         include: {
           course: true, branch: true,
           enrollments: { where: { status: { in: ACTIVE_ENROLLMENTS } }, include: { student: { include: { user: true } } } },
           sessions: { orderBy: { date: 'desc' }, take: 30, include: { studentAttendance: true } },
-          syllabi: { include: { chapters: { orderBy: { position: 'asc' } }, dailyLogs: { orderBy: { logDate: 'desc' }, take: 20 } } },
+          syllabi: { include: { chapters: { orderBy: { position: 'asc' }, include: { topics: { orderBy: { position: 'asc' }, include: { logs: { orderBy: { logDate: 'desc' }, take: 20 } } } } }, dailyLogs: { orderBy: { logDate: 'desc' }, take: 20 } } },
           homework: { orderBy: { createdAt: 'desc' }, take: 20 },
         },
         orderBy: { name: 'asc' },
@@ -49,6 +49,7 @@ router.get('/workspace', authMiddleware, async (req: TenantRequest, res: Respons
       prisma.staffRecord.findFirst({ where: { userId: user.id }, include: { performanceScore: true, payrolls: { orderBy: [{ year: 'desc' }, { month: 'desc' }] } } }),
       prisma.leave.findMany({ where: { tenantId: req.tenantId!, userId: user.id }, include: { branch: true }, orderBy: { createdAt: 'desc' } }),
       prisma.studentScore.findMany({ where: { tenantId: req.tenantId!, recordedBy: user.id }, include: { student: { include: { user: true } } }, orderBy: { createdAt: 'desc' }, take: 100 }),
+      prisma.resultDefinition.findMany({ where: { tenantId: req.tenantId!, isOpen: true, classId: { in: await prisma.class.findMany({ where: { teacherId: user.id, course: { tenantId: req.tenantId! } }, select: { id: true } }).then((rows) => rows.map((row) => row.id)) } }, orderBy: { testDate: 'desc' } }),
     ]);
     const lastStamp = stamps[0] ?? null;
     const checkedIn = Boolean(lastStamp && ['IN', 'RE_IN'].includes(lastStamp.stampType));
@@ -59,6 +60,12 @@ router.get('/workspace', authMiddleware, async (req: TenantRequest, res: Respons
     const attendanceRate = presentStamps.length + absentLeaves.length
       ? Math.round((presentStamps.length / (presentStamps.length + absentLeaves.length)) * 100)
       : 0;
+    const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+    const presentDays = new Set(presentStamps.filter((stamp) => stamp.timestamp >= monthStart).map((stamp) => stamp.timestamp.toISOString().slice(0, 10))).size;
+    const daysInMonth = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0).getDate();
+    const requiredDays = Array.from({ length: daysInMonth }, (_, offset) => {
+      const day = new Date(monthStart); day.setDate(offset + 1); return day;
+    }).filter((day) => day.getDay() !== 6).length;
     return res.json({
       generatedAt: new Date().toISOString(),
       teacher: {
@@ -68,7 +75,7 @@ router.get('/workspace', authMiddleware, async (req: TenantRequest, res: Respons
         branches: [...new Map(classes.map((item) => [item.branch.id, { id: item.branch.id, name: item.branch.name }])).values()],
       },
       statistics: {
-        attendanceRate, presentDays: presentStamps.length, approvedLeaveDays: absentLeaves.length,
+        attendanceRate, presentDays, requiredDays, approvedLeaveDays: absentLeaves.length,
         totalSessions: completedSessions.length,
         updateCompliance: completedSessions.length ? Math.round((confirmedSessions.length / completedSessions.length) * 100) : 0,
         assignedClasses: classes.length,
@@ -91,6 +98,7 @@ router.get('/workspace', authMiddleware, async (req: TenantRequest, res: Respons
         syllabi: item.syllabi, homework: item.homework,
       })),
       results: scores.map((score) => ({ ...score, score: Number(score.score), maximum: Number(score.maximum), passMarks: score.passMarks == null ? null : Number(score.passMarks), percentile: score.percentile == null ? null : Number(score.percentile), studentName: `${score.student.user.firstName} ${score.student.user.lastName}` })),
+      resultDefinitions,
       profile: { performance: staff?.performanceScore ?? null, salaryStructure: staff?.salaryStructure ?? null },
       leaves,
       payrolls: staff?.payrolls ?? [],
@@ -111,6 +119,12 @@ router.post('/class/:classId/attendance', authMiddleware, async (req: TenantRequ
   if (!records.length || Number.isNaN(date.getTime())) return res.status(400).json({ error: 'Date and at least one attendance record are required.' });
   const { start, end } = dayBounds(date);
   try {
+    const today = dayBounds();
+    if (start.getTime() !== today.start.getTime()) return res.status(422).json({ error: 'Class attendance can only be taken for the present day.' });
+    const teacherPresent = await prisma.teacherAttendance.findFirst({
+      where: { userId: req.user!.id, timestamp: { gte: today.start, lte: today.end }, stampType: { in: ['IN', 'RE_IN'] } },
+    });
+    if (!teacherPresent) return res.status(403).json({ error: 'You must be marked present today before taking class attendance.' });
     const klass = await ownedClass(classId, req.user!.id, req.tenantId!);
     if (!klass) return res.status(404).json({ error: 'Assigned class not found.' });
     const enrollmentMap = new Map(klass.enrollments.map((item) => [item.studentId, item]));
@@ -140,12 +154,12 @@ router.post('/class/:classId/attendance', authMiddleware, async (req: TenantRequ
 
 router.post('/syllabus', authMiddleware, async (req: TenantRequest, res: Response) => {
   const { classId, subject } = req.body;
-  const chapters = Array.isArray(req.body?.chapters) ? req.body.chapters.map((item: unknown) => String(item).trim()).filter(Boolean) : [];
+  const chapters = Array.isArray(req.body?.chapters) ? req.body.chapters.map((item: any) => typeof item === 'string' ? { title: item.trim(), topics: [] } : { title: String(item?.title || '').trim(), topics: Array.isArray(item?.topics) ? item.topics.map((topic: unknown) => String(topic).trim()).filter(Boolean) : [] }).filter((item: { title: string }) => item.title) : [];
   if (!classId || !String(subject).trim() || !chapters.length) return res.status(400).json({ error: 'Class, subject, and at least one chapter are required.' });
   try {
     const klass = await ownedClass(classId, req.user!.id, req.tenantId!);
     if (!klass) return res.status(404).json({ error: 'Assigned class not found.' });
-    const syllabus = await prisma.syllabus.create({ data: { classId, subject: String(subject).trim(), createdBy: req.user!.id, chapters: { create: chapters.map((title: string, position: number) => ({ title, position: position + 1 })) } }, include: { chapters: true } });
+    const syllabus = await prisma.syllabus.create({ data: { classId, subject: String(subject).trim(), createdBy: req.user!.id, chapters: { create: chapters.map((chapter: { title: string; topics: string[] }, position: number) => ({ title: chapter.title, position: position + 1, topics: { create: chapter.topics.map((title, topicPosition) => ({ title, position: topicPosition + 1 })) } })) } }, include: { chapters: { include: { topics: true } } } });
     return res.status(201).json({ message: 'Syllabus shared with enrolled students.', syllabus });
   } catch (error: any) {
     return res.status(error.code === 'P2002' ? 409 : 500).json({ error: error.code === 'P2002' ? 'A syllabus already exists for this class and subject.' : 'Failed to create syllabus.' });
@@ -204,14 +218,61 @@ router.post('/syllabus/:syllabusId/log', authMiddleware, async (req: TenantReque
   } catch (error: any) { return res.status(500).json({ error: 'Failed to update syllabus progress.', details: error.message }); }
 });
 
+router.post('/syllabus/:syllabusId/topic-log', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const { topicId, status, notes, logDate } = req.body;
+  if (!topicId || !['IN_PROGRESS', 'COMPLETED', 'LEFT'].includes(status)) return res.status(400).json({ error: 'Topic and a valid progress status are required.' });
+  try {
+    const syllabus = await prisma.syllabus.findFirst({ where: { id: req.params.syllabusId, createdBy: req.user!.id, class: { teacherId: req.user!.id, course: { tenantId: req.tenantId! } }, chapters: { some: { topics: { some: { id: topicId } } } } } });
+    if (!syllabus) return res.status(404).json({ error: 'Owned syllabus topic not found.' });
+    const topic = await prisma.syllabusTopic.findUniqueOrThrow({ where: { id: topicId }, select: { chapterId: true } });
+    const date = logDate ? new Date(logDate) : new Date(); date.setHours(0, 0, 0, 0);
+    const log = await prisma.$transaction(async (tx) => {
+      const saved = await tx.topicProgressLog.upsert({ where: { topicId_logDate: { topicId, logDate: date } }, create: { topicId, teacherId: req.user!.id, classId: syllabus.classId, logDate: date, status, notes: String(notes || '').trim() || null }, update: { status, notes: String(notes || '').trim() || null } });
+      await tx.syllabusTopic.update({ where: { id: topicId }, data: { status } });
+      const topics = await tx.syllabusTopic.findMany({ where: { chapterId: topic.chapterId }, select: { status: true } });
+      const chapterStatus = topics.every((item) => item.status === 'COMPLETED') ? 'COMPLETED' : topics.some((item) => item.status === 'IN_PROGRESS' || item.status === 'COMPLETED') ? 'IN_PROGRESS' : 'LEFT';
+      await tx.syllabusChapter.update({ where: { id: topic.chapterId }, data: { status: chapterStatus } });
+      return saved;
+    });
+    return res.json({ message: 'Topic progress shared with students and Branch Admin.', log });
+  } catch (error: any) { return res.status(500).json({ error: 'Failed to update topic progress.', details: error.message }); }
+});
+
+router.post('/syllabus/:syllabusId/topics', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const chapterId = String(req.body?.chapterId || ''); const title = String(req.body?.title || '').trim();
+  if (!chapterId || !title) return res.status(400).json({ error: 'Chapter and topic title are required.' });
+  const syllabus = await prisma.syllabus.findFirst({ where: { id: req.params.syllabusId, createdBy: req.user!.id, class: { teacherId: req.user!.id, course: { tenantId: req.tenantId! } }, chapters: { some: { id: chapterId } } } });
+  if (!syllabus) return res.status(404).json({ error: 'Owned syllabus chapter not found.' });
+  const last = await prisma.syllabusTopic.findFirst({ where: { chapterId }, orderBy: { position: 'desc' }, select: { position: true } });
+  const topic = await prisma.syllabusTopic.create({ data: { chapterId, title, position: (last?.position ?? 0) + 1 } });
+  return res.status(201).json({ message: 'Topic added.', topic });
+});
+
+router.patch('/syllabus/:syllabusId/topics/:topicId', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const title = String(req.body?.title || '').trim(); if (!title) return res.status(400).json({ error: 'Topic title is required.' });
+  const topic = await prisma.syllabusTopic.findFirst({ where: { id: req.params.topicId, chapter: { syllabus: { id: req.params.syllabusId, createdBy: req.user!.id, class: { teacherId: req.user!.id, course: { tenantId: req.tenantId! } } } } } });
+  if (!topic) return res.status(404).json({ error: 'Owned syllabus topic not found.' });
+  return res.json({ message: 'Topic updated.', topic: await prisma.syllabusTopic.update({ where: { id: topic.id }, data: { title } }) });
+});
+
+router.delete('/syllabus/:syllabusId/topics/:topicId', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const topic = await prisma.syllabusTopic.findFirst({ where: { id: req.params.topicId, chapter: { syllabus: { id: req.params.syllabusId, createdBy: req.user!.id, class: { teacherId: req.user!.id, course: { tenantId: req.tenantId! } } } } }, include: { _count: { select: { logs: true } } } });
+  if (!topic) return res.status(404).json({ error: 'Owned syllabus topic not found.' });
+  if (topic._count.logs) return res.status(409).json({ error: 'A topic with progress history cannot be deleted. Rename it instead.' });
+  await prisma.syllabusTopic.delete({ where: { id: topic.id } }); return res.status(204).send();
+});
+
 router.post('/results', authMiddleware, async (req: TenantRequest, res: Response) => {
-  const { classId, subject, assessment, maximum, passMarks, testDate } = req.body;
+  const { classId, resultDefinitionId, subject, assessment, maximum, passMarks, testDate } = req.body;
   const marks = Array.isArray(req.body?.marks) ? req.body.marks : [];
   const max = Number(maximum); const pass = Number(passMarks);
-  if (!classId || !subject?.trim() || !assessment?.trim() || !marks.length || !(max > 0) || pass < 0 || pass > max) return res.status(400).json({ error: 'Class, assessment, valid mark limits, and student marks are required.' });
+  if (!classId || !resultDefinitionId || !subject?.trim() || !assessment?.trim() || !marks.length || !(max > 0) || pass < 0 || pass > max) return res.status(400).json({ error: 'An available result, class, valid mark limits, and student marks are required.' });
   try {
     const klass = await ownedClass(classId, req.user!.id, req.tenantId!);
     if (!klass) return res.status(404).json({ error: 'Assigned class not found.' });
+    const definition = await prisma.resultDefinition.findFirst({ where: { id: resultDefinitionId, tenantId: req.tenantId!, classId, isOpen: true } });
+    if (!definition) return res.status(404).json({ error: 'This Branch Admin-created result is unavailable for the selected class.' });
+    if (definition.title !== assessment.trim() || definition.subject !== subject.trim()) return res.status(422).json({ error: 'Result title and subject must match the selected result.' });
     const allowed = new Set(klass.enrollments.map((item) => item.studentId));
     const numeric = marks.map((item: any) => ({ studentId: String(item.studentId), score: Number(item.score) }));
     if (numeric.some((item: any) => !allowed.has(item.studentId) || item.score < 0 || item.score > max || !Number.isFinite(item.score))) return res.status(422).json({ error: 'Each mark must belong to an enrolled student and be within the full marks.' });

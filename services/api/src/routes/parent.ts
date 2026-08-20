@@ -99,7 +99,7 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
     const child = children.find((item) => item.id === student.id)!;
     const classIds = student.enrollments.map((enrollment) => enrollment.classId);
     const branchIds = [...new Set(student.enrollments.map((enrollment) => enrollment.class.branchId))];
-    const [events, leaves, appointments, messages, remarks, scores, tenant] = await Promise.all([
+    const [events, leaves, appointments, messages, remarks, scores, tenant, branchAdmins] = await Promise.all([
       prisma.academicEvent.findMany({
         where: { tenantId: req.tenantId!, OR: [{ branchId: null }, { branchId: { in: branchIds } }] },
         orderBy: { startDate: 'asc' },
@@ -123,6 +123,7 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
       }),
       prisma.studentScore.findMany({ where: { tenantId: req.tenantId!, studentId: student.id }, orderBy: { testDate: 'asc' } }),
       prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { appointmentWindowHours: true } }),
+      prisma.user.findMany({ where: { tenantId: req.tenantId!, status: 'ACTIVE', userRoles: { some: { branchId: { in: branchIds }, role: { name: 'Branch Admin' } } } }, select: { id: true, firstName: true, lastName: true } }),
     ]);
 
     const weekday = new Intl.DateTimeFormat('en', { weekday: 'long', timeZone: 'Asia/Kathmandu' }).format(new Date()).toLowerCase();
@@ -142,7 +143,7 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
         type: enrollment.course.type.split('_').map((part) => part[0] + part.slice(1).toLowerCase()).join('-'),
       }));
     }).sort((a, b) => a.time.localeCompare(b.time));
-    const teachers = [...new Map(student.enrollments
+    const teachers = [...new Map([...student.enrollments
       .filter((enrollment) => enrollment.class.assignedTeacher)
       .map((enrollment) => {
         const teacher = enrollment.class.assignedTeacher!;
@@ -152,8 +153,8 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
           name: `${teacher.firstName} ${teacher.lastName}`,
           subject: enrollment.course.name,
           initials: `${teacher.firstName[0] ?? ''}${teacher.lastName[0] ?? ''}`.toUpperCase(),
-        }];
-      })).values()];
+        }] as const;
+      }), ...branchAdmins.map((admin) => [admin.id, { id: admin.id, childId: student.id, name: `${admin.firstName} ${admin.lastName}`, subject: 'Branch administration', initials: `${admin.firstName[0] ?? ''}${admin.lastName[0] ?? ''}`.toUpperCase() }] as const)]).values()];
     const attendance = student.studentAttendance.map((record) => ({
       id: record.id, childId: student.id, date: formatDate(record.date), subject: record.class.course.name,
       session: record.class.name, state: attendanceLabel(record.status),

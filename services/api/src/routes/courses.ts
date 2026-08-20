@@ -49,7 +49,7 @@ function parseSchedule(value: unknown): ValidationResult<Array<Record<string, st
   if (!Array.isArray(value) || value.length > 14) return { success: false, error: 'schedule must be an array of at most 14 timetable slots.' };
   const slots: Array<Record<string, string>> = [];
   for (const [index, slot] of value.entries()) {
-    const shape = parseStrictKeys(slot, ['day', 'start', 'end', 'startTime', 'endTime']);
+    const shape = parseStrictKeys(slot, ['day', 'start', 'end', 'startTime', 'endTime', 'room']);
     if (!shape.success) return { success: false, error: `Schedule slot ${index + 1}: ${shape.error}` };
     const day = shape.data.day;
     const hasLegacyTimes = shape.data.start !== undefined || shape.data.end !== undefined;
@@ -62,7 +62,9 @@ function parseSchedule(value: unknown): ValidationResult<Array<Record<string, st
     if (typeof day !== 'string' || !SCHEDULE_DAYS.has(day) || typeof start !== 'string' || !TIME_PATTERN.test(start) || typeof end !== 'string' || !TIME_PATTERN.test(end) || start >= end) {
       return { success: false, error: `Schedule slot ${index + 1} must have a valid weekday and an increasing HH:mm time range.` };
     }
-    slots.push(hasModernTimes ? { day, startTime: start, endTime: end } : { day, start, end });
+    const room = typeof shape.data.room === 'string' ? shape.data.room.trim() : '';
+    if (room.length > 120) return { success: false, error: `Schedule slot ${index + 1} room must be 120 characters or fewer.` };
+    slots.push(hasModernTimes ? { day, startTime: start, endTime: end, ...(room ? { room } : {}) } : { day, start, end, ...(room ? { room } : {}) });
   }
   return { success: true, data: slots };
 }
@@ -299,12 +301,13 @@ router.get(
   async (req: TenantRequest, res: Response) => {
     try {
       const classes = await prisma.class.findMany({
-        where: { course: { tenantId: req.tenantId! } },
+        where: { course: { tenantId: req.tenantId! }, ...(isTenantAdmin(req.user!) ? {} : { branchId: { in: req.user!.roles.filter((role: { roleName: string; branchId: string | null }) => role.roleName === 'Branch Admin' && role.branchId).map((role: { roleName: string; branchId: string | null }) => role.branchId as string) } }) },
         orderBy: { createdAt: 'desc' },
         include: {
           course: { select: { name: true, type: true, grade: { select: { id: true, name: true } } } },
           branch: { select: { name: true } },
           assignedTeacher: { select: { id: true, firstName: true, lastName: true } },
+          enrollments: { where: { status: { in: ['ACTIVE', 'BLOCKED'] } }, include: { student: { include: { user: { select: { firstName: true, lastName: true, email: true } } } } }, orderBy: { student: { user: { firstName: 'asc' } } } },
           _count: { select: { enrollments: true, sessions: true } },
         },
       });
@@ -324,6 +327,7 @@ router.get(
           teacherId: c.teacherId,
           teacherName: c.assignedTeacher ? `${c.assignedTeacher.firstName} ${c.assignedTeacher.lastName}` : null,
           enrollmentCount: c._count.enrollments,
+          enrollments: c.enrollments.map((enrollment) => ({ id: enrollment.id, studentId: enrollment.studentId, status: enrollment.status, studentName: `${enrollment.student.user.firstName} ${enrollment.student.user.lastName}`.trim(), studentEmail: enrollment.student.user.email })),
           sessionCount: c._count.sessions,
           createdAt: c.createdAt,
         })),
@@ -531,6 +535,16 @@ router.put(
         });
         if (!teacher) {
           return res.status(400).json({ error: 'Selected teacher is not a teacher in your institution.' });
+        }
+        const nextSchedule = (data.schedule ?? cls.schedule) as Array<Record<string, string>>;
+        const otherClasses = await prisma.class.findMany({ where: { id: { not: id }, teacherId: data.teacherId, branchId: cls.branchId }, select: { name: true, schedule: true } });
+        for (const other of otherClasses) {
+          const otherSlots = Array.isArray(other.schedule) ? other.schedule as Array<Record<string, string>> : [];
+          for (const slot of nextSchedule) {
+            const start = slot.start ?? slot.startTime; const end = slot.end ?? slot.endTime;
+            const collision = otherSlots.find((candidate) => candidate.day === slot.day && (candidate.start ?? candidate.startTime) < end && (candidate.end ?? candidate.endTime) > start);
+            if (collision) return res.status(409).json({ error: `This teacher is already scheduled for ${other.name} on ${slot.day} during that time.` });
+          }
         }
       }
 

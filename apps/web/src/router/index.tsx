@@ -291,6 +291,8 @@ const router = createBrowserRouter([
             children: [
               { path: '/branch/dashboard', element: <Suspense fallback={<FullPageSpinner />}><BranchAdminDashboard /></Suspense> },
               { path: '/branch/staff', element: <Suspense fallback={<FullPageSpinner />}><PeopleDirectory /></Suspense> },
+              { path: '/branch/admissions', element: <Suspense fallback={<FullPageSpinner />}><TenantAdmissionsPage /></Suspense> },
+              { path: '/branch/students', element: <Suspense fallback={<FullPageSpinner />}><AcademicStudents /></Suspense> },
               { path: '/branch/*', element: <Suspense fallback={<FullPageSpinner />}><BranchAdminWorkspace /></Suspense> },
             ],
           },

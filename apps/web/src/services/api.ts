@@ -289,12 +289,17 @@ export const api = {
     },
     saveClassAttendance: async (classId: string, date: string, records: Array<{ studentId: string; status: 'PRESENT' | 'ABSENT' }>) =>
       request<any>(`/teacher/class/${classId}/attendance`, { method: 'POST', body: JSON.stringify({ date, records }) }),
-    createSyllabus: async (payload: { classId: string; subject: string; chapters: string[] }) =>
+    createSyllabus: async (payload: { classId: string; subject: string; chapters: Array<string | { title: string; topics: string[] }> }) =>
       request<any>('/teacher/syllabus', { method: 'POST', body: JSON.stringify(payload) }),
     updateSyllabus: async (syllabusId: string, payload: { subject: string; chapters: Array<{ id?: string; title: string }> }) =>
       request<any>(`/teacher/syllabus/${syllabusId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
     updateSyllabusLog: async (syllabusId: string, payload: { chapterId: string; status: 'IN_PROGRESS' | 'COMPLETED' | 'LEFT'; notes?: string; logDate?: string }) =>
       request<any>(`/teacher/syllabus/${syllabusId}/log`, { method: 'POST', body: JSON.stringify(payload) }),
+    updateTopicLog: async (syllabusId: string, payload: { topicId: string; status: 'IN_PROGRESS' | 'COMPLETED' | 'LEFT'; notes?: string; logDate?: string }) =>
+      request<any>(`/teacher/syllabus/${syllabusId}/topic-log`, { method: 'POST', body: JSON.stringify(payload) }),
+    createSyllabusTopic: async (syllabusId: string, payload: { chapterId: string; title: string }) => request<any>(`/teacher/syllabus/${syllabusId}/topics`, { method: 'POST', body: JSON.stringify(payload) }),
+    updateSyllabusTopic: async (syllabusId: string, topicId: string, title: string) => request<any>(`/teacher/syllabus/${syllabusId}/topics/${topicId}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
+    deleteSyllabusTopic: async (syllabusId: string, topicId: string) => request<void>(`/teacher/syllabus/${syllabusId}/topics/${topicId}`, { method: 'DELETE' }),
     createHomework: async (payload: { classId: string; subject: string; title: string; description?: string; contentUrl?: string; deadline: string }) =>
       request<any>('/homework', { method: 'POST', body: JSON.stringify(payload) }),
     saveResultDraft: async (payload: any) => request<{ message: string; resultIds: string[] }>('/teacher/results', { method: 'POST', body: JSON.stringify(payload) }),
@@ -472,6 +477,7 @@ export const api = {
       feeStructure: Record<string, unknown>;
       isTaxExempt?: boolean;
       taxPercentage?: number;
+      isExtraActivity?: boolean;
     }) => {
       return request<{ message: string; course: any }>('/courses', {
         method: 'POST',
@@ -558,6 +564,8 @@ export const api = {
   // Branch Admin operations. Authorization and branch scoping are enforced by the API.
   branchAdmin: {
     getDashboard: async (branchId?: string) => request<BranchAdminDashboardData>(`/branch-admin/dashboard${branchId ? `?branchId=${encodeURIComponent(branchId)}` : ''}`),
+    getTeacherWorkflows: async (branchId?: string, date?: string) => request<any>(`/branch-admin/teacher-workflows?${new URLSearchParams({ ...(branchId ? { branchId } : {}), ...(date ? { date } : {}) }).toString()}`),
+    createResultDefinition: async (payload: { branchId: string; classId: string; title: string; subject: string; testDate: string }) => request<any>('/branch-admin/result-definitions', { method: 'POST', body: JSON.stringify(payload) }),
     getAppointments: async (branchId: string) => request<{ appointments: BranchAppointment[] }>(`/appointments/branch?branchId=${encodeURIComponent(branchId)}`),
     respondToAppointment: async (appointmentId: string, payload: { action: 'APPROVE' | 'REJECT'; scheduledTime?: string; remarks: string }) =>
       request<{ message: string }>(`/appointments/respond/${encodeURIComponent(appointmentId)}`, { method: 'POST', body: JSON.stringify(payload) }),
@@ -579,6 +587,9 @@ export const api = {
       request<{ message: string; override: any }>('/branch-admin/fee-overrides', { method: 'POST', body: JSON.stringify(payload) }),
     createSocialDraft: async (payload: { branchId: string; text: string; platforms: string[]; mediaUrls: string[]; proposedTime?: string }) =>
       request<{ message: string; draft: any }>('/branch-admin/social-drafts', { method: 'POST', body: JSON.stringify(payload) }),
+    getParentContacts: async () => request<{ contacts: Array<{ studentId: string; studentName: string; gradeName: string; branchName: string; parentId: string; parentName: string; parentEmail: string; parentPhone: string }> }>('/communication/admin/parent-contacts'),
+    getParentThread: async (studentId: string, parentId: string) => request<{ messages: Array<{ id: string; senderId: string; receiverId: string; messageText: string; createdAt: string; sender: { firstName: string; lastName: string } }> }>(`/communication/messages/thread/${encodeURIComponent(studentId)}?teacherId=${encodeURIComponent(parentId)}`),
+    sendParentMessage: async (payload: { studentId: string; receiverId: string; messageText: string }) => request<{ message: string }>('/communication/messages', { method: 'POST', body: JSON.stringify(payload) }),
   },
 
   // Onboarding & tenant provisioning (Super Admin)

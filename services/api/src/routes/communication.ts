@@ -3,7 +3,7 @@ import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware } from '../middleware/auth';
 import { MockPushNotificationService } from '../utils/notifications';
-import { isTenantAdmin } from '../utils/access-control';
+import { isTenantAdmin, managedBranchIds } from '../utils/access-control';
 import { parseStrictKeys, readTrimmedString } from '../utils/request-validation';
 
 const router = Router();
@@ -19,13 +19,31 @@ async function canUseThread(userId: string, tenantId: string, studentId: string,
   if (!student) return null;
   const parentUserIds = student.studentParents.map((link) => link.parent.userId);
   const teacherIds = student.enrollments.map((enrollment) => enrollment.class.teacherId).filter((id): id is string => Boolean(id));
+  const branchIds = [...new Set(student.enrollments.map((enrollment) => enrollment.class.branchId))];
+  const adminIds = (await prisma.userRole.findMany({ where: { branchId: { in: branchIds }, role: { name: 'Branch Admin' }, user: { tenantId } }, select: { userId: true } })).map((role) => role.userId);
   const userIsParent = parentUserIds.includes(userId);
   const userIsTeacher = teacherIds.includes(userId);
-  if (!userIsParent && !userIsTeacher) return null;
-  if (otherUserId && userIsParent && !teacherIds.includes(otherUserId)) return null;
+  const userIsAdmin = adminIds.includes(userId);
+  if (!userIsParent && !userIsTeacher && !userIsAdmin) return null;
+  if (otherUserId && userIsParent && !teacherIds.includes(otherUserId) && !adminIds.includes(otherUserId)) return null;
   if (otherUserId && userIsTeacher && !parentUserIds.includes(otherUserId)) return null;
-  return { student, parentUserIds, teacherIds, userIsParent };
+  if (otherUserId && userIsAdmin && !parentUserIds.includes(otherUserId)) return null;
+  return { student, parentUserIds, teacherIds, adminIds, userIsParent };
 }
+
+router.get('/admin/parent-contacts', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const branchIds = managedBranchIds(req.user!);
+  if (!branchIds.length) return res.status(403).json({ error: 'Only a Branch Admin may view branch parent contacts.' });
+  try {
+    const links = await prisma.studentParent.findMany({
+      where: { student: { user: { tenantId: req.tenantId!, userRoles: { some: { branchId: { in: branchIds } } } } } },
+      include: { student: { include: { grade: { select: { name: true } }, user: { select: { firstName: true, lastName: true, userRoles: { include: { branch: true } } } } } }, parent: { include: { user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } } } } },
+      orderBy: { student: { user: { firstName: 'asc' } } },
+    });
+    const contacts = links.map((link) => ({ studentId: link.studentId, studentName: `${link.student.user.firstName} ${link.student.user.lastName}`.trim(), gradeName: link.student.grade?.name ?? 'Grade not assigned', branchName: link.student.user.userRoles.find((role) => role.branchId && branchIds.includes(role.branchId))?.branch?.name ?? 'Branch', parentId: link.parent.user.id, parentName: `${link.parent.user.firstName} ${link.parent.user.lastName}`.trim(), parentEmail: link.parent.user.email, parentPhone: link.parent.user.phone }));
+    return res.json({ contacts });
+  } catch (error: any) { return res.status(500).json({ error: 'Failed to load parent contacts.', details: error.message }); }
+});
 
 router.post('/messages', authMiddleware, async (req: TenantRequest, res: Response) => {
   const { studentId, receiverId, messageText } = req.body;
@@ -40,7 +58,7 @@ router.post('/messages', authMiddleware, async (req: TenantRequest, res: Respons
     const message = await prisma.parentMessage.create({
       data: { tenantId: req.tenantId!, studentId, senderId: req.user!.id, receiverId, messageText: text },
     });
-    await MockPushNotificationService.sendPush(receiverId, 'New parent-teacher message', `New message regarding ${access.student.id}.`);
+    await MockPushNotificationService.sendPush(receiverId, 'New school message', `New message regarding ${access.student.id}.`);
     return res.status(201).json({ message: 'Message sent.', record: message });
   } catch (error: any) {
     return res.status(500).json({ error: 'Failed to send message.', details: error.message });

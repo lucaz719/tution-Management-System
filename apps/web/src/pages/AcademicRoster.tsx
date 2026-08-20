@@ -14,11 +14,13 @@ interface Person {
   id: string;
   name: string;
   email: string;
+  phone: string;
   status: string;
   gradeId: string | null;
   gradeName: string | null;
   roles: PersonRole[];
   createdAt: string;
+  parents?: Array<{ id: string; name: string; email: string; phone: string }>;
 }
 
 interface FeeSummary {
@@ -73,7 +75,7 @@ export function AcademicRoster({ role, title, subtitle, emptyText, showFees = fa
         api.people.list() as Promise<Person[]>,
         showFees ? api.finances.getStudentFees() : Promise.resolve([]),
       ]);
-      setPeople(list.filter((p) => p.roles.some((r) => r.role === role)));
+      setPeople(list.filter((p) => p.roles.some((r) => r.role === role)).map((p) => ({ ...p, parents: p.parents ?? [] })));
       const map = new Map<string, FeeSummary>();
       for (const f of fees) {
         map.set(f.userId, { totalDue: f.totalDue, overdueAmount: f.overdueAmount, overdueCount: f.overdueCount });
@@ -221,6 +223,7 @@ export function AcademicRoster({ role, title, subtitle, emptyText, showFees = fa
                           <div>
                             <div className="people-person-name">{person.name}</div>
                             <div className="people-person-email">{person.email}</div>
+                            {role === 'Student' ? <div className="people-person-email">{person.phone || 'No phone'} · Parent: {person.parents?.[0] ? `${person.parents[0].name} · ${person.parents[0].phone || 'no phone'} · ${person.parents[0].email}` : 'Not linked'}</div> : null}
                           </div>
                         </div>
                       </td>
