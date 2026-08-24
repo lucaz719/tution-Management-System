@@ -6,6 +6,7 @@ import 'package:tms_mobile/features/auth/screens/login_screen.dart';
 import 'package:tms_mobile/features/auth/screens/forgot_password_screen.dart';
 import 'package:tms_mobile/features/auth/screens/reset_password_screen.dart';
 import 'package:tms_mobile/features/auth/screens/two_factor_screen.dart';
+import 'package:tms_mobile/features/admin/screens/branch_admin_home_screen.dart';
 import 'package:tms_mobile/features/teacher/screens/teacher_home_screen.dart';
 import 'package:tms_mobile/features/teacher/screens/teacher_timetable_screen.dart';
 import 'package:tms_mobile/features/teacher/screens/teacher_leave_screen.dart';
@@ -74,6 +75,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           'TEACHER' => '/teacher/',
           'STUDENT' => '/student/',
           'PARENT' => '/parent/',
+          'BRANCH_ADMIN' || 'TENANT_ADMIN' || 'SUPER_ADMIN' || 'STAFF' => '/admin/',
           _ => null,
         };
         if (allowedPrefix == null || !location.startsWith(allowedPrefix)) {
@@ -114,6 +116,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               '';
           return TwoFactorScreen(email: email);
         },
+      ),
+
+      // ── Admin routes ──
+      GoRoute(
+        path: '/admin/home',
+        builder: (BuildContext context, GoRouterState state) =>
+            const BranchAdminHomeScreen(),
       ),
 
       // ── Teacher routes ──

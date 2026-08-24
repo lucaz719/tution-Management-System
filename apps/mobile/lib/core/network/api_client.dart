@@ -19,12 +19,17 @@ class ApiClient {
   /// The debug default targets the Android emulator. Release builds must
   /// provide an HTTPS endpoint explicitly; a package must never be released
   /// with an emulator URL or clear-text API traffic.
-  static const String _configuredBaseUrl = String.fromEnvironment(
-    'API_BASE_URL',
-    defaultValue: kDebugMode ? 'http://10.0.2.2:3001' : '',
-  );
+  static String get _defaultBaseUrl {
+    if (kIsWeb) return 'http://localhost:3001';
+    return defaultTargetPlatform == TargetPlatform.android
+        ? 'http://10.0.2.2:3001'
+        : 'http://localhost:3001';
+  }
 
-  static String get baseUrl => _configuredBaseUrl;
+  static const String _configuredBaseUrl = String.fromEnvironment('API_BASE_URL');
+
+  static String get baseUrl =>
+      _configuredBaseUrl.isNotEmpty ? _configuredBaseUrl : (kDebugMode ? _defaultBaseUrl : '');
 
   static const String userKey = 'tms_auth_user';
   static const String tenantKey = 'tms_tenant_id';
@@ -36,20 +41,23 @@ class ApiClient {
   Future<void> init() async {
     if (_initialized) return;
 
-    final endpoint = Uri.tryParse(_configuredBaseUrl);
+    final resolvedUrl = baseUrl;
+    final endpoint = Uri.tryParse(resolvedUrl);
     if (endpoint == null || !endpoint.hasScheme || !endpoint.hasAuthority) {
-      throw StateError(
-        'API_BASE_URL must be an absolute URL. Provide it with --dart-define.',
-      );
+      if (!kDebugMode) {
+        throw StateError(
+          'API_BASE_URL must be an absolute URL. Provide it with --dart-define.',
+        );
+      }
     }
-    if (!kDebugMode && endpoint.scheme != 'https') {
+    if (!kDebugMode && endpoint?.scheme != 'https') {
       throw StateError('Release builds require an HTTPS API_BASE_URL.');
     }
 
     dio = Dio(BaseOptions(
-      baseUrl: _configuredBaseUrl,
-      connectTimeout: const Duration(seconds: 15),
-      receiveTimeout: const Duration(seconds: 15),
+      baseUrl: resolvedUrl,
+      connectTimeout: const Duration(seconds: 3),
+      receiveTimeout: const Duration(seconds: 3),
       contentType: 'application/json',
       responseType: ResponseType.json,
     ));

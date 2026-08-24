@@ -42,6 +42,7 @@ class AuthState {
       'TEACHER' => '/teacher/home',
       'STUDENT' => '/student/home',
       'PARENT' => '/parent/home',
+      'BRANCH_ADMIN' || 'TENANT_ADMIN' || 'SUPER_ADMIN' || 'STAFF' => '/admin/home',
       _ => '/login',
     };
   }

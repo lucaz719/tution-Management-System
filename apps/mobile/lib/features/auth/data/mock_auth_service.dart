@@ -1,8 +1,4 @@
-class AuthFailure implements Exception {
-  const AuthFailure(this.message);
-
-  final String message;
-}
+import 'package:tms_mobile/features/auth/data/auth_service.dart';
 
 class AuthResult {
   const AuthResult({
