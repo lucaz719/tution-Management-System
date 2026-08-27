@@ -10,6 +10,8 @@ RUN npm ci
 
 COPY apps/web apps/web
 WORKDIR /app/apps/web
+ARG TMS_API_BASE_URL
+ENV TMS_API_BASE_URL=$TMS_API_BASE_URL
 RUN npm run build
 
 FROM nginx:1.27-alpine

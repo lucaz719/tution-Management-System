@@ -132,7 +132,8 @@ the API and web application.
 
 ```powershell
 Copy-Item .env.docker.example .env
-# Replace BETTER_AUTH_SECRET and POSTGRES_PASSWORD in .env.
+# Replace BETTER_AUTH_SECRET, NEPALPAY_WEBHOOK_SECRET, and POSTGRES_PASSWORD in .env.
+# For a VPS, set TMS_API_BASE_URL, BETTER_AUTH_URL, and WEB_ORIGIN to your HTTPS staging or production URLs before building.
 docker compose up --build -d
 docker compose ps
 ```

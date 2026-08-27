@@ -80,6 +80,8 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        TMS_API_BASE_URL: ${TMS_API_BASE_URL:?TMS_API_BASE_URL must be set}
     restart: unless-stopped
     ports:
       - "${WEB_PORT:-5173}:80"
