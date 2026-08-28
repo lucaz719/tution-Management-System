@@ -583,6 +583,9 @@ router.get(
   '/overview',
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
+    if (!isTenantAdmin(req.user!)) {
+      return res.status(403).json({ error: 'Only the Tenant Admin may view institution-wide fee totals.' });
+    }
     try {
       const invoices = await prisma.invoice.findMany({ where: { tenantId: req.tenantId! } });
       const summary = summarizeInvoices(invoices);

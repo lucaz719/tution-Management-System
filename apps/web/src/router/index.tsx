@@ -8,10 +8,11 @@ import {
   useNavigate,
 } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { DashboardShell } from '../components/patterns/DashboardShell';
 import { findNavigationItem, mapAuthRoleToDashboardRole, type DashboardRole } from '../components/patterns/dashboardNavigation';
-import { SessionTimeoutDialog } from '../components/ui/SessionTimeoutDialog';
 import type { UserRole } from '../features/auth/types';
+
+const DashboardShell = lazy(() => import('../components/patterns/DashboardShell').then((module) => ({ default: module.DashboardShell })));
+const SessionTimeoutDialog = lazy(() => import('../components/ui/SessionTimeoutDialog').then((module) => ({ default: module.SessionTimeoutDialog })));
 
 const LoginPage = lazy(() => import('../pages/auth/LoginPage').then((module) => ({ default: module.LoginPage })));
 const ForgotPasswordPage = lazy(() => import('../pages/auth/ForgotPasswordPage').then((module) => ({ default: module.ForgotPasswordPage })));
@@ -70,7 +71,7 @@ function RequireAuth() {
 
   return (
     <>
-      <SessionTimeoutDialog />
+      <Suspense fallback={null}><SessionTimeoutDialog /></Suspense>
       <Outlet />
     </>
   );
@@ -135,9 +136,11 @@ function AuthenticatedLayout() {
   }
 
   return (
-    <DashboardShell role={dashboardRole}>
-      <Outlet />
-    </DashboardShell>
+    <Suspense fallback={<FullPageSpinner />}>
+      <DashboardShell role={dashboardRole}>
+        <Outlet />
+      </DashboardShell>
+    </Suspense>
   );
 }
 
