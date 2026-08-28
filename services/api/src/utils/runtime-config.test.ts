@@ -55,4 +55,27 @@ assert.throws(
   /SMS_PROVIDER/,
 );
 
+assert.throws(
+  () => validateRuntimeConfig({
+    NODE_ENV: 'production',
+    BETTER_AUTH_SECRET: secureSecret,
+    BETTER_AUTH_URL: 'https://api.example.test',
+    WEB_ORIGIN: 'https://app.example.test',
+    PLATFORM_ADMIN_ENABLED: 'false',
+    SMS_PROVIDER: 'AAKASH',
+    NEPALPAY_WEBHOOK_SECRET: secureSecret,
+  }),
+  /AAKASH_SMS_AUTH_TOKEN/,
+);
+
+assert.doesNotThrow(() => validateRuntimeConfig({
+  NODE_ENV: 'production',
+  BETTER_AUTH_SECRET: secureSecret,
+  BETTER_AUTH_URL: 'https://api.example.test',
+  WEB_ORIGIN: 'https://app.example.test',
+  PLATFORM_ADMIN_ENABLED: 'false',
+  SMS_PROVIDER: 'DISABLED',
+  NEPALPAY_WEBHOOK_SECRET: secureSecret,
+}));
+
 console.log('Runtime configuration tests passed.');

@@ -46,8 +46,15 @@ export function validateRuntimeConfig(env: Environment = process.env): RuntimeCo
     if (env.PLATFORM_ADMIN_ENABLED === 'true') {
       throw new Error('PLATFORM_ADMIN_ENABLED must be false in production.');
     }
-    if (env.SMS_PROVIDER === 'MOCK') {
+    const smsProvider = (env.SMS_PROVIDER || 'MOCK').toUpperCase();
+    if (smsProvider === 'MOCK') {
       throw new Error('SMS_PROVIDER must not be MOCK in production.');
+    }
+    if (!['AAKASH', 'DISABLED'].includes(smsProvider)) {
+      throw new Error('SMS_PROVIDER must be AAKASH or DISABLED in production.');
+    }
+    if (smsProvider === 'AAKASH' && !env.AAKASH_SMS_AUTH_TOKEN?.trim()) {
+      throw new Error('AAKASH_SMS_AUTH_TOKEN is required when SMS_PROVIDER=AAKASH.');
     }
     const webhookSecret = required(env, 'NEPALPAY_WEBHOOK_SECRET');
     if (webhookSecret.length < 32) {

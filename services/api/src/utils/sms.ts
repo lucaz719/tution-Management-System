@@ -37,6 +37,14 @@ export class MockSmsSender implements ISmsSender {
   }
 }
 
+// Explicit production-safe no-delivery adapter. It never reports a simulated
+// message as delivered.
+export class DisabledSmsSender implements ISmsSender {
+  async sendSms(): Promise<{ success: boolean; error: string }> {
+    return { success: false, error: 'SMS delivery is disabled.' };
+  }
+}
+
 // Concrete adapter for Aakash SMS API v3.
 // Docs: POST/GET https://sms.aakashsms.com/sms/v3/send
 // Parameters: auth_token, to, text
@@ -95,11 +103,13 @@ export function getSmsSender(): ISmsSender {
 
   if (provider === 'AAKASH') {
     if (!token) {
-      console.warn('[Aakash SMS] AAKASH_SMS_AUTH_TOKEN is not configured; using mock delivery.');
-      return new MockSmsSender();
+      console.error('[Aakash SMS] AAKASH_SMS_AUTH_TOKEN is not configured; SMS delivery is disabled.');
+      return new DisabledSmsSender();
     }
     return new AakashSmsSender(token);
   }
+
+  if (provider === 'DISABLED') return new DisabledSmsSender();
 
   return new MockSmsSender();
 }
