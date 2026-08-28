@@ -52,7 +52,7 @@ the repository's available plan/features when possible.
 - Route each web service to container port `80` and each API service to `3001`.
 - Keep `SMS_PROVIDER=DISABLED` until Aakash SMS is provisioned. For live SMS,
   use `SMS_PROVIDER=AAKASH` with `AAKASH_SMS_AUTH_TOKEN`.
-- Keep `PLATFORM_ADMIN_ENABLED=false` in both hosted environments.
+- Keep `PLATFORM_ADMIN_ENABLED=false` in both hosted environments after onboarding. The one-time production bootstrap requires both `PLATFORM_ADMIN_ENABLED=true` and `PLATFORM_ADMIN_PRODUCTION_ACK=INITIAL_TENANT_BOOTSTRAP`; clear both immediately after verifying the Tenant Admin login.
 - Take a verified database backup before migrations and production promotion.
 - Configure the connectIPS reconciliation schedule only after UAT is enabled.
 

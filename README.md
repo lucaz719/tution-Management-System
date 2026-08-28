@@ -187,7 +187,7 @@ scheduler.
 
 ## Development provisioning flow
 
-When `PLATFORM_ADMIN_ENABLED=true`, the seeded development Super Admin can provision the initial institution and Tenant Admin. After the Tenant Admin is created:
+When `PLATFORM_ADMIN_ENABLED=true`, the seeded Super Admin can provision the initial institution and Tenant Admin. A production deployment also requires `PLATFORM_ADMIN_PRODUCTION_ACK=INITIAL_TENANT_BOOTSTRAP`. After the Tenant Admin is created:
 
 1. Sign in as Tenant Admin.
 2. Change the temporary password immediately.
@@ -198,9 +198,10 @@ When `PLATFORM_ADMIN_ENABLED=true`, the seeded development Super Admin can provi
 
 ```env
 PLATFORM_ADMIN_ENABLED="false"
+PLATFORM_ADMIN_PRODUCTION_ACK=""
 ```
 
-Restart the API after changing the flag. When disabled, Super Admin sessions and provisioning endpoints are rejected; the Tenant Admin continues to operate normally.
+Restart the API after changing the flags. When disabled, Super Admin sessions and provisioning endpoints are rejected; the Tenant Admin continues to operate normally. The production acknowledgement is intentionally temporary and must be cleared after the initial handoff.
 
 ## Verification commands
 

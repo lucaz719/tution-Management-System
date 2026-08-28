@@ -36,11 +36,22 @@ assert.throws(
     BETTER_AUTH_URL: 'https://api.example.test',
     WEB_ORIGIN: 'https://app.example.test',
     PLATFORM_ADMIN_ENABLED: 'true',
-    SMS_PROVIDER: 'TWILIO',
+    SMS_PROVIDER: 'DISABLED',
     NEPALPAY_WEBHOOK_SECRET: secureSecret,
   }),
-  /PLATFORM_ADMIN_ENABLED/,
+  /PLATFORM_ADMIN_PRODUCTION_ACK/,
 );
+
+assert.doesNotThrow(() => validateRuntimeConfig({
+  NODE_ENV: 'production',
+  BETTER_AUTH_SECRET: secureSecret,
+  BETTER_AUTH_URL: 'https://api.example.test',
+  WEB_ORIGIN: 'https://app.example.test',
+  PLATFORM_ADMIN_ENABLED: 'true',
+  PLATFORM_ADMIN_PRODUCTION_ACK: 'INITIAL_TENANT_BOOTSTRAP',
+  SMS_PROVIDER: 'DISABLED',
+  NEPALPAY_WEBHOOK_SECRET: secureSecret,
+}));
 
 assert.throws(
   () => validateRuntimeConfig({
