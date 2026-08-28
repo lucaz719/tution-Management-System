@@ -6,6 +6,8 @@ export interface RuntimeConfig {
   webOrigin: string;
 }
 
+export const PRODUCTION_BOOTSTRAP_ACK = 'INITIAL_TENANT_BOOTSTRAP';
+
 function required(env: Environment, name: string): string {
   const value = env[name]?.trim();
   if (!value) {
@@ -43,8 +45,10 @@ export function validateRuntimeConfig(env: Environment = process.env): RuntimeCo
   const webOrigin = validateUrl(required(env, 'WEB_ORIGIN'), 'WEB_ORIGIN', isProduction);
 
   if (isProduction) {
-    if (env.PLATFORM_ADMIN_ENABLED === 'true') {
-      throw new Error('PLATFORM_ADMIN_ENABLED must be false in production.');
+    if (env.PLATFORM_ADMIN_ENABLED === 'true' && env.PLATFORM_ADMIN_PRODUCTION_ACK !== PRODUCTION_BOOTSTRAP_ACK) {
+      throw new Error(
+        `PLATFORM_ADMIN_PRODUCTION_ACK must equal ${PRODUCTION_BOOTSTRAP_ACK} when enabling platform administration in production.`,
+      );
     }
     const smsProvider = (env.SMS_PROVIDER || 'MOCK').toUpperCase();
     if (smsProvider === 'MOCK') {
