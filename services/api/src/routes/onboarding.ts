@@ -363,60 +363,6 @@ router.get(
   }
 );
 
-// 4. Smart admin dashboard (Admin only)
-router.get(
-  '/dashboard',
-  authMiddleware,
-  async (req: TenantRequest, res: Response) => {
-    try {
-      const studentCount = await prisma.student.count({
-        where: { user: { tenantId: req.tenantId! } },
-      });
-      const teacherCount = await prisma.userRole.count({
-        where: {
-          user: { tenantId: req.tenantId! },
-          role: { name: 'Teacher' },
-        },
-      });
-      const overdueInvoices = await prisma.invoice.findMany({
-        where: { tenantId: req.tenantId!, status: 'OVERDUE' },
-      });
-      const overdueAmount = overdueInvoices.reduce((sum: number, inv: any) => sum + Number(inv.netPayable), 0);
-      const pendingLeaves = await prisma.leave.count({
-        where: { tenantId: req.tenantId!, status: 'PENDING' },
-      });
-
-      // Per-branch summary: students are linked to branches through their UserRole scope.
-      const branches = await prisma.branch.findMany({
-        where: { tenantId: req.tenantId! },
-        orderBy: { createdAt: 'asc' },
-      });
-      const branchSummary = await Promise.all(
-        branches.map(async (branch) => ({
-          branchId: branch.id,
-          branchName: branch.name,
-          activeStudents: await prisma.userRole.count({
-            where: { branchId: branch.id, role: { name: 'Student' } },
-          }),
-          staffRoles: await prisma.userRole.count({
-            where: { branchId: branch.id, role: { name: { not: 'Student' } } },
-          }),
-        }))
-      );
-
-      return res.status(200).json({
-        activeStudentsCount: studentCount,
-        activeTeachersCount: teacherCount,
-        totalOverdueAmountNpr: overdueAmount,
-        pendingLeaveRequestsCount: pendingLeaves,
-        branchSummary,
-      });
-    } catch (error: any) {
-      return res.status(500).json({ error: 'Failed to retrieve dashboard summaries.', details: error.message });
-    }
-  }
-);
-
 // 5. Digital Student ID Card Info
 router.get(
   '/student-id/:studentId',

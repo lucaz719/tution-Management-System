@@ -347,7 +347,7 @@ export const api = {
         totalOverdueAmountNpr: number;
         pendingLeaveRequestsCount: number;
         branchSummary: Array<{ branchId: string; branchName: string; activeStudents: number; staffRoles: number }>;
-      }>('/onboarding/dashboard');
+      }>('/tenant-admin/dashboard');
     },
     getDocumentAlerts: async () => request<{ expiringDocs: any[] }>('/hr/documents/alerts'),
     listCalendarEvents: async () => request<{ events: any[] }>('/academic-events'),

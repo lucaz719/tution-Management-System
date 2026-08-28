@@ -372,6 +372,13 @@ async function main(): Promise<void> {
     assert.equal(response.status, 403,
       'branch-scoped finance roles must use their scoped workspace, not tenant-wide totals');
 
+    response = await request('GET', '/api/tenant-admin/dashboard', adminACookie);
+    assert.equal(response.status, 200,
+      'Tenant Admin dashboard must remain mounted when platform administration is disabled');
+    assert.deepEqual(response.body.branchSummary.map((branch: any) => branch.branchId), [branchA.id]);
+    response = await request('GET', '/api/tenant-admin/dashboard', branchAdminCookie);
+    assert.equal(response.status, 403, 'Branch Admin must not receive institution-wide dashboard summaries');
+
     response = await request('POST', '/api/branches', adminACookie, {
       tenantId: tenantB.id,
       name: 'Created Safely',
