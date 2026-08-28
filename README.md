@@ -265,6 +265,8 @@ Production requirements:
 
 ## Documentation
 
+- [Staging-first deployment workflow](docs/DEPLOYMENT_WORKFLOW.md) — branch
+  protection, Coolify environment isolation, promotion, and rollback procedure.
 - [Operational working memory and current project status](.memory) — read this
   first before development and update it in the same change set when current
   state, validation, known gaps, or next work changes.
