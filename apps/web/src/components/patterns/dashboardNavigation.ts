@@ -21,13 +21,8 @@ const ROLE_LABELS: Record<DashboardRole, string> = {
 
 export const DASHBOARD_NAVIGATION: Record<DashboardRole, DashboardNavItem[]> = {
   'super-admin': [
-    { section: 'Platform', label: 'Overview', icon: 'space_dashboard', path: '/platform/overview' },
-    { section: 'Platform', label: 'Tenants', icon: 'domain', path: '/platform/tenants' },
-    { section: 'Operations', label: 'Onboarding', icon: 'playlist_add_check', path: '/platform/onboarding' },
-    { section: 'Operations', label: 'Support Access', icon: 'support_agent', path: '/platform/support' },
-    { section: 'Governance', label: 'Policy Defaults', icon: 'tune', path: '/platform/policies' },
-    { section: 'Governance', label: 'Billing', icon: 'receipt_long', path: '/platform/billing' },
-    { section: 'Security', label: 'Audit Log', icon: 'policy', path: '/platform/audit' },
+    { section: 'Bootstrap', label: 'Create Tenant Admin', icon: 'person_add', path: '/platform/overview' },
+    { section: 'Bootstrap', label: 'Created Tenants', icon: 'domain', path: '/platform/tenants' },
     { section: 'Security', label: 'Security', icon: 'security', path: '/platform/security' },
   ],
   'tenant-admin': [

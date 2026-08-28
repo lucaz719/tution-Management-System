@@ -11,6 +11,10 @@ export async function authMiddleware(req: TenantRequest, res: Response, next: Ne
 
     if (session && session.user) {
       const user = session.user as any;
+      const isSuperAdmin = Array.isArray(user.roles) && user.roles.some((role: any) => role.roleName === 'Super Admin');
+      if (isSuperAdmin && process.env.PLATFORM_ADMIN_ENABLED !== 'true') {
+        return res.status(403).json({ error: 'Platform administration is disabled in this deployment.' });
+      }
       if (user.status && user.status !== 'ACTIVE') {
         return res.status(403).json({ error: 'Account is not active.' });
       }
@@ -46,7 +50,7 @@ export function hasPermission(requiredPermission: string) {
 
     // 1. Super Admin global bypass
     const isSuperAdmin = user.roles.some(r => r.roleName === 'Super Admin');
-    if (isSuperAdmin) {
+    if (isSuperAdmin && process.env.PLATFORM_ADMIN_ENABLED === 'true') {
       return next();
     }
 

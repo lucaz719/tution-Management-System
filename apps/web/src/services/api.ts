@@ -594,6 +594,33 @@ export const api = {
 
   // Onboarding & tenant provisioning (Super Admin)
   onboarding: {
+    provisionTenant: async (payload: {
+      institutionName: string;
+      panNumber: string;
+      adminFirstName: string;
+      adminLastName: string;
+      adminEmail: string;
+      adminPhone: string;
+      branchName: string;
+      branchAddress: string;
+      latitude?: number;
+      longitude?: number;
+    }) => {
+      return request<{
+        message: string;
+        provisioned: {
+          tenantId: string;
+          tenantName: string;
+          primaryAdminUser: string;
+          primaryAdminName: string;
+          defaultBranch: string;
+          temporaryPassword: string;
+        };
+      }>('/onboarding/provision', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    },
     getRequests: async () => {
       const data = await request<{ requests: any[] }>('/onboarding/requests');
       return data.requests ?? [];

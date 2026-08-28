@@ -200,7 +200,7 @@ When `PLATFORM_ADMIN_ENABLED=true`, the seeded development Super Admin can provi
 PLATFORM_ADMIN_ENABLED="false"
 ```
 
-Restart the API after changing the flag. Production must not mount or compile a client-facing Super Admin surface.
+Restart the API after changing the flag. When disabled, Super Admin sessions and provisioning endpoints are rejected; the Tenant Admin continues to operate normally.
 
 ## Verification commands
 

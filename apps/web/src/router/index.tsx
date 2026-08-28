@@ -248,12 +248,12 @@ const router = createBrowserRouter([
           {
             element: <RequireRole allowedRoles={['SUPER_ADMIN']} />,
             children: [
-              { path: '/platform/overview', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard view="overview" /></Suspense> },
-              { path: '/platform/onboarding', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard view="onboarding" /></Suspense> },
-              { path: '/platform/support', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard view="support" /></Suspense> },
-              { path: '/platform/policies', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard view="policies" /></Suspense> },
-              { path: '/platform/billing', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard view="billing" /></Suspense> },
-              { path: '/platform/audit', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard view="audit" /></Suspense> },
+              { path: '/platform/overview', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard /></Suspense> },
+              { path: '/platform/onboarding', element: <Navigate to="/platform/overview" replace /> },
+              { path: '/platform/support', element: <Navigate to="/platform/overview" replace /> },
+              { path: '/platform/policies', element: <Navigate to="/platform/overview" replace /> },
+              { path: '/platform/billing', element: <Navigate to="/platform/overview" replace /> },
+              { path: '/platform/audit', element: <Navigate to="/platform/overview" replace /> },
               { path: '/platform/tenants', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminTenants /></Suspense> },
               { path: '/platform/security', element: <Suspense fallback={<FullPageSpinner />}><SecurityPage /></Suspense> },
             ],
