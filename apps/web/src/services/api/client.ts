@@ -37,6 +37,7 @@ function safeBaseUrl(value: string): string {
 }
 
 export const API_BASE_URL = safeBaseUrl(__TMS_API_BASE_URL__);
+export const API_ORIGIN = new URL(API_BASE_URL).origin;
 
 export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);

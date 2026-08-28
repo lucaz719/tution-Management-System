@@ -86,6 +86,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
     try {
       const result = await authClient.signIn.email({ email: email.trim().toLowerCase(), password, dontNavigate: true } as any);
+      if (result.error) {
+        const authError = result.error as { status?: number; code?: string; message?: string };
+        if (
+          authError.status === 0
+          || authError.code === 'FETCH_ERROR'
+          || /failed to fetch|network|unable to connect/i.test(authError.message || '')
+        ) {
+          throw new AuthFlowError(
+            'SERVICE_UNAVAILABLE',
+            'Unable to reach the TMS service. Check your connection and try again.',
+          );
+        }
+        throw new AuthFlowError('INVALID_CREDENTIALS', 'Invalid email or password.');
+      }
       if ((result?.data as any)?.twoFactorRedirect) {
         const otpResult = await authClient.twoFactor.sendOtp();
         if (otpResult.error) {
@@ -115,13 +129,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAttemptCount(0);
 
     } catch (error) {
+      if (error instanceof AuthFlowError && error.code !== 'INVALID_CREDENTIALS') throw error;
+
+      if (!(error instanceof AuthFlowError)) {
+        throw new AuthFlowError(
+          'SERVICE_UNAVAILABLE',
+          'Unable to reach the TMS service. Check your connection and try again.',
+        );
+      }
+
       const nextAttemptCount = attemptCount + 1;
       setAttemptCount(nextAttemptCount);
       if (nextAttemptCount >= 5) {
         throw new AuthFlowError('ACCOUNT_LOCKED', 'Your account has been locked after 5 failed attempts.');
       }
-      if (error instanceof AuthFlowError) throw error;
-      throw new AuthFlowError('INVALID_CREDENTIALS', 'Invalid email or password.');
+      throw error;
     } finally {
       setIsLoading(false);
     }

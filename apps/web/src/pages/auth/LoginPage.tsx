@@ -99,6 +99,8 @@ export function LoginPage() {
     } catch (error) {
       if (error instanceof AuthFlowError && error.code === 'ACCOUNT_LOCKED') {
         setLockDialogOpen(true);
+      } else if (error instanceof AuthFlowError && error.code === 'SERVICE_UNAVAILABLE') {
+        showToast(error.message, 'error', 5000);
       } else {
         const nextRemainingAttempts = Math.max(0, 4 - attemptCount);
         showToast(

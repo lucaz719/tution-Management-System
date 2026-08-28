@@ -28,6 +28,19 @@ Worktree at reconciliation: deployment-hardening changes in progress
 - Production secrets disclosed during setup must be rotated. PostgreSQL
   rotation must also update the initialized database role (or safely replace
   the empty new volume), not only the Coolify environment value.
+- The production login connectivity defect was traced to the Better Auth web
+  client reading `VITE_API_ORIGIN` even though the web app uses Webpack. Hosted
+  builds therefore fell back to the visitor's `http://localhost:3001` while
+  ordinary API calls correctly used `TMS_API_BASE_URL`. The auth client now
+  derives its origin from the same injected API URL, CI rejects localhost URLs
+  in the production bundle, and login distinguishes service connectivity
+  failures from invalid credentials without consuming a credential attempt.
+- API CORS already allows the single configured `WEB_ORIGIN` with credentials,
+  Better Auth already uses that origin as `trustedOrigins`, and auth fetches
+  already use `credentials: include`. The API-host-only session cookie is the
+  correct scope: both HTTPS subdomains are same-site, and the web host does not
+  need access to the HTTP-only API cookie. No nginx API proxy or shared parent-
+  domain cookie is required.
 
 ## Reconciliation notes (2026-08-18)
 
