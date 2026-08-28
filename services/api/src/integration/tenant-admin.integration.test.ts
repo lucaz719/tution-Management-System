@@ -356,6 +356,22 @@ async function main(): Promise<void> {
     assert.deepEqual(response.body.branches.map((branch: any) => branch.id), [branchA.id],
       'client-controlled tenant headers must not change scope');
 
+    response = await request('GET', '/api/branches', branchAdminCookie);
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.branches.map((branch: any) => branch.id), [branchA.id],
+      'Branch Admin branch listings must be derived from assigned branch roles');
+
+    response = await request('GET', '/api/branches', accountantCookie);
+    assert.equal(response.status, 403,
+      'non-admin roles must not receive the branch-management projection or geofence configuration');
+
+    response = await request('GET', '/api/finances/overview', branchAdminCookie);
+    assert.equal(response.status, 403,
+      'Branch Admin must not receive institution-wide finance totals');
+    response = await request('GET', '/api/finances/overview', accountantCookie);
+    assert.equal(response.status, 403,
+      'branch-scoped finance roles must use their scoped workspace, not tenant-wide totals');
+
     response = await request('POST', '/api/branches', adminACookie, {
       tenantId: tenantB.id,
       name: 'Created Safely',
@@ -509,6 +525,16 @@ async function main(): Promise<void> {
       signIn(studentCredentials.email, studentCredentials.temporaryPassword),
       signIn(parentCredentials.email, parentCredentials.temporaryPassword),
     ]);
+
+    response = await request('GET', '/api/branches', studentCookie);
+    assert.equal(response.status, 403, 'Students must not enumerate branch-management metadata');
+    response = await request('GET', '/api/branches', parentCookie);
+    assert.equal(response.status, 403, 'Parents must not enumerate branch-management metadata');
+    response = await request('GET', '/api/finances/overview', studentCookie);
+    assert.equal(response.status, 403, 'Students must not receive institution-wide finance totals');
+    response = await request('GET', '/api/finances/overview', parentCookie);
+    assert.equal(response.status, 403, 'Parents must not receive institution-wide finance totals');
+
     const activatedStudent = await prisma.student.findUniqueOrThrow({
       where: { id: admissionStudentId },
       include: { user: true, studentParents: { include: { parent: { include: { user: true } } } } },

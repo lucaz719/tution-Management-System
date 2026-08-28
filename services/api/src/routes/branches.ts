@@ -2,17 +2,29 @@ import { Router, Response } from 'express';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
+import { isTenantAdmin, managedBranchIds } from '../utils/access-control';
 
 const router = Router();
 
 // All branch operations are tenant-scoped: the tenant comes from the caller's
 // verified session, so client-controlled tenant headers cannot cross boundaries.
 
-// List branches for the current tenant
+// List only the branches the authenticated administrator is allowed to manage.
+// Lower-privilege roles must use their role-specific/self-service contracts;
+// this management projection includes attendance geofence configuration.
 router.get('/', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const tenantWide = isTenantAdmin(req.user!);
+  const branchIds = managedBranchIds(req.user!);
+  if (!tenantWide && branchIds.length === 0) {
+    return res.status(403).json({ error: 'Only Tenant Admins and assigned Branch Admins may list branches.' });
+  }
+
   try {
     const branches = await prisma.branch.findMany({
-      where: { tenantId: req.tenantId! },
+      where: {
+        tenantId: req.tenantId!,
+        ...(tenantWide ? {} : { id: { in: branchIds } }),
+      },
       orderBy: { createdAt: 'asc' },
       include: {
         _count: { select: { userRoles: true, courses: true } },
