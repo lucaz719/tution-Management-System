@@ -8,8 +8,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-tms}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+    expose:
+      - "5432"
     volumes:
       - tms_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -44,6 +44,7 @@ services:
       WEB_ORIGIN: ${WEB_ORIGIN:?WEB_ORIGIN must be set}
       PLATFORM_ADMIN_ENABLED: ${PLATFORM_ADMIN_ENABLED:-false}
       SMS_PROVIDER: ${SMS_PROVIDER:-MOCK}
+      AAKASH_SMS_AUTH_TOKEN: ${AAKASH_SMS_AUTH_TOKEN:-}
       NEPALPAY_WEBHOOK_SECRET: ${NEPALPAY_WEBHOOK_SECRET:?NEPALPAY_WEBHOOK_SECRET must be set}
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
@@ -57,8 +58,8 @@ services:
       CONNECTIPS_VALIDATE_PASSWORD: ${CONNECTIPS_VALIDATE_PASSWORD:-}
       CONNECTIPS_GATEWAY_URL: ${CONNECTIPS_GATEWAY_URL:-https://uat.connectips.com/connectipswebgw/loginpage}
       CONNECTIPS_VALIDATE_URL: ${CONNECTIPS_VALIDATE_URL:-https://uat.connectips.com/connectipswebws/api/creditor/validatetxn}
-    ports:
-      - "${API_PORT:-3001}:3001"
+    expose:
+      - "3001"
     depends_on:
       db:
         condition: service_healthy
@@ -75,6 +76,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 10s
 
   web:
     build:
@@ -83,8 +85,8 @@ services:
       args:
         TMS_API_BASE_URL: ${TMS_API_BASE_URL:?TMS_API_BASE_URL must be set}
     restart: unless-stopped
-    ports:
-      - "${WEB_PORT:-5173}:80"
+    expose:
+      - "80"
     depends_on:
       api:
         condition: service_healthy

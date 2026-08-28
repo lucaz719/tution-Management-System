@@ -1,0 +1,12 @@
+services:
+  db:
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+
+  api:
+    ports:
+      - "${API_PORT:-3001}:3001"
+
+  web:
+    ports:
+      - "${WEB_PORT:-5173}:80"
