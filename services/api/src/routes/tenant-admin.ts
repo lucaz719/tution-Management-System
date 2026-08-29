@@ -3,6 +3,7 @@ import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware } from '../middleware/auth';
 import { isTenantAdmin } from '../utils/access-control';
+import { isInvoiceOverdue } from '../utils/billing-rules';
 
 const router = Router();
 
@@ -24,8 +25,8 @@ router.get('/dashboard', authMiddleware, async (req: TenantRequest, res: Respons
         },
       }),
       prisma.invoice.findMany({
-        where: { tenantId: req.tenantId!, status: 'OVERDUE' },
-        select: { netPayable: true },
+        where: { tenantId: req.tenantId!, status: { in: ['UNPAID', 'OVERDUE'] } },
+        select: { netPayable: true, status: true, dueDate: true },
       }),
       prisma.leave.count({ where: { tenantId: req.tenantId!, status: 'PENDING' } }),
       prisma.branch.findMany({
@@ -62,7 +63,9 @@ router.get('/dashboard', authMiddleware, async (req: TenantRequest, res: Respons
     return res.json({
       activeStudentsCount: studentCount,
       activeTeachersCount: teacherCount,
-      totalOverdueAmountNpr: overdueInvoices.reduce((sum, invoice) => sum + Number(invoice.netPayable), 0),
+      totalOverdueAmountNpr: overdueInvoices
+        .filter((invoice) => isInvoiceOverdue(invoice.status, invoice.dueDate))
+        .reduce((sum, invoice) => sum + Number(invoice.netPayable), 0),
       pendingLeaveRequestsCount: pendingLeaves,
       branchSummary,
     });

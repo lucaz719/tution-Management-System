@@ -11,3 +11,11 @@ export function recurringInvoiceType(
 export function canReleaseAdmissionLogins(admissionStatus: string, invoiceStatus: string | undefined): boolean {
   return admissionStatus === 'READY_FOR_LOGIN' && invoiceStatus === 'PAID';
 }
+
+export function isInvoiceOverdue(
+  status: string,
+  dueDate: Date | string,
+  now: Date = new Date(),
+): boolean {
+  return status === 'OVERDUE' || (status === 'UNPAID' && new Date(dueDate).getTime() < now.getTime());
+}

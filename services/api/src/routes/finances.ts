@@ -7,7 +7,7 @@ import { MockSmsSender } from '../utils/notifications';
 import { getBillingPeriod } from '../utils/nepali';
 import { canApprovePettyCashL1, canReleasePettyCash, hasBranchPermission, isTenantAdmin } from '../utils/access-control';
 import crypto from 'node:crypto';
-import { recurringInvoiceType } from '../utils/billing-rules';
+import { isInvoiceOverdue, recurringInvoiceType } from '../utils/billing-rules';
 import { createConnectIpsForm, validateAndConfirmConnectIps } from '../utils/connectips';
 import { parsePlainRecord, parseStrictKeys, parseStrictObject, readBoolean, readFiniteNumber, readTrimmedString } from '../utils/request-validation';
 import { activateAdmissionAndSendLogins } from '../utils/admission-logins';
@@ -210,7 +210,7 @@ const num = (v: any) => Number(v ?? 0);
 
 // An invoice counts as overdue if explicitly OVERDUE, or unpaid past its due date.
 function invoiceOverdue(inv: { status: string; dueDate: Date }): boolean {
-  return inv.status === 'OVERDUE' || (inv.status === 'UNPAID' && new Date(inv.dueDate) < new Date());
+  return isInvoiceOverdue(inv.status, inv.dueDate);
 }
 
 interface FeeSummary {
@@ -704,7 +704,13 @@ router.post(
       },
     });
     if (!input.success) return res.status(400).json({ error: input.error });
-    const transactionId = input.data.transactionId || 'CASH';
+    // The UI sends the generic label "CASH" for manual collection. Invoice
+    // references are unique in the ledger, so turn that label into a unique
+    // receipt reference instead of reusing the same value for every payment.
+    const requestedReference = input.data.transactionId;
+    const transactionId = !requestedReference || requestedReference.toUpperCase() === 'CASH'
+      ? `CASH-${crypto.randomUUID()}`
+      : requestedReference;
     try {
       const invoice = await prisma.invoice.findUnique({
         where: { id },
@@ -754,10 +760,13 @@ router.post(
             ? 'Payment recorded. Student and parent login IDs were sent by SMS.'
             : 'Payment recorded, but login SMS delivery failed. Retry from Admissions.'
           : 'Payment recorded.',
-        invoice: { id: updated.id, status: updated.status, paymentDate: updated.paymentDate },
+        invoice: { id: updated.id, status: updated.status, paymentDate: updated.paymentDate, transactionId: updated.transactionId },
         loginDelivery,
       });
     } catch (error: any) {
+      if (error?.code === 'P2002') {
+        return res.status(409).json({ error: 'That payment reference has already been used. Try marking the invoice as paid again.' });
+      }
       return res.status(500).json({ error: 'Failed to record payment.', details: error.message });
     }
   }
