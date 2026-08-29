@@ -248,6 +248,7 @@ export const api = {
     getStudentInvoices: async (studentId: string) => {
       return request<{
         admissionStatus: 'PENDING_PAYMENT' | 'READY_FOR_LOGIN' | 'ACTIVE';
+        loginDeliveries: Array<{ recipient: 'STUDENT' | 'PARENT'; status: 'PENDING' | 'SENT' | 'FAILED'; failureReason: string | null; attemptCount: number; lastAttemptAt: string | null; sentAt: string | null }>;
         invoices: Array<{ id: string; invoiceType: string; netPayable: number; status: string; overdue: boolean; dueDate: string; billingCycleStart: string; billingCycleEnd: string; paymentDate: string | null }>;
       }>(`/finances/students/${studentId}/invoices`);
     },
@@ -255,7 +256,7 @@ export const api = {
       return request<{
         message: string;
         invoice: { id: string; status: string; paymentDate: string | null; transactionId: string | null };
-        loginDelivery: { delivered: boolean; studentPhone: string; parentPhone: string; failures: string[] } | null;
+        loginDelivery: { delivered: boolean; studentPhone: string; parentPhone: string; failures: string[]; recipients: Array<{ recipient: 'STUDENT' | 'PARENT'; status: 'SENT' | 'FAILED'; sentAt: string | null; error: string | null }> } | null;
       }>(`/finances/invoices/${invoiceId}/pay`, {
         method: 'POST',
         body: JSON.stringify({ transactionId }),
@@ -387,7 +388,7 @@ export const api = {
       return request<{ temporaryPassword: string }>(`/users/${userId}/reset-password`, { method: 'POST' });
     },
     issueAdmissionLogins: async (studentId: string) => {
-      return request<{ message: string; delivery: { delivered: boolean; studentPhone: string; parentPhone: string; failures: string[] } }>(`/users/admissions/${studentId}/issue-logins`, { method: 'POST' });
+      return request<{ message: string; delivery: { delivered: boolean; studentPhone: string; parentPhone: string; failures: string[]; recipients: Array<{ recipient: 'STUDENT' | 'PARENT'; status: 'SENT' | 'FAILED'; sentAt: string | null; error: string | null }> } }>(`/users/admissions/${studentId}/issue-logins`, { method: 'POST' });
     },
     getAnalytics: async (userId: string) => {
       return request<{

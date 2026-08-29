@@ -664,12 +664,28 @@ router.get(
     try {
       const student = await loadStudentBillingAccess(req, req.params.studentId);
       if (!student) return res.status(404).json({ error: 'Student fee record not found or unavailable.' });
-      const invoices = await prisma.invoice.findMany({
-        where: { studentId: student.id, tenantId: req.tenantId! },
-        orderBy: { dueDate: 'desc' },
-      });
+      const [invoices, loginDeliveries] = await Promise.all([
+        prisma.invoice.findMany({
+          where: { studentId: student.id, tenantId: req.tenantId! },
+          orderBy: { dueDate: 'desc' },
+        }),
+        prisma.$queryRaw<Array<{
+          recipient: 'STUDENT' | 'PARENT';
+          status: 'PENDING' | 'SENT' | 'FAILED';
+          failureReason: string | null;
+          attemptCount: number;
+          lastAttemptAt: Date | null;
+          sentAt: Date | null;
+        }>>`
+          SELECT "recipient", "status", "failureReason", "attemptCount", "lastAttemptAt", "sentAt"
+          FROM "AdmissionLoginDelivery"
+          WHERE "tenantId" = ${req.tenantId!} AND "studentId" = ${student.id}
+          ORDER BY "recipient" ASC
+        `,
+      ]);
       return res.json({
         admissionStatus: student.admissionStatus,
+        loginDeliveries,
         invoices: invoices.map((i) => ({
           id: i.id,
           invoiceType: i.invoiceType,

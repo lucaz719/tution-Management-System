@@ -41,6 +41,15 @@ interface Invoice {
   paymentDate: string | null;
 }
 
+interface LoginDelivery {
+  recipient: 'STUDENT' | 'PARENT';
+  status: 'PENDING' | 'SENT' | 'FAILED';
+  failureReason: string | null;
+  attemptCount: number;
+  lastAttemptAt: string | null;
+  sentAt: string | null;
+}
+
 function money(n: number): string {
   return `NPR ${n.toLocaleString()}`;
 }
@@ -62,6 +71,7 @@ export function AcademicFees() {
   const [payingId, setPayingId] = useState('');
   const [paymentNotice, setPaymentNotice] = useState<{ message: string; delivered: boolean | null } | null>(null);
   const [admissionStatus, setAdmissionStatus] = useState<'PENDING_PAYMENT' | 'READY_FOR_LOGIN' | 'ACTIVE' | null>(null);
+  const [loginDeliveries, setLoginDeliveries] = useState<LoginDelivery[]>([]);
   const [isRetryingDelivery, setIsRetryingDelivery] = useState(false);
   const [qrModal, setQrModal] = useState<{ id: string; studentName: string; amount: number; month: string } | null>(null);
 
@@ -101,6 +111,7 @@ export function AcademicFees() {
     setBillingProfile(null);
     setPaymentNotice(null);
     setAdmissionStatus(null);
+    setLoginDeliveries([]);
     try {
       const [invoiceData, ledger] = await Promise.all([
         api.finances.getStudentInvoices(student.studentId),
@@ -108,8 +119,17 @@ export function AcademicFees() {
       ]);
       setInvoices(invoiceData.invoices as Invoice[]);
       setAdmissionStatus(invoiceData.admissionStatus);
+      setLoginDeliveries(invoiceData.loginDeliveries);
       if (invoiceData.admissionStatus === 'READY_FOR_LOGIN') {
-        setPaymentNotice({ message: 'Admission payment is recorded, but login SMS delivery is still pending.', delivered: false });
+        const sent = invoiceData.loginDeliveries.filter((item) => item.status === 'SENT').map((item) => item.recipient.toLowerCase());
+        const failed = invoiceData.loginDeliveries.filter((item) => item.status === 'FAILED');
+        const detail = [
+          ...(sent.length ? [`${sent.join(' and ')} SMS sent.`] : []),
+          ...failed.map((item) => `${item.recipient.toLowerCase()} SMS failed${item.failureReason ? `: ${item.failureReason}` : '.'}`),
+        ].join(' ');
+        setPaymentNotice({ message: detail || 'Admission payment is recorded, but login SMS delivery is still pending.', delivered: false });
+      } else if (invoiceData.admissionStatus === 'ACTIVE' && invoiceData.loginDeliveries.some((item) => item.status === 'SENT')) {
+        setPaymentNotice({ message: 'Admission activated. Student and parent login SMS notifications are recorded as sent.', delivered: true });
       }
       setBillingProfile(ledger.students.find((item) => item.studentId === student.studentId) ?? null);
     } catch (error: unknown) {
@@ -130,6 +150,7 @@ export function AcademicFees() {
         const invoiceData = await api.finances.getStudentInvoices(payStudent.studentId);
         setInvoices(invoiceData.invoices as Invoice[]);
         setAdmissionStatus(invoiceData.admissionStatus);
+        setLoginDeliveries(invoiceData.loginDeliveries);
       }
       await loadData();
     } catch (error: unknown) {
@@ -146,11 +167,24 @@ export function AcademicFees() {
       const result = await api.people.issueAdmissionLogins(payStudent.studentId);
       setPaymentNotice({ message: result.message, delivered: true });
       setAdmissionStatus('ACTIVE');
+      setLoginDeliveries(result.delivery.recipients.map((item) => ({
+        recipient: item.recipient,
+        status: item.status,
+        failureReason: item.error,
+        attemptCount: 1,
+        lastAttemptAt: item.sentAt,
+        sentAt: item.sentAt,
+      })));
       showToast(result.message, 'success');
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Login SMS delivery failed again.';
       setPaymentNotice({ message, delivered: false });
       showToast(message, 'error');
+      const invoiceData = await api.finances.getStudentInvoices(payStudent.studentId).catch(() => null);
+      if (invoiceData) {
+        setAdmissionStatus(invoiceData.admissionStatus);
+        setLoginDeliveries(invoiceData.loginDeliveries);
+      }
     } finally {
       setIsRetryingDelivery(false);
     }
@@ -302,8 +336,27 @@ export function AcademicFees() {
                   {paymentNotice.message}
                   {paymentNotice.delivered === false ? (
                     <p style={{ marginTop: '6px', color: 'var(--text-muted)', fontWeight: 500 }}>
-                      Payment is saved, but credentials were not delivered. Confirm the Aakash SMS configuration, then retry below.
+                      Payment is saved. Review each recipient below and retry any notification that failed.
                     </p>
+                  ) : null}
+                  {loginDeliveries.length ? (
+                    <div style={{ display: 'grid', gap: '8px', marginTop: '10px' }} aria-label="Login SMS notification log">
+                      {loginDeliveries.map((delivery) => (
+                        <div key={delivery.recipient} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', paddingTop: '8px', borderTop: '1px solid var(--border)' }}>
+                          <span style={{ minWidth: 0, fontWeight: 600 }}>
+                            {delivery.recipient === 'STUDENT' ? 'Student login SMS' : 'Parent login SMS'}
+                            {delivery.status === 'FAILED' && delivery.failureReason ? (
+                              <small style={{ display: 'block', marginTop: '2px', color: 'var(--text-muted)', fontWeight: 500 }}>{delivery.failureReason}</small>
+                            ) : delivery.sentAt ? (
+                              <small style={{ display: 'block', marginTop: '2px', color: 'var(--text-muted)', fontWeight: 500 }}>Sent {new Date(delivery.sentAt).toLocaleString('en-NP')}</small>
+                            ) : null}
+                          </span>
+                          <StatusBadge variant={delivery.status === 'SENT' ? 'success' : delivery.status === 'FAILED' ? 'error' : 'warning'}>
+                            {delivery.status === 'SENT' ? 'Sent' : delivery.status === 'FAILED' ? 'Failed' : 'Pending'}
+                          </StatusBadge>
+                        </div>
+                      ))}
+                    </div>
                   ) : null}
                   {paymentNotice.delivered === false && admissionStatus === 'READY_FOR_LOGIN' ? (
                     <Button
