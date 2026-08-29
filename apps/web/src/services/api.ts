@@ -387,7 +387,7 @@ export const api = {
       return request<{ temporaryPassword: string }>(`/users/${userId}/reset-password`, { method: 'POST' });
     },
     issueAdmissionLogins: async (studentId: string) => {
-      return request<{ message: string; delivery: { delivered: boolean; studentPhone: string; parentPhone: string } }>(`/users/admissions/${studentId}/issue-logins`, { method: 'POST' });
+      return request<{ message: string; delivery: { delivered: boolean; studentPhone: string; parentPhone: string; failures: string[] } }>(`/users/admissions/${studentId}/issue-logins`, { method: 'POST' });
     },
     getAnalytics: async (userId: string) => {
       return request<{

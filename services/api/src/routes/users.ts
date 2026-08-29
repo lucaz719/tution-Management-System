@@ -353,7 +353,10 @@ router.post('/admissions/:studentId/issue-logins', authMiddleware, async (req: T
   try {
     const delivery = await activateAdmissionAndSendLogins(req.tenantId!, student.id);
     if (!delivery.delivered) {
-      return res.status(502).json({
+      // This is an expected external-provider rejection, not an unexpected
+      // server fault. A 4xx dependency status preserves the safe provider
+      // reason; the API security boundary intentionally redacts all 5xx bodies.
+      return res.status(424).json({
         error: `SMS delivery failed. ${delivery.failures.join(' ') || 'Check both phone numbers and retry.'}`,
         delivery,
       });
