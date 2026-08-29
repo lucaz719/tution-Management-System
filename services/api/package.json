@@ -14,6 +14,7 @@
     "db:seed": "prisma db seed",
     "test:access": "ts-node src/utils/access-control.test.ts",
     "test:billing": "ts-node src/utils/billing-rules.test.ts",
+    "test:sms": "ts-node src/utils/sms.test.ts",
     "test:connectips": "ts-node src/utils/connectips.test.ts",
     "test:connectips-reconciliation": "ts-node src/utils/connectips-reconciliation.test.ts",
     "connectips:reconcile": "npm run build && node dist/scripts/reconcile-connectips.js",

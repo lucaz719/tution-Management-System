@@ -50,6 +50,10 @@ export async function activateAdmissionAndSendLogins(tenantId: string, studentId
     smsSender.sendSms(parentUser.phone, `TMS admission approved. Parent login ID: ${parentUser.email}. Temporary password: ${parentPassword}`),
   ]);
   const delivered = studentDelivery.success && parentDelivery.success;
+  const failures = [
+    ...(!studentDelivery.success ? [`Student SMS: ${studentDelivery.error || 'delivery failed.'}`] : []),
+    ...(!parentDelivery.success ? [`Parent SMS: ${parentDelivery.error || 'delivery failed.'}`] : []),
+  ];
   if (!delivered) {
     await prisma.$transaction([
       prisma.student.update({ where: { id: student.id }, data: { admissionStatus: 'READY_FOR_LOGIN' } }),
@@ -57,5 +61,5 @@ export async function activateAdmissionAndSendLogins(tenantId: string, studentId
       prisma.enrollment.updateMany({ where: { studentId: student.id, status: 'ACTIVE' }, data: { status: 'BLOCKED' } }),
     ]);
   }
-  return { delivered, studentPhone: student.user.phone, parentPhone: parentUser.phone };
+  return { delivered, studentPhone: student.user.phone, parentPhone: parentUser.phone, failures };
 }

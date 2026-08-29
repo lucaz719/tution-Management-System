@@ -352,7 +352,12 @@ router.post('/admissions/:studentId/issue-logins', authMiddleware, async (req: T
   }
   try {
     const delivery = await activateAdmissionAndSendLogins(req.tenantId!, student.id);
-    if (!delivery.delivered) return res.status(502).json({ error: 'SMS delivery failed. Check both phone numbers and retry.' });
+    if (!delivery.delivered) {
+      return res.status(502).json({
+        error: `SMS delivery failed. ${delivery.failures.join(' ') || 'Check both phone numbers and retry.'}`,
+        delivery,
+      });
+    }
     return res.json({ message: 'Admission activated and login IDs were sent by SMS.', delivery });
   } catch (error) {
     return res.status(409).json({ error: error instanceof Error ? error.message : 'Unable to issue admission logins.' });

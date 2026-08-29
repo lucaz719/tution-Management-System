@@ -760,7 +760,7 @@ router.post(
         message: updated.invoiceType === 'ADMISSION'
           ? loginDelivery?.delivered
             ? 'Payment recorded. Student and parent login IDs were sent by SMS.'
-            : 'Payment recorded, but login SMS delivery failed. Retry from Admissions.'
+            : `Payment recorded, but login SMS delivery failed. ${loginDelivery?.failures.join(' ') || 'Retry from Admissions.'}`
           : 'Payment recorded.',
         invoice: { id: updated.id, status: updated.status, paymentDate: updated.paymentDate, transactionId: updated.transactionId },
         loginDelivery,

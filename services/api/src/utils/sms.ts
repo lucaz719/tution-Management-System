@@ -9,16 +9,19 @@ type AakashSmsResponse = {
   message_id?: string | number;
   messageId?: string | number;
   id?: string | number;
+  data?: {
+    valid?: Array<{ id?: string | number; mobile?: string; status?: string }>;
+    invalid?: Array<{ mobile?: string; status?: string }>;
+  } | unknown[];
   [key: string]: unknown;
 };
 
-function normaliseNepalPhoneNumber(value: string): string {
-  // Aakash accepts Nepali numbers. Normalising the most common local formats
-  // here keeps callers from accidentally sending an unusable number.
+export function normaliseAakashPhoneNumber(value: string): string {
+  // Aakash API v3 requires a local 10-digit number in the `to` field.
   const digits = value.replace(/[\s()-]/g, '');
-  if (/^\+977\d{10}$/.test(digits)) return digits.slice(1);
-  if (/^977\d{10}$/.test(digits)) return digits;
-  if (/^\d{10}$/.test(digits)) return `977${digits}`;
+  if (/^\+977\d{10}$/.test(digits)) return digits.slice(4);
+  if (/^977\d{10}$/.test(digits)) return digits.slice(3);
+  if (/^\d{10}$/.test(digits)) return digits;
   return digits;
 }
 
@@ -52,9 +55,9 @@ export class AakashSmsSender implements ISmsSender {
   constructor(private readonly authToken: string) {}
 
   async sendSms(to: string, message: string): Promise<{ success: boolean; messageId?: string; error?: string }> {
-    const recipient = normaliseNepalPhoneNumber(to);
+    const recipient = normaliseAakashPhoneNumber(to);
 
-    if (!/^977\d{10}$/.test(recipient)) {
+    if (!/^\d{10}$/.test(recipient)) {
       return { success: false, error: 'A valid Nepali mobile number is required.' };
     }
     if (!message.trim()) {
@@ -79,14 +82,19 @@ export class AakashSmsSender implements ISmsSender {
       }
 
       const apiError = body?.error === true || body?.error === 'true' || body?.error === 1;
-      if (!response.ok || apiError) {
+      const deliveryData = body?.data && !Array.isArray(body.data) ? body.data : undefined;
+      const acceptedMessage = deliveryData?.valid?.[0];
+      const rejectedRecipient = Boolean(deliveryData?.invalid?.length) && !acceptedMessage;
+      if (!response.ok || apiError || rejectedRecipient) {
         return {
           success: false,
-          error: body?.message || `Aakash SMS request failed (${response.status}).`,
+          error: rejectedRecipient
+            ? 'Aakash SMS rejected the recipient number.'
+            : body?.message || `Aakash SMS request failed (${response.status}).`,
         };
       }
 
-      const messageId = body?.message_id ?? body?.messageId ?? body?.id;
+      const messageId = acceptedMessage?.id ?? body?.message_id ?? body?.messageId ?? body?.id;
       console.info(`[Aakash SMS] Message accepted for ${maskPhoneNumber(recipient)}`);
       return { success: true, messageId: messageId == null ? undefined : String(messageId) };
     } catch (error) {

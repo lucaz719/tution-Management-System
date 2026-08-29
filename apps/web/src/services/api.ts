@@ -255,7 +255,7 @@ export const api = {
       return request<{
         message: string;
         invoice: { id: string; status: string; paymentDate: string | null; transactionId: string | null };
-        loginDelivery: { delivered: boolean; studentPhone: string; parentPhone: string } | null;
+        loginDelivery: { delivered: boolean; studentPhone: string; parentPhone: string; failures: string[] } | null;
       }>(`/finances/invoices/${invoiceId}/pay`, {
         method: 'POST',
         body: JSON.stringify({ transactionId }),
