@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import forge from 'node-forge';
 import prisma from './db';
+import { activateAdmissionAndSendLogins } from './admission-logins';
 
 interface ConnectIpsConfig {
   merchantId: number;
@@ -172,7 +173,7 @@ export async function validateAndConfirmConnectIps(txnId: string) {
     return prisma.paymentAttempt.findUniqueOrThrow({ where: { id: attempt.id } });
   }
 
-  return prisma.$transaction(async (tx) => {
+  const confirmed = await prisma.$transaction(async (tx) => {
     const claim = await tx.paymentAttempt.updateMany({
       where: { id: attempt.id, status: { not: 'SUCCESS' } },
       data: {
@@ -211,6 +212,10 @@ export async function validateAndConfirmConnectIps(txnId: string) {
     }
     return tx.paymentAttempt.findUniqueOrThrow({ where: { id: attempt.id } });
   });
+  if (attempt.invoice.invoiceType === 'ADMISSION' && confirmed?.status === 'SUCCESS') {
+    await activateAdmissionAndSendLogins(attempt.tenantId, attempt.invoice.studentId);
+  }
+  return confirmed;
 }
 
 export interface ReconcilePendingConnectIpsOptions {

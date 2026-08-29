@@ -194,7 +194,7 @@ export function TenantPayrollPage() {
     </div>)}</Card>}</div>;
 }
 
-interface Branch { id: string; name: string; }
+interface Branch { id: string; name: string; admissionFee?: number; }
 export function TenantResourcesPage() {
   const [branches, setBranches] = useState<Branch[]>([]); const [branchId, setBranchId] = useState(''); const [tasks, setTasks] = useState<MaintenanceTask[]>([]); const [error, setError] = useState<unknown>(null); const [loading, setLoading] = useState(true);
   const load = useCallback(async () => { setLoading(true); setError(null); try { const result = await request<{ branches: Branch[] }>('/branches'); setBranches(result.branches); const selected = branchId || result.branches[0]?.id || ''; setBranchId(selected); setTasks(selected ? (await resourcesApi.tasks(selected)).tasks : []); } catch (next) { setError(next); } finally { setLoading(false); } }, [branchId]);
@@ -232,34 +232,43 @@ export function TenantHrPage() {
   </div>;
 }
 
-interface IssuedCredentials { student: { email: string; temporaryPassword: string }; parent: { email: string; temporaryPassword: string }; }
 interface GradeOption { id: string; name: string; admissionFee?: number | string; }
+interface AdmissionResult {
+  admission: { studentId: string; status: 'PENDING_PAYMENT' | 'READY_FOR_LOGIN' | 'ACTIVE'; admissionFee: number | string };
+  loginDelivery: { delivered: boolean } | null;
+  message: string;
+}
 export function TenantAdmissionsPage() {
   const { showToast } = useToast();
   const [branches, setBranches] = useState<Branch[]>([]); const [grades, setGrades] = useState<GradeOption[]>([]); const [classes, setClasses] = useState<any[]>([]);
-  const [busy, setBusy] = useState(false); const [credentials, setCredentials] = useState<IssuedCredentials | null>(null);
+  const [busy, setBusy] = useState(false); const [result, setResult] = useState<AdmissionResult | null>(null);
   const [form, setForm] = useState({ branchId: '', gradeId: '', classId: '', studentFirst: '', studentLast: '', studentEmail: '', studentPhone: '', parentFirst: '', parentLast: '', parentEmail: '', parentPhone: '' });
   useEffect(() => { void Promise.all([request<{ branches: Branch[] }>('/branches'), request<{ grades: GradeOption[] }>('/grades'), request<{ classes: any[] }>('/courses/classes')]).then(([b, g, c]) => { setBranches(b.branches); setGrades(g.grades); setClasses(c.classes); const branchId = b.branches[0]?.id ?? ''; const gradeId = g.grades[0]?.id ?? ''; const classId = c.classes.find((item) => item.branchId === branchId && item.gradeId === gradeId && item.courseType === 'REGULAR')?.id ?? ''; setForm((old) => ({ ...old, branchId, gradeId, classId })); }).catch((next) => showToast(errorMessage(next), 'error')); }, []);
   const availableClasses = classes.filter((item) => item.branchId === form.branchId && item.gradeId === form.gradeId && item.courseType === 'REGULAR');
   const submit = async (event: FormEvent) => {
     event.preventDefault(); if (form.studentEmail === form.parentEmail) return showToast('Student and parent emails must be different.', 'error'); setBusy(true);
     try {
-      const result = await request<{ credentials: IssuedCredentials }>('/users/admissions', { method: 'POST', body: JSON.stringify({ branchId: form.branchId, gradeId: form.gradeId, classId: form.classId, student: { firstName: form.studentFirst, lastName: form.studentLast, email: form.studentEmail, phone: form.studentPhone }, parent: { firstName: form.parentFirst, lastName: form.parentLast, email: form.parentEmail, phone: form.parentPhone } }) });
-      setCredentials(result.credentials); showToast('Admission completed and both login accounts were created.', 'success');
+      const admission = await request<AdmissionResult>('/users/admissions', { method: 'POST', body: JSON.stringify({ branchId: form.branchId, gradeId: form.gradeId, classId: form.classId, student: { firstName: form.studentFirst, lastName: form.studentLast, email: form.studentEmail, phone: form.studentPhone }, parent: { firstName: form.parentFirst, lastName: form.parentLast, email: form.parentEmail, phone: form.parentPhone } }) });
+      setResult(admission); showToast(admission.message, admission.loginDelivery && !admission.loginDelivery.delivered ? 'error' : 'success');
     } catch (next) { showToast(errorMessage(next), 'error'); } finally { setBusy(false); }
   };
-  const acknowledge = () => { setCredentials(null); setForm((old) => ({ ...old, studentFirst: '', studentLast: '', studentEmail: '', studentPhone: '', parentFirst: '', parentLast: '', parentEmail: '', parentPhone: '' })); };
-  return <div style={{ display: 'grid', gap: 18 }}><Header title="Admissions" description="Admit a student into a regular class and create linked student and parent login accounts in one step."/>
-    {!credentials ? <Card hoverable={false}><form onSubmit={(e) => void submit(e)} style={{ display: 'grid', gap: 16 }} aria-busy={busy}>
+  const acknowledge = () => { setResult(null); setForm((old) => ({ ...old, studentFirst: '', studentLast: '', studentEmail: '', studentPhone: '', parentFirst: '', parentLast: '', parentEmail: '', parentPhone: '' })); };
+  const selectedBranch = branches.find((branch) => branch.id === form.branchId);
+  return <div style={{ display: 'grid', gap: 18 }}><Header title="Admissions" description="Complete admission first. Login IDs activate and are sent to the recorded phone numbers only after the branch fee is paid."/>
+    {!result ? <Card hoverable={false}><form onSubmit={(e) => void submit(e)} style={{ display: 'grid', gap: 16 }} aria-busy={busy}>
       <div style={grid}>
         <label>Branch<select required style={input} value={form.branchId} onChange={(e) => { const branchId = e.target.value; const classId = classes.find((item) => item.branchId === branchId && item.gradeId === form.gradeId && item.courseType === 'REGULAR')?.id ?? ''; setForm((old) => ({ ...old, branchId, classId })); }}>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
         <label>Grade<select required style={input} value={form.gradeId} onChange={(e) => { const gradeId = e.target.value; const classId = classes.find((item) => item.branchId === form.branchId && item.gradeId === gradeId && item.courseType === 'REGULAR')?.id ?? ''; setForm((old) => ({ ...old, gradeId, classId })); }}>{grades.map((grade) => <option key={grade.id} value={grade.id}>{grade.name}</option>)}</select></label>
         <label>Regular class<select required style={input} value={form.classId} onChange={(e) => setForm((old) => ({ ...old, classId: e.target.value }))}><option value="">Select class</option>{availableClasses.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.courseName}</option>)}</select>{!availableClasses.length ? <small style={{ color: 'var(--color-error)' }}>Create a regular class for this branch and grade before admission.</small> : null}</label>
       </div>
+      <div role="note" style={{ padding: 14, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--color-surface)' }}>
+        <strong>Admission fee for this branch: NPR {Number(selectedBranch?.admissionFee ?? 0).toLocaleString()}</strong>
+        <p style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 13 }}>Tenant Admin can edit this amount independently in Branches.</p>
+      </div>
       <h3>Student details</h3><div style={grid}>{[['studentFirst','First name'],['studentLast','Last name'],['studentEmail','Email'],['studentPhone','Phone']].map(([key, text]) => <label key={key}>{text}<input required style={input} type={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : 'text'} autoComplete={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : key.includes('First') ? 'given-name' : 'family-name'} value={form[key as keyof typeof form]} onChange={(e) => setForm((old) => ({ ...old, [key]: e.target.value }))}/></label>)}</div>
       <h3>Parent or guardian details</h3><div style={grid}>{[['parentFirst','First name'],['parentLast','Last name'],['parentEmail','Email'],['parentPhone','Phone']].map(([key, text]) => <label key={key}>{text}<input required style={input} type={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : 'text'} autoComplete={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : key.includes('First') ? 'given-name' : 'family-name'} value={form[key as keyof typeof form]} onChange={(e) => setForm((old) => ({ ...old, [key]: e.target.value }))}/></label>)}</div>
-      <Button disabled={busy || !form.branchId || !form.gradeId || !form.classId} type="submit">{busy ? 'Completing admission…' : 'Complete admission and generate logins'}</Button>
-    </form></Card> : <Card hoverable={false}><StatusBadge variant="success">Admission completed</StatusBadge><h3 style={{ marginTop: 12 }}>Student and parent login credentials</h3><div role="alert" style={{ padding: 16, marginTop: 12, background: 'var(--color-warning-soft)', borderRadius: 10 }}><strong>Copy these now. The temporary passwords are shown only once.</strong><p style={{ marginTop: 12 }}>Student: <strong>{credentials.student.email}</strong> · <code>{credentials.student.temporaryPassword}</code></p><p>Parent: <strong>{credentials.parent.email}</strong> · <code>{credentials.parent.temporaryPassword}</code></p><p style={{ marginTop: 10, color: 'var(--text-muted)' }}>The student is enrolled in the selected regular class and already receives its timetable.</p><Button style={{ marginTop: 12 }} onClick={acknowledge}>Credentials delivered securely</Button></div></Card>}
+      <Button disabled={busy || !form.branchId || !form.gradeId || !form.classId} type="submit">{busy ? 'Saving admission…' : 'Complete admission'}</Button>
+    </form></Card> : <Card hoverable={false}><StatusBadge variant={result.admission.status === 'ACTIVE' ? 'success' : 'warning'}>{result.admission.status === 'ACTIVE' ? 'Active' : 'Payment pending'}</StatusBadge><h3 style={{ marginTop: 12 }}>Admission recorded</h3><div role="status" style={{ padding: 16, marginTop: 12, background: 'var(--color-warning-soft)', borderRadius: 10 }}><strong>{result.message}</strong><p style={{ marginTop: 12 }}>Amount due: <strong>NPR {Number(result.admission.admissionFee).toLocaleString()}</strong></p><p style={{ marginTop: 10, color: 'var(--text-muted)' }}>After confirmed payment, student and parent login IDs and temporary passwords are sent automatically to their admission phone numbers.</p><Button style={{ marginTop: 12 }} onClick={acknowledge}>Start another admission</Button></div></Card>}
   </div>;
 }
 

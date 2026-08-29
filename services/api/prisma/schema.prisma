@@ -200,6 +200,7 @@ model Branch {
   longitude          Float
   radiusMeters       Float               @default(100.0) // Geofence radius
   gracePeriodMinutes Int                 @default(15)
+  admissionFee       Int                 @default(0) // Branch-specific admission charge in NPR
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   userRoles          UserRole[]

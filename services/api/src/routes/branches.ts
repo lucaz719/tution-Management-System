@@ -50,6 +50,7 @@ router.get('/', authMiddleware, async (req: TenantRequest, res: Response) => {
           longitude: branch.longitude,
           radiusMeters: branch.radiusMeters,
           gracePeriodMinutes: branch.gracePeriodMinutes,
+          admissionFee: branch.admissionFee,
           createdAt: branch.createdAt,
           staffCount,
           courseCount: branch._count.courses,
@@ -63,7 +64,7 @@ router.get('/', authMiddleware, async (req: TenantRequest, res: Response) => {
 
 // Create a branch (Tenant Admin / manage_branches)
 router.post('/', authMiddleware, hasPermission('manage_branches'), async (req: TenantRequest, res: Response) => {
-  const { name, address, latitude, longitude, radiusMeters, gracePeriodMinutes } = req.body;
+  const { name, address, latitude, longitude, radiusMeters, gracePeriodMinutes, admissionFee } = req.body;
 
   if (!name || !address) {
     return res.status(400).json({ error: 'Branch name and address are required.' });
@@ -86,6 +87,7 @@ router.post('/', authMiddleware, hasPermission('manage_branches'), async (req: T
         radiusMeters: Number.isFinite(Number(radiusMeters)) && Number(radiusMeters) > 0 ? Number(radiusMeters) : 100,
         gracePeriodMinutes:
           Number.isFinite(Number(gracePeriodMinutes)) && Number(gracePeriodMinutes) >= 0 ? Number(gracePeriodMinutes) : 15,
+        admissionFee: Number.isFinite(Number(admissionFee)) && Number(admissionFee) >= 0 ? Math.round(Number(admissionFee)) : 0,
       },
     });
 
@@ -98,7 +100,7 @@ router.post('/', authMiddleware, hasPermission('manage_branches'), async (req: T
 // Update a branch (Tenant Admin / manage_branches)
 router.put('/:id', authMiddleware, hasPermission('manage_branches'), async (req: TenantRequest, res: Response) => {
   const { id } = req.params;
-  const { name, address, latitude, longitude, radiusMeters, gracePeriodMinutes } = req.body;
+  const { name, address, latitude, longitude, radiusMeters, gracePeriodMinutes, admissionFee } = req.body;
 
   try {
     const existing = await prisma.branch.findUnique({ where: { id } });
@@ -116,6 +118,9 @@ router.put('/:id', authMiddleware, hasPermission('manage_branches'), async (req:
     }
     if (gracePeriodMinutes !== undefined && Number.isFinite(Number(gracePeriodMinutes)) && Number(gracePeriodMinutes) >= 0) {
       data.gracePeriodMinutes = Number(gracePeriodMinutes);
+    }
+    if (admissionFee !== undefined && Number.isFinite(Number(admissionFee)) && Number(admissionFee) >= 0) {
+      data.admissionFee = Math.round(Number(admissionFee));
     }
     if (Object.keys(data).length === 0) {
       return res.status(400).json({ error: 'No valid fields provided to update.' });

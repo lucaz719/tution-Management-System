@@ -28,7 +28,7 @@ export const DASHBOARD_NAVIGATION: Record<DashboardRole, DashboardNavItem[]> = {
   'tenant-admin': [
     { section: 'Main', label: 'Dashboard', icon: 'dashboard', path: '/tenant/dashboard' },
     { section: 'Main', label: 'Branches', icon: 'domain', path: '/tenant/branches' },
-    { section: 'Main', label: 'Staff & Students', icon: 'group', path: '/tenant/people' },
+    { section: 'Main', label: 'Staff & Parents', icon: 'group', path: '/tenant/people' },
     { section: 'Main', label: 'Admissions', icon: 'person_add', path: '/tenant/admissions' },
     { section: 'Main', label: 'Control Center', icon: 'admin_panel_settings', path: '/tenant/control-center' },
     { section: 'Academic', label: 'Students', icon: 'school', path: '/tenant/students' },

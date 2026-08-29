@@ -10,6 +10,7 @@ import crypto from 'node:crypto';
 import { recurringInvoiceType } from '../utils/billing-rules';
 import { createConnectIpsForm, validateAndConfirmConnectIps } from '../utils/connectips';
 import { parsePlainRecord, parseStrictKeys, parseStrictObject, readBoolean, readFiniteNumber, readTrimmedString } from '../utils/request-validation';
+import { activateAdmissionAndSendLogins } from '../utils/admission-logins';
 
 const router = Router();
 
@@ -743,7 +744,19 @@ router.post(
       if (!updated) {
         return res.status(409).json({ error: 'Invoice payment was already processed by another request.' });
       }
-      return res.json({ message: 'Payment recorded.', invoice: { id: updated.id, status: updated.status, paymentDate: updated.paymentDate } });
+      let loginDelivery: Awaited<ReturnType<typeof activateAdmissionAndSendLogins>> | null = null;
+      if (updated.invoiceType === 'ADMISSION') {
+        loginDelivery = await activateAdmissionAndSendLogins(req.tenantId!, updated.studentId);
+      }
+      return res.json({
+        message: updated.invoiceType === 'ADMISSION'
+          ? loginDelivery?.delivered
+            ? 'Payment recorded. Student and parent login IDs were sent by SMS.'
+            : 'Payment recorded, but login SMS delivery failed. Retry from Admissions.'
+          : 'Payment recorded.',
+        invoice: { id: updated.id, status: updated.status, paymentDate: updated.paymentDate },
+        loginDelivery,
+      });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to record payment.', details: error.message });
     }
@@ -1081,6 +1094,10 @@ router.post(
           return res.status(200).json({ message: 'Payment was already recorded.', invoiceId: invoiceId.data });
         }
 
+        const admissionDelivery = invoice.invoiceType === 'ADMISSION'
+          ? await activateAdmissionAndSendLogins(req.tenantId!, invoice.studentId)
+          : null;
+
         const smsSender = new MockSmsSender();
         await smsSender.sendSms(
           '98510XXXXX',
@@ -1088,7 +1105,11 @@ router.post(
         );
 
         return res.status(200).json({
-          message: 'Payment confirmed and enrollment unblocked.',
+          message: admissionDelivery
+            ? admissionDelivery.delivered
+              ? 'Payment confirmed and admission login IDs were sent by SMS.'
+              : 'Payment confirmed, but admission login SMS delivery failed.'
+            : 'Payment confirmed and enrollment unblocked.',
           payment: {
             invoiceId: invoiceId.data,
             transactionId: transactionId.data,

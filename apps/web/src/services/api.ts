@@ -547,6 +547,7 @@ export const api = {
       longitude: number;
       radiusMeters?: number;
       gracePeriodMinutes?: number;
+      admissionFee?: number;
     }) => {
       return request<{ message: string; branch: any }>('/branches', {
         method: 'POST',

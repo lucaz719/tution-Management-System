@@ -13,6 +13,7 @@ import {
 } from '../utils/roles';
 import { UserPayload } from '@tms/types';
 import { canReleaseAdmissionLogins } from '../utils/billing-rules';
+import { activateAdmissionAndSendLogins } from '../utils/admission-logins';
 import { parseStrictKeys, parseStrictObject, readTrimmedString } from '../utils/request-validation';
 
 const router = Router();
@@ -185,8 +186,8 @@ router.get('/me', authMiddleware, async (req: TenantRequest, res: Response) => {
   }
 });
 
-// Admission atomically creates active Student/Parent accounts, links the family,
-// creates the admission invoice, and returns one-time credentials.
+// Admission creates inactive Student/Parent accounts and a branch-priced invoice.
+// Logins are activated and delivered by SMS only after that invoice is paid.
 router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Response) => {
   const admissionShape = parseStrictKeys(req.body, ['branchId', 'gradeId', 'classId', 'student', 'parent']);
   if (!admissionShape.success) return res.status(400).json({ error: admissionShape.error });
@@ -248,7 +249,7 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
           lastName: studentFields.lastName,
           phone: studentFields.phone,
           passwordHash: studentPasswordHash,
-          status: 'ACTIVE',
+          status: 'INACTIVE',
         },
       });
       await tx.account.create({
@@ -261,10 +262,10 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
           gradeId,
           admissionDate: now,
           emergencyContact: studentFields.phone || parentFields.phone,
-          admissionStatus: 'ACTIVE',
+          admissionStatus: branch.admissionFee > 0 ? 'PENDING_PAYMENT' : 'READY_FOR_LOGIN',
         },
       });
-      await tx.enrollment.create({ data: { studentId: student.id, courseId: regularClass.courseId, classId: regularClass.id, status: 'ACTIVE', admissionDate: now } });
+      await tx.enrollment.create({ data: { studentId: student.id, courseId: regularClass.courseId, classId: regularClass.id, status: 'BLOCKED', admissionDate: now } });
 
       const parentUser = await tx.user.create({
         data: {
@@ -275,7 +276,7 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
           lastName: parentFields.lastName,
           phone: parentFields.phone,
           passwordHash: parentPasswordHash,
-          status: 'ACTIVE',
+          status: 'INACTIVE',
         },
       });
       await tx.account.create({
@@ -293,19 +294,26 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
           invoiceType: 'ADMISSION',
           panNumberSnapshot: tenant.panNumber,
           vatRateSnapshot: tenant.vatRate,
-          amount: grade.admissionFee,
-          netPayable: grade.admissionFee,
+          amount: branch.admissionFee,
+          netPayable: branch.admissionFee,
           billingCycleStart: now,
           billingCycleEnd: now,
           dueDate,
-          status: grade.admissionFee > 0 ? 'UNPAID' : 'PAID',
+          status: branch.admissionFee > 0 ? 'UNPAID' : 'PAID',
         },
       });
       return { student, parent, invoice };
     });
 
+    const delivery = branch.admissionFee === 0
+      ? await activateAdmissionAndSendLogins(req.tenantId!, result.student.id)
+      : null;
     return res.status(201).json({
-      message: 'Admission completed. Student and parent accounts are ready to use.',
+      message: branch.admissionFee > 0
+        ? 'Admission saved. Login IDs will be sent by SMS after payment.'
+        : delivery?.delivered
+          ? 'Admission completed and login IDs were sent by SMS.'
+          : 'Admission completed, but SMS delivery failed. Retry login delivery.',
       admission: {
         studentId: result.student.id,
         parentId: result.parent.id,
@@ -316,10 +324,7 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
         invoiceId: result.invoice.id,
         admissionFee: result.invoice.netPayable,
       },
-      credentials: {
-        student: { email: studentFields.email, temporaryPassword: studentPassword },
-        parent: { email: parentFields.email, temporaryPassword: parentPassword },
-      },
+      loginDelivery: delivery,
     });
   } catch (error: any) {
     if (error.code === 'P2002') return res.status(409).json({ error: 'Student or parent email already exists.' });
@@ -345,36 +350,13 @@ router.post('/admissions/:studentId/issue-logins', authMiddleware, async (req: T
   if (!canReleaseAdmissionLogins(student.admissionStatus, student.invoices[0]?.status)) {
     return res.status(409).json({ error: 'Admission payment must be recorded before logins can be issued.' });
   }
-  const parentUser = student.studentParents[0]?.parent.user;
-  if (!parentUser) return res.status(409).json({ error: 'A linked parent account is required before issuing logins.' });
-
-  const studentPassword = generateTempPassword();
-  const parentPassword = generateTempPassword();
-  const [studentHash, parentHash] = await Promise.all([
-    bcrypt.hash(studentPassword, 10),
-    bcrypt.hash(parentPassword, 10),
-  ]);
-  const activated = await prisma.$transaction(async (tx) => {
-    const transition = await tx.student.updateMany({
-      where: { id: student.id, admissionStatus: 'READY_FOR_LOGIN' },
-      data: { admissionStatus: 'ACTIVE' },
-    });
-    if (transition.count !== 1) return false;
-    await tx.user.update({ where: { id: student.userId }, data: { status: 'ACTIVE', passwordHash: studentHash } });
-    await tx.account.updateMany({ where: { userId: student.userId, providerId: 'credential' }, data: { password: studentHash } });
-    await tx.user.update({ where: { id: parentUser.id }, data: { status: 'ACTIVE', passwordHash: parentHash } });
-    await tx.account.updateMany({ where: { userId: parentUser.id, providerId: 'credential' }, data: { password: parentHash } });
-    return true;
-  });
-  if (!activated) {
-    return res.status(409).json({ error: 'Admission logins were already issued by another request.' });
+  try {
+    const delivery = await activateAdmissionAndSendLogins(req.tenantId!, student.id);
+    if (!delivery.delivered) return res.status(502).json({ error: 'SMS delivery failed. Check both phone numbers and retry.' });
+    return res.json({ message: 'Admission activated and login IDs were sent by SMS.', delivery });
+  } catch (error) {
+    return res.status(409).json({ error: error instanceof Error ? error.message : 'Unable to issue admission logins.' });
   }
-
-  return res.json({
-    message: 'Admission activated. Deliver these one-time credentials through a secure channel.',
-    student: { email: student.user.email, temporaryPassword: studentPassword },
-    parent: { email: parentUser.email, temporaryPassword: parentPassword },
-  });
 });
 
 // --- List users in the caller's tenant (branch admins see only their branch) ---

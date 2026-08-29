@@ -4,7 +4,6 @@ import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { useToast } from '../components/ui/Toast';
 import { UserProfileDrawer } from '../components/UserProfileDrawer';
-import { BulkStudentImport } from '../components/BulkStudentImport';
 import { api } from '../services/api';
 
 interface PersonRole {
@@ -46,18 +45,15 @@ interface FormState {
   phone: string;
   role: string;
   branchId: string;
-  gradeId: string;
   studentId: string;
-  parentFirstName: string;
-  parentLastName: string;
-  parentEmail: string;
-  parentPhone: string;
 }
 
-const EMPTY_FORM: FormState = { firstName: '', lastName: '', email: '', phone: '', role: '', branchId: '', gradeId: '', studentId: '', parentFirstName: '', parentLastName: '', parentEmail: '', parentPhone: '' };
+const EMPTY_FORM: FormState = { firstName: '', lastName: '', email: '', phone: '', role: '', branchId: '', studentId: '' };
 
 // Categorize a role for the stat strip.
 const STAFF_ROLES = ['Teacher', 'Accountant', 'Receptionist', 'Janitor'];
+const SUPPORT_ROLES = ['Accountant', 'Receptionist', 'Janitor'];
+const DIRECTORY_ROLES = ['Tenant Admin', 'Branch Admin', ...STAFF_ROLES, 'Parent'];
 
 function initials(name: string): string {
   return (
@@ -87,8 +83,7 @@ const ROLE_GROUPS: RoleGroup[] = [
   { label: 'Administration', icon: 'shield_person', roles: ['Tenant Admin'] },
   { label: 'Branch Managers', icon: 'manage_accounts', roles: ['Branch Admin'] },
   { label: 'Teachers', icon: 'badge', roles: ['Teacher'], link: '/tenant/teachers' },
-  { label: 'Support Staff', icon: 'engineering', roles: ['Accountant', 'Receptionist', 'Janitor'] },
-  { label: 'Students', icon: 'school', roles: ['Student'], link: '/tenant/students' },
+  { label: 'Support Staff', icon: 'engineering', roles: SUPPORT_ROLES },
   { label: 'Parents', icon: 'family_restroom', roles: ['Parent'] },
 ];
 
@@ -117,23 +112,18 @@ export function PeopleDirectory() {
   const [credentials, setCredentials] = useState<CreatedCredentials[]>([]);
   const [copied, setCopied] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState('');
-  const [bulkOpen, setBulkOpen] = useState(false);
-  const [grades, setGrades] = useState<Array<{ id: string; name: string }>>([]);
-
   const PREVIEW_LIMIT = 5;
 
   const loadData = async () => {
     setIsLoading(true);
     setErrorMsg('');
     try {
-      const [capabilities, list, gradeList] = await Promise.all([
+      const [capabilities, list] = await Promise.all([
         api.people.capabilities(),
         api.people.list(),
-        api.grades.list().catch(() => []),
       ]);
       setCaps(capabilities);
       setPeople(list as Person[]);
-      setGrades((gradeList as Array<{ id: string; name: string }>).map((g) => ({ id: g.id, name: g.name })));
     } catch (error: unknown) {
       setErrorMsg(error instanceof Error ? error.message : 'Failed to load the directory.');
     } finally {
@@ -145,24 +135,27 @@ export function PeopleDirectory() {
     void loadData();
   }, []);
 
-  const stats = useMemo(() => {
-    const roles = people.flatMap((p) => p.roles.map((r) => r.role));
-    return {
-      total: people.length,
-      managers: roles.filter((r) => r === 'Branch Admin').length,
-      teachers: roles.filter((r) => r === 'Teacher').length,
-      students: roles.filter((r) => r === 'Student').length,
-      staff: roles.filter((r) => STAFF_ROLES.includes(r)).length,
-    };
-  }, [people]);
-
   const location = useLocation();
   const isBranchStaff = location.pathname.includes('/branch/staff');
 
+  const directoryPeople = useMemo(() => people.filter((person) => person.roles.some((role) =>
+    isBranchStaff ? STAFF_ROLES.includes(role.role) : DIRECTORY_ROLES.includes(role.role)
+  )), [people, isBranchStaff]);
+
+  const stats = useMemo(() => {
+    const roles = directoryPeople.flatMap((p) => p.roles.map((r) => r.role));
+    return {
+      total: directoryPeople.length,
+      managers: roles.filter((r) => r === 'Branch Admin').length,
+      teachers: roles.filter((r) => r === 'Teacher').length,
+      parents: roles.filter((r) => r === 'Parent').length,
+      staff: roles.filter((r) => SUPPORT_ROLES.includes(r)).length,
+    };
+  }, [directoryPeople]);
+
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return people.filter((person) => {
-      if (isBranchStaff && !person.roles.some((r) => STAFF_ROLES.includes(r.role))) return false;
+    return directoryPeople.filter((person) => {
       const matchesSearch =
         !term || person.name.toLowerCase().includes(term) || person.email.toLowerCase().includes(term);
       const matchesRole = roleFilter === 'ALL' || person.roles.some((r) => r.role === roleFilter);
@@ -170,12 +163,14 @@ export function PeopleDirectory() {
         branchFilter === 'ALL' || person.roles.some((r) => r.branchId === branchFilter);
       return matchesSearch && matchesRole && matchesBranch;
     });
-  }, [people, search, roleFilter, branchFilter, isBranchStaff]);
+  }, [directoryPeople, search, roleFilter, branchFilter]);
 
   const roleOptions = useMemo(() => {
-    const set = new Set(people.flatMap((p) => p.roles.map((r) => r.role)));
+    const set = new Set(directoryPeople.flatMap((p) => p.roles.map((r) => r.role)).filter((role) =>
+      isBranchStaff ? STAFF_ROLES.includes(role) : DIRECTORY_ROLES.includes(role)
+    ));
     return Array.from(set);
-  }, [people]);
+  }, [directoryPeople, isBranchStaff]);
 
   const grouped = useMemo(() => groupPeople(filtered), [filtered]);
   const linkableStudents = useMemo(() => people.filter((person) =>
@@ -187,7 +182,7 @@ export function PeopleDirectory() {
     const branches = caps?.manageableBranches ?? [];
     setForm({
       ...EMPTY_FORM,
-      role: caps?.creatableRoles[0] ?? '',
+      role: caps?.creatableRoles.find((role) => DIRECTORY_ROLES.includes(role)) ?? '',
       branchId: branches.length === 1 ? branches[0].id : '',
     });
     setDrawerOpen(true);
@@ -227,51 +222,17 @@ export function PeopleDirectory() {
       const branchName = caps?.manageableBranches.find((b) => b.id === form.branchId)?.name ?? '';
       const creds: CreatedCredentials[] = [];
 
-      if (form.role === 'Student') {
-        if (!form.parentFirstName.trim() || !form.parentLastName.trim() || !form.parentEmail.trim()) {
-          showToast('Parent first name, last name, and email are required for students.', 'error');
-          setIsSaving(false);
-          return;
-        }
+      const result = form.role === 'Branch Admin'
+        ? await api.people.createBranchAdmin(payload)
+        : await api.people.create({ ...payload, role: form.role, studentId: form.role === 'Parent' ? form.studentId : undefined });
 
-        const studentResult = await api.people.create({ ...payload, role: 'Student', gradeId: form.gradeId || undefined });
-        creds.push({
-          name: `${payload.firstName} ${payload.lastName}`,
-          email: studentResult.user.email,
-          role: 'Student',
-          branch: branchName,
-          temporaryPassword: studentResult.temporaryPassword,
-        });
-
-        const parentResult = await api.people.create({
-          firstName: form.parentFirstName.trim(),
-          lastName: form.parentLastName.trim(),
-          email: form.parentEmail.trim(),
-          phone: form.parentPhone.trim(),
-          branchId: form.branchId,
-          role: 'Parent',
-          studentId: studentResult.user.id || studentResult.user.studentId
-        });
-        creds.push({
-          name: `${form.parentFirstName.trim()} ${form.parentLastName.trim()}`,
-          email: parentResult.user.email,
-          role: 'Parent',
-          branch: branchName,
-          temporaryPassword: parentResult.temporaryPassword,
-        });
-      } else {
-        const result = form.role === 'Branch Admin'
-          ? await api.people.createBranchAdmin(payload)
-          : await api.people.create({ ...payload, role: form.role, studentId: form.role === 'Parent' ? form.studentId : undefined });
-          
-        creds.push({
-          name: `${payload.firstName} ${payload.lastName}`,
-          email: result.user.email,
-          role: form.role,
-          branch: branchName,
-          temporaryPassword: result.temporaryPassword,
-        });
-      }
+      creds.push({
+        name: `${payload.firstName} ${payload.lastName}`,
+        email: result.user.email,
+        role: form.role,
+        branch: branchName,
+        temporaryPassword: result.temporaryPassword,
+      });
 
       setCredentials(creds);
       setCopied(false);
@@ -303,19 +264,15 @@ export function PeopleDirectory() {
     <div className="people-page">
       <div className="people-header">
         <div>
-          <h1 className="people-title">Staff &amp; Students</h1>
+          <h1 className="people-title">{isBranchStaff ? 'Staff' : 'Staff & Parents'}</h1>
           <p className="people-subtitle">
             {caps?.isTenantAdmin
-              ? 'Provision branch managers and staff across every center.'
-              : 'Add and manage teachers and students in your branch.'}
+              ? 'Manage staff and parent accounts across every center.'
+              : 'Add and manage staff in your branch.'}
           </p>
         </div>
         {caps?.canManagePeople ? (
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-            <Button variant="outline" onClick={() => setBulkOpen(true)} style={{ height: '42px' }}>
-              <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>upload_file</span>
-              Bulk Import
-            </Button>
             <Button onClick={openDrawer} style={{ height: '42px' }}>
               <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>person_add</span>
               Add Person
@@ -342,8 +299,8 @@ export function PeopleDirectory() {
           <span className="people-stat-label">Teachers</span>
         </div>
         <div className="people-stat" style={{ ['--stat-accent' as string]: 'var(--color-success)' }}>
-          <span className="people-stat-value">{stats.students}</span>
-          <span className="people-stat-label">Students</span>
+          <span className="people-stat-value">{stats.parents}</span>
+          <span className="people-stat-label">Parents</span>
         </div>
         <div className="people-stat" style={{ ['--stat-accent' as string]: 'var(--color-warning)' }}>
           <span className="people-stat-value">{stats.staff}</span>
@@ -384,7 +341,7 @@ export function PeopleDirectory() {
       {filtered.length === 0 ? (
         <div className="pd-empty">
           <span className="material-symbols-outlined">group_off</span>
-          <p>{isLoading ? 'Loading directory…' : people.length === 0 ? 'No people yet. Add your first staff member or student.' : 'No matches for your filters.'}</p>
+          <p>{isLoading ? 'Loading directory…' : directoryPeople.length === 0 ? 'No staff or parents yet. Add your first person.' : 'No matches for your filters.'}</p>
         </div>
       ) : (
         <div className="pd-dashboard">
@@ -432,15 +389,6 @@ export function PeopleDirectory() {
 
       {selectedUserId ? <UserProfileDrawer userId={selectedUserId} onClose={() => setSelectedUserId('')} onChanged={() => void loadData()} /> : null}
 
-      {bulkOpen ? (
-        <BulkStudentImport
-          branches={caps?.manageableBranches ?? []}
-          grades={grades.map((g) => g.name)}
-          onClose={() => setBulkOpen(false)}
-          onImported={() => void loadData()}
-        />
-      ) : null}
-
       {drawerOpen ? (
         <>
           <div className="people-drawer-overlay" onClick={() => setDrawerOpen(false)} />
@@ -460,12 +408,12 @@ export function PeopleDirectory() {
                 <div className="people-field">
                   <label>Role</label>
                   <div className="people-role-picker">
-                    {(caps?.creatableRoles ?? []).map((role) => (
+                    {(caps?.creatableRoles ?? []).filter((role) => DIRECTORY_ROLES.includes(role)).map((role) => (
                       <button
                         key={role}
                         type="button"
                         className={`people-role-chip${form.role === role ? ' people-role-chip--active' : ''}`}
-                        onClick={() => setForm((current) => ({ ...current, role, gradeId: '', studentId: '' }))}
+                        onClick={() => setForm((current) => ({ ...current, role, studentId: '' }))}
                       >
                         {role}
                       </button>
@@ -507,45 +455,6 @@ export function PeopleDirectory() {
                     </select>
                   )}
                 </div>
-
-                {form.role === 'Student' ? (
-                  <>
-                    <div className="people-field">
-                      <label>Grade <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>(class level)</span></label>
-                      {grades.length === 0 ? (
-                        <input value="No grades set up — add them under Academics › Grades" disabled />
-                      ) : (
-                        <select value={form.gradeId} onChange={(e) => setField('gradeId', e.target.value)}>
-                          <option value="">Not assigned</option>
-                          {grades.map((g) => (
-                            <option key={g.id} value={g.id}>{g.name}</option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
-                    
-                    <hr style={{ margin: '20px 0', border: 'none', borderTop: '1px dashed var(--border)' }} />
-                    <h3 style={{ fontSize: '14px', marginBottom: '12px' }}>Parent Details</h3>
-                    <div className="people-field-row">
-                      <div className="people-field">
-                        <label>Parent First name</label>
-                        <input value={form.parentFirstName} onChange={(e) => setField('parentFirstName', e.target.value)} placeholder="Ram" required />
-                      </div>
-                      <div className="people-field">
-                        <label>Parent Last name</label>
-                        <input value={form.parentLastName} onChange={(e) => setField('parentLastName', e.target.value)} placeholder="Thapa" required />
-                      </div>
-                    </div>
-                    <div className="people-field">
-                      <label>Parent Email</label>
-                      <input type="email" value={form.parentEmail} onChange={(e) => setField('parentEmail', e.target.value)} placeholder="parent@example.com" required />
-                    </div>
-                    <div className="people-field">
-                      <label>Parent Phone <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>(optional)</span></label>
-                      <input value={form.parentPhone} onChange={(e) => setField('parentPhone', e.target.value)} placeholder="98XXXXXXXX" inputMode="tel" />
-                    </div>
-                  </>
-                ) : null}
 
                 {form.role === 'Parent' ? (
                   <div className="people-field">
