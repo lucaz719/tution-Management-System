@@ -27,22 +27,33 @@ router.get('/', authMiddleware, async (req: TenantRequest, res: Response) => {
       },
       orderBy: { createdAt: 'asc' },
       include: {
-        _count: { select: { userRoles: true, courses: true } },
+        _count: { select: { courses: true } },
       },
     });
 
     return res.json({
-      branches: branches.map(branch => ({
-        id: branch.id,
-        name: branch.name,
-        address: branch.address,
-        latitude: branch.latitude,
-        longitude: branch.longitude,
-        radiusMeters: branch.radiusMeters,
-        gracePeriodMinutes: branch.gracePeriodMinutes,
-        createdAt: branch.createdAt,
-        staffCount: branch._count.userRoles,
-        courseCount: branch._count.courses,
+      branches: await Promise.all(branches.map(async branch => {
+        const staffCount = await prisma.user.count({
+          where: {
+            tenantId: req.tenantId!,
+            status: 'ACTIVE',
+            staffRecord: { isNot: null },
+            userRoles: { some: { branchId: branch.id, role: { name: { not: 'Student' } } } },
+          },
+        });
+
+        return {
+          id: branch.id,
+          name: branch.name,
+          address: branch.address,
+          latitude: branch.latitude,
+          longitude: branch.longitude,
+          radiusMeters: branch.radiusMeters,
+          gracePeriodMinutes: branch.gracePeriodMinutes,
+          createdAt: branch.createdAt,
+          staffCount,
+          courseCount: branch._count.courses,
+        };
       })),
     });
   } catch (error: any) {
@@ -106,7 +117,6 @@ router.put('/:id', authMiddleware, hasPermission('manage_branches'), async (req:
     if (gracePeriodMinutes !== undefined && Number.isFinite(Number(gracePeriodMinutes)) && Number(gracePeriodMinutes) >= 0) {
       data.gracePeriodMinutes = Number(gracePeriodMinutes);
     }
-
     if (Object.keys(data).length === 0) {
       return res.status(400).json({ error: 'No valid fields provided to update.' });
     }

@@ -346,7 +346,7 @@ export const api = {
         activeTeachersCount: number;
         totalOverdueAmountNpr: number;
         pendingLeaveRequestsCount: number;
-        branchSummary: Array<{ branchId: string; branchName: string; activeStudents: number; staffRoles: number }>;
+        branchSummary: Array<{ branchId: string; branchName: string; activeStudents: number; staffCount: number }>;
       }>('/tenant-admin/dashboard');
     },
     getDocumentAlerts: async () => request<{ expiringDocs: any[] }>('/hr/documents/alerts'),

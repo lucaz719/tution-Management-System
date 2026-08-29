@@ -229,7 +229,7 @@ export function TenantAdminDashboard() {
                   </div>
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
                     <StatusBadge variant="info">{branch.activeStudents} students</StatusBadge>
-                    <StatusBadge variant="gold">{branch.staffRoles} staff</StatusBadge>
+                    <StatusBadge variant="gold">{branch.staffCount} staff</StatusBadge>
                   </div>
                 </div>
               ))

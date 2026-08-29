@@ -15,9 +15,13 @@ router.get('/dashboard', authMiddleware, async (req: TenantRequest, res: Respons
 
   try {
     const [studentCount, teacherCount, overdueInvoices, pendingLeaves, branches] = await Promise.all([
-      prisma.student.count({ where: { user: { tenantId: req.tenantId! } } }),
-      prisma.userRole.count({
-        where: { user: { tenantId: req.tenantId! }, role: { name: 'Teacher' } },
+      prisma.student.count({ where: { user: { tenantId: req.tenantId!, status: 'ACTIVE' } } }),
+      prisma.user.count({
+        where: {
+          tenantId: req.tenantId!,
+          status: 'ACTIVE',
+          userRoles: { some: { role: { name: 'Teacher' } } },
+        },
       }),
       prisma.invoice.findMany({
         where: { tenantId: req.tenantId!, status: 'OVERDUE' },
@@ -33,11 +37,25 @@ router.get('/dashboard', authMiddleware, async (req: TenantRequest, res: Respons
 
     const branchSummary = await Promise.all(
       branches.map(async (branch) => {
-        const [activeStudents, staffRoles] = await Promise.all([
-          prisma.userRole.count({ where: { branchId: branch.id, role: { name: 'Student' } } }),
-          prisma.userRole.count({ where: { branchId: branch.id, role: { name: { not: 'Student' } } } }),
+        const [activeStudents, activeStaff] = await Promise.all([
+          prisma.user.count({
+            where: {
+              tenantId: req.tenantId!,
+              status: 'ACTIVE',
+              student: { isNot: null },
+              userRoles: { some: { branchId: branch.id, role: { name: 'Student' } } },
+            },
+          }),
+          prisma.user.count({
+            where: {
+              tenantId: req.tenantId!,
+              status: 'ACTIVE',
+              staffRecord: { isNot: null },
+              userRoles: { some: { branchId: branch.id, role: { name: { not: 'Student' } } } },
+            },
+          }),
         ]);
-        return { branchId: branch.id, branchName: branch.name, activeStudents, staffRoles };
+        return { branchId: branch.id, branchName: branch.name, activeStudents, staffCount: activeStaff };
       }),
     );
 
