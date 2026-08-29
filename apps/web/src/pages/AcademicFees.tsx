@@ -31,6 +31,7 @@ interface Overview {
 
 interface Invoice {
   id: string;
+  invoiceType: string;
   netPayable: number;
   status: string;
   overdue: boolean;
@@ -59,6 +60,9 @@ export function AcademicFees() {
   const [billingProfile, setBillingProfile] = useState<BillingLedger['students'][number] | null>(null);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
   const [payingId, setPayingId] = useState('');
+  const [paymentNotice, setPaymentNotice] = useState<{ message: string; delivered: boolean | null } | null>(null);
+  const [admissionStatus, setAdmissionStatus] = useState<'PENDING_PAYMENT' | 'READY_FOR_LOGIN' | 'ACTIVE' | null>(null);
+  const [isRetryingDelivery, setIsRetryingDelivery] = useState(false);
   const [qrModal, setQrModal] = useState<{ id: string; studentName: string; amount: number; month: string } | null>(null);
 
   const loadData = async () => {
@@ -95,12 +99,18 @@ export function AcademicFees() {
     setInvoicesLoading(true);
     setInvoices([]);
     setBillingProfile(null);
+    setPaymentNotice(null);
+    setAdmissionStatus(null);
     try {
-      const [list, ledger] = await Promise.all([
+      const [invoiceData, ledger] = await Promise.all([
         api.finances.getStudentInvoices(student.studentId),
         api.finances.getBillingLedger(),
       ]);
-      setInvoices(list as Invoice[]);
+      setInvoices(invoiceData.invoices as Invoice[]);
+      setAdmissionStatus(invoiceData.admissionStatus);
+      if (invoiceData.admissionStatus === 'READY_FOR_LOGIN') {
+        setPaymentNotice({ message: 'Admission payment is recorded, but login SMS delivery is still pending.', delivered: false });
+      }
       setBillingProfile(ledger.students.find((item) => item.studentId === student.studentId) ?? null);
     } catch (error: unknown) {
       showToast(error instanceof Error ? error.message : 'Failed to load invoices.', 'error');
@@ -112,17 +122,37 @@ export function AcademicFees() {
   const recordPayment = async (invoiceId: string) => {
     setPayingId(invoiceId);
     try {
-      await api.finances.payInvoice(invoiceId, 'CASH');
-      showToast('Payment recorded.', 'success');
+      const result = await api.finances.payInvoice(invoiceId, 'CASH');
+      const delivered = result.loginDelivery?.delivered ?? null;
+      setPaymentNotice({ message: result.message, delivered });
+      showToast(result.message, delivered === false ? 'error' : 'success');
       if (payStudent) {
-        const list = await api.finances.getStudentInvoices(payStudent.studentId);
-        setInvoices(list as Invoice[]);
+        const invoiceData = await api.finances.getStudentInvoices(payStudent.studentId);
+        setInvoices(invoiceData.invoices as Invoice[]);
+        setAdmissionStatus(invoiceData.admissionStatus);
       }
       await loadData();
     } catch (error: unknown) {
       showToast(error instanceof Error ? error.message : 'Failed to record payment.', 'error');
     } finally {
       setPayingId('');
+    }
+  };
+
+  const retryLoginDelivery = async () => {
+    if (!payStudent) return;
+    setIsRetryingDelivery(true);
+    try {
+      const result = await api.people.issueAdmissionLogins(payStudent.studentId);
+      setPaymentNotice({ message: result.message, delivered: true });
+      setAdmissionStatus('ACTIVE');
+      showToast(result.message, 'success');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Login SMS delivery failed again.';
+      setPaymentNotice({ message, delivered: false });
+      showToast(message, 'error');
+    } finally {
+      setIsRetryingDelivery(false);
     }
   };
 
@@ -254,6 +284,40 @@ export function AcademicFees() {
               </button>
             </div>
             <div className="people-drawer-body">
+              {paymentNotice ? (
+                <div
+                  role={paymentNotice.delivered === false ? 'alert' : 'status'}
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: '10px',
+                    border: `1px solid ${paymentNotice.delivered === false ? 'var(--color-error)' : 'var(--color-success)'}`,
+                    background: paymentNotice.delivered === false
+                      ? 'color-mix(in srgb, var(--color-error) 8%, transparent)'
+                      : 'color-mix(in srgb, var(--color-success) 8%, transparent)',
+                    color: 'var(--color-text)',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                  }}
+                >
+                  {paymentNotice.message}
+                  {paymentNotice.delivered === false ? (
+                    <p style={{ marginTop: '6px', color: 'var(--text-muted)', fontWeight: 500 }}>
+                      Payment is saved, but credentials were not delivered. Confirm the Aakash SMS configuration, then retry below.
+                    </p>
+                  ) : null}
+                  {paymentNotice.delivered === false && admissionStatus === 'READY_FOR_LOGIN' ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void retryLoginDelivery()}
+                      disabled={isRetryingDelivery}
+                      style={{ marginTop: '10px', minHeight: '40px' }}
+                    >
+                      {isRetryingDelivery ? 'Retrying SMS…' : 'Retry login SMS'}
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
               {invoicesLoading ? (
                 <p style={{ color: 'var(--text-muted)', fontSize: '14px', textAlign: 'center', padding: '24px 0' }}>Loading invoices…</p>
               ) : (

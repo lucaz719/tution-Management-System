@@ -246,11 +246,17 @@ export const api = {
       return data.students ?? [];
     },
     getStudentInvoices: async (studentId: string) => {
-      const data = await request<{ invoices: Array<{ id: string; netPayable: number; status: string; overdue: boolean; dueDate: string; billingCycleStart: string; billingCycleEnd: string; paymentDate: string | null }> }>(`/finances/students/${studentId}/invoices`);
-      return data.invoices ?? [];
+      return request<{
+        admissionStatus: 'PENDING_PAYMENT' | 'READY_FOR_LOGIN' | 'ACTIVE';
+        invoices: Array<{ id: string; invoiceType: string; netPayable: number; status: string; overdue: boolean; dueDate: string; billingCycleStart: string; billingCycleEnd: string; paymentDate: string | null }>;
+      }>(`/finances/students/${studentId}/invoices`);
     },
     payInvoice: async (invoiceId: string, transactionId?: string) => {
-      return request<{ message: string; invoice: any }>(`/finances/invoices/${invoiceId}/pay`, {
+      return request<{
+        message: string;
+        invoice: { id: string; status: string; paymentDate: string | null; transactionId: string | null };
+        loginDelivery: { delivered: boolean; studentPhone: string; parentPhone: string } | null;
+      }>(`/finances/invoices/${invoiceId}/pay`, {
         method: 'POST',
         body: JSON.stringify({ transactionId }),
       });
@@ -379,6 +385,9 @@ export const api = {
     },
     resetPassword: async (userId: string) => {
       return request<{ temporaryPassword: string }>(`/users/${userId}/reset-password`, { method: 'POST' });
+    },
+    issueAdmissionLogins: async (studentId: string) => {
+      return request<{ message: string; delivery: { delivered: boolean; studentPhone: string; parentPhone: string } }>(`/users/admissions/${studentId}/issue-logins`, { method: 'POST' });
     },
     getAnalytics: async (userId: string) => {
       return request<{

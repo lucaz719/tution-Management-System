@@ -669,8 +669,10 @@ router.get(
         orderBy: { dueDate: 'desc' },
       });
       return res.json({
+        admissionStatus: student.admissionStatus,
         invoices: invoices.map((i) => ({
           id: i.id,
+          invoiceType: i.invoiceType,
           netPayable: num(i.netPayable),
           status: i.status,
           overdue: invoiceOverdue(i),
