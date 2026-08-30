@@ -485,6 +485,8 @@ model StudentScore {
   student        Student   @relation(fields: [studentId], references: [id])
   recordedBy     String
   recorder       User      @relation("StudentScoreRecorder", fields: [recordedBy], references: [id])
+  resultDefinitionId String?
+  resultDefinition   ResultDefinition? @relation(fields: [resultDefinitionId], references: [id], onDelete: SetNull)
   subject        String
   assessment     String
   score          Decimal   @db.Decimal(8, 2)
@@ -497,6 +499,7 @@ model StudentScore {
   createdAt      DateTime  @default(now())
 
   @@index([tenantId, studentId, subject, testDate])
+  @@unique([resultDefinitionId, studentId])
 }
 
 // 8. Parent / Guardian Records
@@ -561,6 +564,7 @@ model Class {
   // Phase 2 relations
   homework          Homework[]
   syllabi           Syllabus[]
+  resultDefinitions ResultDefinition[]
 }
 
 // 12. Student Enrollment
@@ -861,6 +865,7 @@ model ResultDefinition {
   tenantId  String
   branchId  String
   classId   String
+  class     Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
   createdBy String
   title     String
   subject   String
@@ -868,6 +873,7 @@ model ResultDefinition {
   isOpen    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  scores    StudentScore[]
 
   @@index([tenantId, branchId, classId, isOpen])
 }

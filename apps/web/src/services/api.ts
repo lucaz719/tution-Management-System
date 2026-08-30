@@ -578,6 +578,9 @@ export const api = {
     getDashboard: async (branchId?: string) => request<BranchAdminDashboardData>(`/branch-admin/dashboard${branchId ? `?branchId=${encodeURIComponent(branchId)}` : ''}`),
     getTeacherWorkflows: async (branchId?: string, date?: string) => request<any>(`/branch-admin/teacher-workflows?${new URLSearchParams({ ...(branchId ? { branchId } : {}), ...(date ? { date } : {}) }).toString()}`),
     createResultDefinition: async (payload: { branchId: string; classId: string; title: string; subject: string; testDate: string }) => request<any>('/branch-admin/result-definitions', { method: 'POST', body: JSON.stringify(payload) }),
+    getResultTemplate: async (resultId: string) => request<any>(`/branch-admin/result-definitions/${encodeURIComponent(resultId)}/template`),
+    importResults: async (resultId: string, payload: { maximum: number; passMarks: number; rows: Array<{ studentId: string; score: number }> }) => request<{ message: string; imported: number }>(`/branch-admin/result-definitions/${encodeURIComponent(resultId)}/import`, { method: 'POST', body: JSON.stringify(payload) }),
+    getResultReport: async (resultId: string) => request<any>(`/branch-admin/result-definitions/${encodeURIComponent(resultId)}/report`),
     getAppointments: async (branchId: string) => request<{ appointments: BranchAppointment[] }>(`/appointments/branch?branchId=${encodeURIComponent(branchId)}`),
     respondToAppointment: async (appointmentId: string, payload: { action: 'APPROVE' | 'REJECT'; scheduledTime?: string; remarks: string }) =>
       request<{ message: string }>(`/appointments/respond/${encodeURIComponent(appointmentId)}`, { method: 'POST', body: JSON.stringify(payload) }),

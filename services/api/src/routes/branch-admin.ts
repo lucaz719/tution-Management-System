@@ -136,6 +136,81 @@ router.post('/result-definitions', async (req: TenantRequest, res: Response) => 
   return res.status(201).json({ message: 'Result created and made available to the assigned teacher.', definition });
 });
 
+async function loadManagedResult(req: TenantRequest, resultId: string) {
+  const definition = await prisma.resultDefinition.findFirst({
+    where: { id: resultId, tenantId: req.tenantId! },
+    include: {
+      class: {
+        include: {
+          branch: { select: { id: true, name: true } },
+          course: { include: { grade: { select: { id: true, name: true } } } },
+          enrollments: {
+            where: { status: { in: ['ACTIVE', 'BLOCKED'] } },
+            include: { student: { include: { user: { select: { firstName: true, lastName: true } } } } },
+            orderBy: { student: { user: { firstName: 'asc' } } },
+          },
+        },
+      },
+      scores: { include: { student: { include: { user: { select: { firstName: true, lastName: true } } } } } },
+    },
+  });
+  if (!definition || !branchAllowed(req, definition.branchId, 'manage_branch_calendar')) return null;
+  return definition;
+}
+
+router.get('/result-definitions/:id/template', async (req: TenantRequest, res: Response) => {
+  const definition = await loadManagedResult(req, req.params.id);
+  if (!definition) return res.status(404).json({ error: 'Result event not found in a branch you manage.' });
+  return res.json({
+    filename: `${definition.title}-${definition.class.name}-${definition.subject}`.replace(/[^A-Za-z0-9_-]+/g, '-').toLowerCase() + '.csv',
+    columns: ['student_id', 'admission_number', 'student_name', 'score', 'remarks'],
+    event: { id: definition.id, title: definition.title, subject: definition.subject, testDate: definition.testDate, className: definition.class.name, gradeName: definition.class.course.grade?.name ?? 'Ungraded', branchName: definition.class.branch.name },
+    rows: definition.class.enrollments.map((entry) => ({
+      student_id: entry.student.id,
+      admission_number: entry.student.admissionNumber ?? '',
+      student_name: `${entry.student.user.firstName} ${entry.student.user.lastName}`.trim(),
+      score: '',
+      remarks: '',
+    })),
+  });
+});
+
+router.post('/result-definitions/:id/import', async (req: TenantRequest, res: Response) => {
+  const definition = await loadManagedResult(req, req.params.id);
+  if (!definition) return res.status(404).json({ error: 'Result event not found in a branch you manage.' });
+  const maximum = Number(req.body?.maximum);
+  const passMarks = Number(req.body?.passMarks);
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  if (!Number.isFinite(maximum) || maximum <= 0 || maximum > 10_000 || !Number.isFinite(passMarks) || passMarks < 0 || passMarks > maximum) {
+    return res.status(400).json({ error: 'Full marks and pass marks must be valid, and pass marks cannot exceed full marks.' });
+  }
+  if (!rows.length || rows.length > 500) return res.status(400).json({ error: 'Upload between 1 and 500 student rows.' });
+  const enrolledIds = new Set(definition.class.enrollments.map((entry) => entry.studentId));
+  const normalized: Array<{ row: number; studentId: string; score: number }> = rows.map((row: any, index: number) => ({ row: index + 2, studentId: String(row?.studentId || '').trim(), score: Number(row?.score) }));
+  const duplicateIds = normalized.filter((row: { studentId: string }, index: number) => normalized.findIndex((candidate: { studentId: string }) => candidate.studentId === row.studentId) !== index).map((row: { studentId: string }) => row.studentId);
+  if (duplicateIds.length) return res.status(422).json({ error: `Duplicate student IDs: ${[...new Set(duplicateIds)].join(', ')}` });
+  const invalid = normalized.filter((row) => !enrolledIds.has(row.studentId) || !Number.isFinite(row.score) || row.score < 0 || row.score > maximum);
+  if (invalid.length) return res.status(422).json({ error: `Invalid student or score on CSV row${invalid.length === 1 ? '' : 's'} ${invalid.map((row) => row.row).join(', ')}.` });
+  const sorted = normalized.map((row) => row.score).sort((a, b) => a - b);
+  await prisma.$transaction(normalized.map((row) => prisma.studentScore.upsert({
+    where: { resultDefinitionId_studentId: { resultDefinitionId: definition.id, studentId: row.studentId } },
+    create: { tenantId: req.tenantId!, studentId: row.studentId, recordedBy: req.user!.id, resultDefinitionId: definition.id, subject: definition.subject, assessment: definition.title, score: row.score, maximum, passMarks, percentile: Math.round((sorted.filter((value) => value <= row.score).length / sorted.length) * 10000) / 100, testDate: definition.testDate },
+    update: { recordedBy: req.user!.id, score: row.score, maximum, passMarks, percentile: Math.round((sorted.filter((value) => value <= row.score).length / sorted.length) * 10000) / 100, publishedAt: null },
+  })));
+  return res.json({ message: `${normalized.length} result rows validated and saved as drafts.`, imported: normalized.length });
+});
+
+router.get('/result-definitions/:id/report', async (req: TenantRequest, res: Response) => {
+  const definition = await loadManagedResult(req, req.params.id);
+  if (!definition) return res.status(404).json({ error: 'Result event not found in a branch you manage.' });
+  const tenant = await prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { name: true } });
+  return res.json({
+    institutionName: tenant?.name ?? 'Tuition Management System',
+    event: { id: definition.id, title: definition.title, subject: definition.subject, testDate: definition.testDate, className: definition.class.name, gradeName: definition.class.course.grade?.name ?? 'Ungraded', branchName: definition.class.branch.name },
+    results: definition.scores.map((score) => ({ id: score.id, studentId: score.studentId, admissionNumber: definition.class.enrollments.find((entry) => entry.studentId === score.studentId)?.student.admissionNumber ?? '', studentName: `${score.student.user.firstName} ${score.student.user.lastName}`.trim(), score: Number(score.score), maximum: Number(score.maximum), passMarks: Number(score.passMarks ?? 0), percentile: Number(score.percentile ?? 0), published: Boolean(score.publishedAt) })).sort((a, b) => a.studentName.localeCompare(b.studentName)),
+  });
+});
+
 router.post('/fee-overrides', async (req: TenantRequest, res: Response) => {
   const { branchId, studentId, scope } = req.body;
   const reason = String(req.body.reason || '').trim();

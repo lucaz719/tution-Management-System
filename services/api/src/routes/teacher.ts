@@ -279,6 +279,7 @@ router.post('/results', authMiddleware, async (req: TenantRequest, res: Response
     const sorted = numeric.map((item: any) => item.score).sort((a: number, b: number) => a - b);
     const created = await prisma.$transaction(numeric.map((item: any) => prisma.studentScore.create({ data: {
       tenantId: req.tenantId!, studentId: item.studentId, recordedBy: req.user!.id, subject: subject.trim(), assessment: assessment.trim(),
+      resultDefinitionId: definition.id,
       score: item.score, maximum: max, passMarks: pass, percentile: Math.round((sorted.filter((value: number) => value <= item.score).length / sorted.length) * 10000) / 100,
       resultSheetUrl: typeof item.resultSheetUrl === 'string' && item.resultSheetUrl ? item.resultSheetUrl : null, testDate: testDate ? new Date(testDate) : new Date(), publishedAt: null,
     } })));
