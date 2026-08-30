@@ -11,6 +11,7 @@ import { isInvoiceOverdue, recurringInvoiceType } from '../utils/billing-rules';
 import { createConnectIpsForm, validateAndConfirmConnectIps } from '../utils/connectips';
 import { parsePlainRecord, parseStrictKeys, parseStrictObject, readBoolean, readFiniteNumber, readTrimmedString } from '../utils/request-validation';
 import { activateAdmissionAndSendLogins } from '../utils/admission-logins';
+import { buildFinancialIntelligence } from '../utils/financial-intelligence';
 
 const router = Router();
 
@@ -1004,39 +1005,42 @@ router.get(
   hasPermission('view_reports'),
   async (req: TenantRequest, res: Response) => {
     try {
-      // Analyze expense history and generate anomalous expense logs
-      // Rule-based and pattern-based suggestions:
-      // - "Last month rent was recorded. No rent entry yet for this month."
-      // - "Utility expense typically logged by 5th. None recorded yet."
-      // - "This month salary is 30% higher than last 3-month average."
-      // - Budget checks.
-      const alerts = [
-        {
-          type: 'MISSING_EXPENSE_ALERT',
-          severity: 'HIGH',
-          message: 'Last month rent (NPR 45,000) was recorded on the 1st. No rent entry has been registered yet for this billing cycle.',
-        },
-        {
-          type: 'PATTERN_REMINDER',
-          severity: 'MEDIUM',
-          message: 'Internet & electricity utility expenses are typically logged by the 5th of the month. None recorded yet.',
-        },
-        {
-          type: 'ANOMALY_DETECTION',
-          severity: 'WARNING',
-          message: 'This month simulated payroll total (NPR 185,000) is 30% higher than the last 3-month average. Please verify hours log.',
-        },
-      ];
-
-      const budgetPlanningPrompt = 'Based on current enrollment of 150 students, projected monthly gross income is NPR 762,500. Estimated fixed costs (rent, utilities, standard staff basic) are NPR 250,000. Projected operational surplus before variables: NPR 512,500.';
-
-      return res.status(200).json({
-        alerts,
-        budgetAnalysis: {
-          projectedSurplusNpr: 512500,
-          promptText: budgetPlanningPrompt,
-        },
+      const now = new Date();
+      const historyStart = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+      const historyEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const payrollPeriods = Array.from({ length: 4 }, (_, index) => {
+        const period = new Date(now.getFullYear(), now.getMonth() - index, 1);
+        return { year: period.getFullYear(), month: period.getMonth() + 1 };
       });
+      const [expenses, payrolls, enrollments] = await Promise.all([
+        prisma.expense.findMany({
+          where: { tenantId: req.tenantId!, date: { gte: historyStart, lt: historyEnd } },
+          select: { category: true, amount: true, date: true },
+        }),
+        prisma.payroll.findMany({
+          where: {
+            tenantId: req.tenantId!,
+            OR: payrollPeriods,
+          },
+          select: { netPayable: true, month: true, year: true },
+        }),
+        prisma.enrollment.findMany({
+          where: { status: 'ACTIVE', course: { tenantId: req.tenantId! } },
+          include: { course: { select: { feeStructure: true } } },
+        }),
+      ]);
+      const projectedIncomeNpr = enrollments.reduce((sum, enrollment) => {
+        const fee = enrollment.course.feeStructure as { monthlyBase?: number };
+        return sum + Number(fee?.monthlyBase || 0);
+      }, 0);
+
+      return res.status(200).json(buildFinancialIntelligence({
+        now,
+        expenses,
+        payrolls,
+        projectedIncomeNpr,
+        activeEnrollments: enrollments.length,
+      }));
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to generate financial intelligence suggestions.' });
     }
