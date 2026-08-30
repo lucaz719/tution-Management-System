@@ -29,8 +29,9 @@ class _StudentAcademicsScreenState extends State<StudentAcademicsScreen> {
                 showSelectedIcon: false,
                 segments: const [
                   ButtonSegment(value: 0, label: Text('Results')),
-                  ButtonSegment(value: 1, label: Text('Homework')),
-                  ButtonSegment(value: 2, label: Text('Insights')),
+                  ButtonSegment(value: 1, label: Text('Syllabus')),
+                  ButtonSegment(value: 2, label: Text('Homework')),
+                  ButtonSegment(value: 3, label: Text('Analytics')),
                 ],
                 selected: {_segment},
                 onSelectionChanged: (selection) =>
@@ -43,6 +44,7 @@ class _StudentAcademicsScreenState extends State<StudentAcademicsScreen> {
               index: _segment,
               children: const [
                 _ResultsView(),
+                _SyllabusView(),
                 _HomeworkView(),
                 _InsightsView(),
               ],
@@ -70,7 +72,7 @@ class _ResultsView extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(StudentSpace.md),
             decoration: BoxDecoration(
-              color: StudentColors.primary.withOpacity(.08),
+              color: StudentColors.primary.withValues(alpha: .08),
               borderRadius: BorderRadius.circular(StudentRadius.card),
             ),
             child: const Row(
@@ -104,7 +106,8 @@ class _ResultCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final aboveAverage = result.percentage >= result.classAverage / result.maximum * 100;
+    final aboveAverage =
+        result.percentage >= result.classAverage / result.maximum * 100;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(StudentSpace.md),
@@ -147,7 +150,9 @@ class _ResultCard extends StatelessWidget {
             Row(
               children: [
                 StudentStatusPill(
-                  label: aboveAverage ? 'Above class average' : 'Below class average',
+                  label: aboveAverage
+                      ? 'Above class average'
+                      : 'Below class average',
                   icon: aboveAverage
                       ? Icons.trending_up_rounded
                       : Icons.trending_down_rounded,
@@ -164,6 +169,74 @@ class _ResultCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _SyllabusView extends StatelessWidget {
+  const _SyllabusView();
+
+  @override
+  Widget build(BuildContext context) {
+    const subjects = [
+      ('Mathematics', 'Linear equations and geometry', 0.68),
+      ('Science', 'Force, motion, and chemical reactions', 0.61),
+      ('English', 'Literature analysis and creative writing', 0.74),
+      ('Social Studies', 'Civics and geography', 0.52),
+    ];
+
+    return RefreshIndicator(
+      onRefresh: () async =>
+          Future<void>.delayed(const Duration(milliseconds: 350)),
+      child: ListView(
+        padding: const EdgeInsets.all(StudentSpace.md),
+        children: [
+          Text('Term 2 syllabus',
+              style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: StudentSpace.xs),
+          Text(
+            'Follow the current topics and your class progress.',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: StudentColors.mutedText,
+                ),
+          ),
+          const SizedBox(height: StudentSpace.lg),
+          for (final subject in subjects) ...[
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(StudentSpace.md),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.menu_book_outlined,
+                            color: StudentColors.primary),
+                        const SizedBox(width: StudentSpace.sm),
+                        Expanded(
+                          child: Text(subject.$1,
+                              style: Theme.of(context).textTheme.titleMedium),
+                        ),
+                        Text('${(subject.$3 * 100).round()}%'),
+                      ],
+                    ),
+                    const SizedBox(height: StudentSpace.sm),
+                    Text(subject.$2),
+                    const SizedBox(height: StudentSpace.sm),
+                    LinearProgressIndicator(
+                      value: subject.$3,
+                      minHeight: 8,
+                      borderRadius: BorderRadius.circular(StudentRadius.pill),
+                      backgroundColor: StudentColors.border,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: StudentSpace.sm),
+          ],
+        ],
       ),
     );
   }
@@ -190,7 +263,7 @@ class _HomeworkView extends StatelessWidget {
                   color: (item.dueAt.isBefore(DateTime.now())
                           ? StudentColors.error
                           : StudentColors.primary)
-                      .withOpacity(.10),
+                      .withValues(alpha: .10),
                   borderRadius: BorderRadius.circular(StudentRadius.control),
                 ),
                 child: Icon(
@@ -230,8 +303,10 @@ class _InsightsView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const insights = StudentDemoData.insights;
-    final strongest = [...insights]..sort((a, b) => b.average.compareTo(a.average));
-    final weakest = [...insights]..sort((a, b) => a.average.compareTo(b.average));
+    final strongest = [...insights]
+      ..sort((a, b) => b.average.compareTo(a.average));
+    final weakest = [...insights]
+      ..sort((a, b) => a.average.compareTo(b.average));
     return ListView(
       padding: const EdgeInsets.all(StudentSpace.md),
       children: [

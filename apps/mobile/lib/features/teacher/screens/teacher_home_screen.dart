@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:tms_mobile/core/adaptive/breakpoints.dart';
 import 'package:tms_mobile/core/adaptive/capabilities.dart';
 import 'package:tms_mobile/core/adaptive/widgets/adaptive_layout.dart';
@@ -124,6 +125,11 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
             icon: Icons.people_outline,
             label: 'Manage Students',
             onTap: () {},
+          ),
+          _SidebarAction(
+            icon: Icons.event_note_outlined,
+            label: 'Leave Requests',
+            onTap: () => context.push('/teacher/leave'),
           ),
           _SidebarAction(
             icon: Icons.settings_outlined,
@@ -523,6 +529,12 @@ class _ProfileTab extends StatelessWidget {
                     const TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
             const SizedBox(height: 6),
             Text('${DemoTeacherData.branchName} • Senior Teacher'),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () => context.push('/teacher/change-password'),
+              icon: const Icon(Icons.key_rounded),
+              label: const Text('Change password'),
+            ),
           ],
         ),
       ),

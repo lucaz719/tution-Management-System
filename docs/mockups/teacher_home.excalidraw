@@ -1,0 +1,30 @@
+{
+  "type": "rectangle",
+  "id": "r1",
+  "x": 100,
+  "y": 100,
+  "width": 300,
+  "height": 250,
+  "roundness": { "type": 3 },
+  "backgroundColor": "#b2f2bb",
+  "fillStyle": "solid",
+  "boundElements": [
+    {
+      "id": "t_r1",
+      "type": "text",
+      "x": 105,
+      "y": 110,
+      "width": 290,
+      "height": 25,
+      "text": "Teacher Dashboard",
+      "fontSize": 20,
+      "fontFamily": 1,
+      "strokeColor": "#1e1e1e",
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "r1",
+      "originalText": "Teacher Dashboard",
+      "autoResize": true
+    }
+  ]
+}

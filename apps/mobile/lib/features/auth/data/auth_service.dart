@@ -160,24 +160,42 @@ class AuthService {
   }
 
   /// Reset the password using the token from [verifyPasswordOtp].
-  static Future<void> resetPassword({
-    required String resetToken,
-    required String newPassword,
-  }) async {
-    try {
-      await _dio.post(
-        '/api/auth/reset-password',
-        data: {
-          'resetToken': resetToken,
-          'newPassword': newPassword,
-        },
-      );
-    } on DioException catch (e) {
-      throw AuthFailure(_extractMessage(e, 'Failed to reset password.'));
+    static Future<void> resetPassword({
+      required String resetToken,
+      required String newPassword,
+    }) async {
+      try {
+        await _dio.post(
+          '/api/auth/reset-password',
+          data: {
+            'resetToken': resetToken,
+            'newPassword': newPassword,
+          },
+        );
+      } on DioException catch (e) {
+        throw AuthFailure(_extractMessage(e, 'Failed to reset password.'));
+      }
     }
-  }
 
-  /// Request a 2FA verification code for [email].
+    /// Change password for authenticated user (requires current password).
+    static Future<void> changePassword({
+      required String currentPassword,
+      required String newPassword,
+    }) async {
+      try {
+        await _dio.post(
+          '/api/auth/change-password',
+          data: {
+            'currentPassword': currentPassword,
+            'newPassword': newPassword,
+          },
+        );
+      } on DioException catch (e) {
+        throw AuthFailure(_extractMessage(e, 'Failed to change password.'));
+      }
+    }
+
+    /// Request a 2FA verification code for [email].
   static Future<void> sendTwoFactorCode(String email) async {
     try {
       await _dio.post(

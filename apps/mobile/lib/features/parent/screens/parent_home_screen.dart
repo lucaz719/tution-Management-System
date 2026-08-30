@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:tms_mobile/core/providers/auth_provider.dart';
+import 'package:tms_mobile/core/providers/child_selection_provider.dart';
 import 'package:tms_mobile/features/parent/widgets/child_switcher_bar.dart';
 import 'package:tms_mobile/shared/widgets/kpi_card.dart';
 
@@ -13,23 +14,20 @@ class ParentHomeScreen extends ConsumerStatefulWidget {
 }
 
 class _ParentHomeScreenState extends ConsumerState<ParentHomeScreen> {
-  final _children = const ['Aarav', 'Mira'];
-  late String _selectedChild;
-
-  @override
-  void initState() {
-    super.initState();
-    _selectedChild = _children.first;
-  }
-
   @override
   Widget build(BuildContext context) {
     final user = ref.watch(authProvider).user;
+    final selectedChild = ref.watch(childSelectionProvider);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Parent Dashboard'),
         actions: [
+          IconButton(
+            tooltip: 'Change password',
+            onPressed: () => context.push('/parent/change-password'),
+            icon: const Icon(Icons.key_rounded),
+          ),
           IconButton(
             tooltip: 'Logout',
             onPressed: () => ref.read(authProvider.notifier).logout(),
@@ -47,15 +45,11 @@ class _ParentHomeScreenState extends ConsumerState<ParentHomeScreen> {
                   style: Theme.of(context).textTheme.displaySmall),
               const SizedBox(height: 8),
               Text(
-                'Stay on top of attendance and payments for each child without switching devices or accounts.',
+                'Track attendance, academic progress, and payments for $selectedChild.',
                 style: Theme.of(context).textTheme.bodyLarge,
               ),
               const SizedBox(height: 20),
-              ChildSwitcherBar(
-                childrenNames: _children,
-                selectedChild: _selectedChild,
-                onChanged: (child) => setState(() => _selectedChild = child),
-              ),
+              const ChildSwitcherBar(),
               const SizedBox(height: 20),
               const Row(
                 children: [
@@ -81,6 +75,13 @@ class _ParentHomeScreenState extends ConsumerState<ParentHomeScreen> {
                 title: 'Attendance details',
                 subtitle: 'Check daily presence, absences, and late arrivals',
                 onTap: () => context.go('/parent/attendance'),
+              ),
+              const SizedBox(height: 14),
+              _ParentActionTile(
+                title: 'Academics & performance',
+                subtitle:
+                    'Review syllabus progress, assessments, and subject performance',
+                onTap: () => context.push('/parent/academics'),
               ),
               const SizedBox(height: 14),
               _ParentActionTile(
