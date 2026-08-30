@@ -495,7 +495,7 @@ export function StudentPortal() {
   }, [location.pathname, reloadKey]);
 
   useEffect(() => {
-    if (view !== 'syllabus') return;
+    if (view !== 'syllabus' && view !== 'results') return;
     const interval = window.setInterval(() => setReloadKey((value) => value + 1), 10_000);
     const refreshOnFocus = () => { if (document.visibilityState === 'visible') setReloadKey((value) => value + 1); };
     document.addEventListener('visibilitychange', refreshOnFocus);

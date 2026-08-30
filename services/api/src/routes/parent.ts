@@ -121,7 +121,7 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
         include: { author: { select: { firstName: true, lastName: true } } },
         orderBy: { createdAt: 'desc' },
       }),
-      prisma.studentScore.findMany({ where: { tenantId: req.tenantId!, studentId: student.id }, orderBy: { testDate: 'asc' } }),
+      prisma.studentScore.findMany({ where: { tenantId: req.tenantId!, studentId: student.id, publishedAt: { not: null } }, orderBy: { testDate: 'asc' } }),
       prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { appointmentWindowHours: true } }),
       prisma.user.findMany({ where: { tenantId: req.tenantId!, status: 'ACTIVE', userRoles: { some: { branchId: { in: branchIds }, role: { name: 'Branch Admin' } } } }, select: { id: true, firstName: true, lastName: true } }),
     ]);

@@ -110,7 +110,7 @@ router.get('/teacher-workflows', async (req: TenantRequest, res: Response) => {
     prisma.studentAttendance.findMany({ where: { date: { gte: start, lt: end }, class: { branchId, course: { tenantId: req.tenantId! } } }, include: { student: { include: { user: { select: { firstName: true, lastName: true } } } }, class: { include: { course: { select: { name: true } }, assignedTeacher: { select: { firstName: true, lastName: true } } } } }, orderBy: [{ class: { name: 'asc' } }, { student: { user: { firstName: 'asc' } } }] }),
     prisma.syllabus.findMany({ where: { class: { branchId, course: { tenantId: req.tenantId! } } }, include: { class: { include: { assignedTeacher: { select: { firstName: true, lastName: true } } } }, chapters: { orderBy: { position: 'asc' }, include: { topics: { orderBy: { position: 'asc' }, include: { logs: { orderBy: { logDate: 'desc' }, take: 1 } } } } } }, orderBy: { updatedAt: 'desc' } }),
     prisma.homework.findMany({ where: { class: { branchId, course: { tenantId: req.tenantId! } } }, include: { class: { include: { assignedTeacher: { select: { firstName: true, lastName: true } } } } }, orderBy: { createdAt: 'desc' }, take: 100 }),
-    prisma.resultDefinition.findMany({ where: { tenantId: req.tenantId!, branchId }, orderBy: { testDate: 'desc' } }),
+    prisma.resultDefinition.findMany({ where: { tenantId: req.tenantId!, branchId }, include: { scores: { select: { publishedAt: true } } }, orderBy: { testDate: 'desc' } }),
     prisma.leave.findMany({ where: { tenantId: req.tenantId!, branchId, user: { userRoles: { some: { role: { name: 'Teacher' } } } } }, include: { user: { select: { firstName: true, lastName: true } } }, orderBy: { createdAt: 'desc' }, take: 100 }),
     prisma.class.findMany({ where: { branchId, course: { tenantId: req.tenantId! }, teacherId: { not: null } }, include: { course: { select: { name: true } }, assignedTeacher: { select: { firstName: true, lastName: true } } }, orderBy: { name: 'asc' } }),
     prisma.user.findMany({
@@ -124,7 +124,7 @@ router.get('/teacher-workflows', async (req: TenantRequest, res: Response) => {
       orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
     }),
   ]);
-  return res.json({ branches, selectedBranch: branches.find((branch) => branch.id === branchId), date: start.toISOString(), attendance: attendance.map((row) => ({ id: row.id, studentName: `${row.student.user.firstName} ${row.student.user.lastName}`.trim(), className: row.class.name, subject: row.class.course.name, teacherName: row.class.assignedTeacher ? `${row.class.assignedTeacher.firstName} ${row.class.assignedTeacher.lastName}`.trim() : 'Unassigned', status: row.status })), syllabi, homework, resultDefinitions, leaves, classes, teachers });
+  return res.json({ branches, selectedBranch: branches.find((branch) => branch.id === branchId), date: start.toISOString(), attendance: attendance.map((row) => ({ id: row.id, studentName: `${row.student.user.firstName} ${row.student.user.lastName}`.trim(), className: row.class.name, subject: row.class.course.name, teacherName: row.class.assignedTeacher ? `${row.class.assignedTeacher.firstName} ${row.class.assignedTeacher.lastName}`.trim() : 'Unassigned', status: row.status })), syllabi, homework, resultDefinitions: resultDefinitions.map(({ scores, ...definition }) => ({ ...definition, scoreCount: scores.length, draftCount: scores.filter((score) => !score.publishedAt).length, publishedCount: scores.filter((score) => score.publishedAt).length })), leaves, classes, teachers });
 });
 
 router.post('/result-definitions', async (req: TenantRequest, res: Response) => {
@@ -178,6 +178,7 @@ router.get('/result-definitions/:id/template', async (req: TenantRequest, res: R
 router.post('/result-definitions/:id/import', async (req: TenantRequest, res: Response) => {
   const definition = await loadManagedResult(req, req.params.id);
   if (!definition) return res.status(404).json({ error: 'Result event not found in a branch you manage.' });
+  if (!definition.isOpen) return res.status(409).json({ error: 'Mark changes are paused for this event. Allow changes before uploading another file.' });
   const maximum = Number(req.body?.maximum);
   const passMarks = Number(req.body?.passMarks);
   const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
@@ -191,6 +192,9 @@ router.post('/result-definitions/:id/import', async (req: TenantRequest, res: Re
   if (duplicateIds.length) return res.status(422).json({ error: `Duplicate student IDs: ${[...new Set(duplicateIds)].join(', ')}` });
   const invalid = normalized.filter((row) => !enrolledIds.has(row.studentId) || !Number.isFinite(row.score) || row.score < 0 || row.score > maximum);
   if (invalid.length) return res.status(422).json({ error: `Invalid student or score on CSV row${invalid.length === 1 ? '' : 's'} ${invalid.map((row) => row.row).join(', ')}.` });
+  const publishedIds = new Set(definition.scores.filter((score) => score.publishedAt).map((score) => score.studentId));
+  const locked = normalized.filter((row) => publishedIds.has(row.studentId));
+  if (locked.length) return res.status(409).json({ error: `Published marks are locked. Remove student${locked.length === 1 ? '' : 's'} ${locked.map((row) => row.studentId).join(', ')} from this upload.` });
   const sorted = normalized.map((row) => row.score).sort((a, b) => a - b);
   await prisma.$transaction(normalized.map((row) => prisma.studentScore.upsert({
     where: { resultDefinitionId_studentId: { resultDefinitionId: definition.id, studentId: row.studentId } },
@@ -228,6 +232,7 @@ router.post('/result-definitions/:id/publish', async (req: TenantRequest, res: R
   if (!definition.scores.length) return res.status(409).json({ error: 'Upload at least one result before publishing.' });
   const publishedAt = new Date();
   const update = await prisma.studentScore.updateMany({ where: { tenantId: req.tenantId!, resultDefinitionId: definition.id, publishedAt: null }, data: { publishedAt } });
+  if (update.count === 0) return res.status(409).json({ error: 'No unpublished result drafts are available. Upload or update result rows before publishing.' });
   return res.json({ message: `${update.count} result${update.count === 1 ? '' : 's'} published.`, published: update.count });
 });
 
