@@ -1,10 +1,12 @@
-import { useEffect, useState, useMemo, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, useMemo, type FormEvent, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { SharedBillingWorkspace } from '../components/finance/SharedBillingWorkspace';
 import { api, type BranchAppointment } from '../services/api';
+import { resourcesApi, type MaintenanceTask } from '../services/api/resources';
+import { API_BASE_URL, request } from '../services/api/client';
 import './staffFinance.css';
 
 function CalendarGrid({ onDateClick, events }: { onDateClick: (date: Date) => void; events: Record<string, string> }) {
@@ -484,20 +486,33 @@ function BranchCalendarView() {
   const action = useAction();
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [showAddEvent, setShowAddEvent] = useState(false);
-  const [events, setEvents] = useState<Record<string, string>>({
-    '2026-08-15': 'Independence Day Holiday',
-    '2026-08-20': 'Parent-Teacher Meeting',
-    '2026-08-25': 'Mid-Term Exams Begin'
-  });
+  const [events, setEvents] = useState<Record<string, string>>({});
+  const [branchId, setBranchId] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   
   const [newEventDate, setNewEventDate] = useState('');
   const [newEventTitle, setNewEventTitle] = useState('');
 
+  const load = useCallback(async () => {
+    setLoading(true); setLoadError('');
+    try {
+      const dashboard = await api.branchAdmin.getDashboard();
+      const response = await request<{ events: any[] }>(`/academic-events?branchId=${encodeURIComponent(dashboard.selectedBranch.id)}`);
+      setBranchId(dashboard.selectedBranch.id);
+      setEvents(Object.fromEntries(response.events
+        .filter((event: any) => !event.branchId || event.branchId === dashboard.selectedBranch.id)
+        .map((event: any) => [String(event.startDate).slice(0, 10), event.title])));
+    } catch (cause) { setLoadError(cause instanceof Error ? cause.message : 'Calendar events could not be loaded.'); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
   const submitEvent = (e: FormEvent) => {
     e.preventDefault();
     void action.run(async () => {
-      await new Promise(r => setTimeout(r, 500));
-      setEvents(prev => ({ ...prev, [newEventDate]: newEventTitle }));
+      await api.branchAdmin.createCalendarEvent({ branchId, title: newEventTitle, eventType: 'EVENT', startDate: newEventDate, endDate: newEventDate });
+      await load();
       setShowAddEvent(false);
       setNewEventDate('');
       setNewEventTitle('');
@@ -523,15 +538,15 @@ function BranchCalendarView() {
                   <label style={label}>Event Title<input required style={field} value={newEventTitle} onChange={e => setNewEventTitle(e.target.value)} placeholder="e.g. Science Fair" /></label>
                   <label style={label}>Event Date<input type="date" required style={field} value={newEventDate} onChange={e => setNewEventDate(e.target.value)} /></label>
                 </div>
-                <Feedback message={action.message} error={action.error} />
-                <Button type="submit" disabled={action.busy} style={{ width: 'fit-content' }}>
+                <Feedback message={action.message} error={loadError || action.error} />
+                <Button type="submit" disabled={action.busy || !branchId} style={{ width: 'fit-content' }}>
                   {action.busy ? 'Saving...' : 'Save Event'}
                 </Button>
               </form>
             </div>
           )}
 
-          <CalendarGrid onDateClick={setSelectedDate} events={events} />
+          {loading ? <p aria-busy="true" style={{ padding: 24, color: 'var(--text-muted)' }}>Loading academic calendar…</p> : loadError ? <div><Feedback message="" error={loadError} /><Button variant="outline" onClick={() => void load()}>Try again</Button></div> : <CalendarGrid onDateClick={setSelectedDate} events={events} />}
         </Card>
         {selectedDate && (
           <Card hoverable={false}>
@@ -554,53 +569,62 @@ function BranchCalendarView() {
 }
 function ResourceTasks() {
   const action = useAction();
-  const [branchId, setBranchId] = useState('B-101');
-  const [taskId, setTaskId] = useState('');
+  const [branches, setBranches] = useState<Array<{ id: string; name: string }>>([]);
+  const [branchId, setBranchId] = useState('');
+  const [tasks, setTasks] = useState<MaintenanceTask[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
-  const mockTasks = [
-    { id: 'T-8921', issue: 'AC Unit 2 malfunctioning', location: 'Room 302', priority: 'High', status: 'Pending' },
-    { id: 'T-8922', issue: 'Broken chair', location: 'Lab 1', priority: 'Low', status: 'Pending' }
-  ];
+  const load = useCallback(async (requestedBranchId?: string) => {
+    setLoading(true); setLoadError('');
+    try {
+      const dashboard = await api.branchAdmin.getDashboard(requestedBranchId);
+      const selected = requestedBranchId || dashboard.selectedBranch.id;
+      setBranches(dashboard.branches);
+      setBranchId(selected);
+      setTasks((await resourcesApi.tasks(selected)).tasks);
+    } catch (cause) {
+      setTasks([]);
+      setLoadError(cause instanceof Error ? cause.message : 'Maintenance tasks could not be loaded.');
+    } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
 
   const handleComplete = (id: string) => {
     void action.run(async () => {
-      await new Promise(r => setTimeout(r, 600));
-      // In mock, do nothing to list, just show toast
-    }, `Task ${id} marked complete with actor and timestamp recorded.`);
+      await resourcesApi.complete(id);
+      await load(branchId);
+    }, 'Task marked complete with actor and timestamp recorded.');
   };
+
+  const openTasks = tasks.filter((task) => task.status !== 'COMPLETED');
 
   return (
     <Page title="Resource and maintenance" description="Action-required logs auto-assign maintenance staff; escalated tasks remain visible for direct follow-up.">
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: '20px' }}>
         <Card hoverable={false}>
-          <h2 style={{ fontSize: '18px', marginBottom: '16px' }}>Pending Maintenance Tasks</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'end', marginBottom: 16 }}><h2 style={{ fontSize: '18px' }}>Pending Maintenance Tasks</h2>{branches.length > 1 ? <label style={label}>Branch<select style={field} value={branchId} disabled={loading} onChange={(event) => void load(event.target.value)}>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label> : null}</div>
+          <Feedback message={action.message} error={loadError || action.error} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {mockTasks.map(task => (
+            {loading ? <p aria-busy="true" style={{ color: 'var(--text-muted)' }}>Loading maintenance tasks…</p> : openTasks.map(task => (
               <div key={task.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', border: '1px solid var(--border)', borderRadius: '8px', background: 'var(--color-surface)' }}>
                 <div>
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '4px' }}>
                     <span style={{ fontWeight: 600, fontSize: '15px' }}>{task.id}</span>
-                    <StatusBadge variant={task.priority === 'High' ? 'error' : 'info'}>{task.priority} Priority</StatusBadge>
+                    <StatusBadge variant={task.status === 'ESCALATED' ? 'error' : 'warning'}>{task.status.replaceAll('_', ' ')}</StatusBadge>
                   </div>
-                  <div style={{ color: 'var(--color-text)', fontSize: '14px' }}>{task.issue}</div>
-                  <div style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '4px' }}>Location: {task.location}</div>
+                  <div style={{ color: 'var(--color-text)', fontSize: '14px' }}>{task.description}</div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '4px' }}>Classroom: {task.classroomId} · Logged {new Date(task.createdAt).toLocaleString('en-NP')}</div>
                 </div>
-                <Button onClick={() => handleComplete(task.id)}>Mark Complete</Button>
+                <Button disabled={action.busy} onClick={() => handleComplete(task.id)}>Mark Complete</Button>
               </div>
             ))}
+            {!loading && !loadError && !openTasks.length ? <p role="status" style={{ color: 'var(--text-muted)', padding: 24, textAlign: 'center' }}>All caught up. No maintenance tasks need action.</p> : null}
           </div>
         </Card>
         
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <Card hoverable={false}>
-            <div style={form}>
-              <h3 style={{ fontSize: '15px', marginBottom: '8px' }}>Manual Task Completion</h3>
-              <label style={label}>Branch ID<input value={branchId} onChange={e => setBranchId(e.target.value)} style={field} /></label>
-              <label style={label}>Task ID<input value={taskId} onChange={e => setTaskId(e.target.value)} placeholder="e.g. T-8921" style={field} /></label>
-              <Feedback message={action.message} error={action.error} />
-              <Button disabled={action.busy || !taskId.trim()} onClick={() => handleComplete(taskId)}>Complete task</Button>
-            </div>
-          </Card>
           <Card hoverable={false}>
             <h2 style={{ fontSize: 16 }}>Escalation policy</h2>
             <p style={{ marginTop: 8, color: 'var(--color-text-muted, rgba(44,62,80,.7))', fontSize: '13px' }}>Tasks unresolved after the Tenant Admin-configured threshold are marked escalated. Default assignment remains branch-scoped.</p>
@@ -613,73 +637,6 @@ function ResourceTasks() {
     </Page>
   );
 }
-function Drafting() {
-  const action = useAction();
-  const [branchId, setBranchId] = useState('');
-  const [text, setText] = useState('');
-  const [platform, setPlatform] = useState('Facebook');
-  const [proposedTime, setProposedTime] = useState('');
-  const [activeTab, setActiveTab] = useState<'create' | 'history'>('create');
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    void action.run(() => api.branchAdmin.createSocialDraft({ branchId, text, platforms: [platform], mediaUrls: [], proposedTime: proposedTime || undefined }), 'Draft submitted to Tenant Admin. Nothing was published.');
-  };
-
-  const mockHistory = [
-    { id: '1', content: 'Exciting news! Enrollment is open.', platform: 'Facebook', status: 'PUBLISHED', date: '2026-08-01' },
-    { id: '2', content: 'Join us for the science fair this weekend.', platform: 'Instagram', status: 'PENDING', date: '2026-08-10' },
-    { id: '3', content: 'Our students placed 1st in the regional debate.', platform: 'LinkedIn', status: 'APPROVED', date: '2026-08-12' },
-  ];
-
-  return (
-    <Page title="Social Media Management" description="Prepare branch posts for Tenant Admin approval and view their status. Branch Admins cannot publish directly.">
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
-        <Button variant={activeTab === 'create' ? 'primary' : 'outline'} onClick={() => setActiveTab('create')}>Draft New Post</Button>
-        <Button variant={activeTab === 'history' ? 'primary' : 'outline'} onClick={() => setActiveTab('history')}>Post Status & History</Button>
-      </div>
-
-      {activeTab === 'create' ? (
-        <Card hoverable={false}>
-          <form onSubmit={submit} style={form} aria-busy={action.busy}>
-            <label style={label}>Branch ID (required)<input required value={branchId} onChange={e => setBranchId(e.target.value)} style={field} /></label>
-            <label style={label}>Post text (required)<textarea required value={text} onChange={e => setText(e.target.value)} style={{ ...field, minHeight: 112 }} /></label>
-            <label style={label}>Target platform
-              <select value={platform} onChange={e => setPlatform(e.target.value)} style={field}>
-                <option>Facebook</option><option>Instagram</option><option>LinkedIn</option>
-              </select>
-            </label>
-            <label style={label}>Proposed schedule<input type="datetime-local" value={proposedTime} onChange={e => setProposedTime(e.target.value)} style={field} /></label>
-            <Feedback message={action.message} error={action.error} />
-            <Button type="submit" disabled={action.busy || !text.trim() || !branchId.trim()}>{action.busy ? 'Submitting…' : 'Submit for approval'}</Button>
-            <Button disabled variant="outline">Direct publishing unavailable</Button>
-          </form>
-        </Card>
-      ) : (
-        <Card hoverable={false}>
-          <h2 style={{ fontSize: '18px' }}>Post History</h2>
-          <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {mockHistory.map((post) => (
-              <div key={post.id} style={{ padding: '16px', border: '1px solid var(--border)', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <StatusBadge variant="info">{post.platform}</StatusBadge>
-                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{post.date}</span>
-                  </div>
-                  <p style={{ marginTop: '8px', fontSize: '14px' }}>{post.content}</p>
-                </div>
-                <StatusBadge variant={post.status === 'PUBLISHED' ? 'success' : post.status === 'APPROVED' ? 'info' : 'warning'}>
-                  {post.status}
-                </StatusBadge>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-    </Page>
-  );
-}
-
 function AttendanceView() {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [filter, setFilter] = useState<'All' | 'Present' | 'Absent'>('All');
@@ -950,22 +907,33 @@ function ResultsView() {
 }
 
 function CertificatesView() {
-  const [student, setStudent] = useState('');
+  const [studentKey, setStudentKey] = useState('');
   const [template, setTemplate] = useState('');
   const [preview, setPreview] = useState(false);
+  const [templates, setTemplates] = useState<Array<{ id: string; name: string; type: string }>>([]);
+  const [students, setStudents] = useState<Array<{ studentId: string; studentName: string; gradeName: string; branchId: string; branchName: string }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [issuedId, setIssuedId] = useState('');
   const action = useAction();
+  const selectedStudent = students.find((item) => `${item.studentId}:${item.branchId}` === studentKey);
 
-  const templates = [
-    { id: '1', name: 'Course Completion Certificate' },
-    { id: '2', name: 'Certificate of Merit' },
-  ];
+  const load = useCallback(async () => {
+    setLoading(true); setLoadError('');
+    try { const options = await api.branchAdmin.getCertificateOptions(); setTemplates(options.templates); setStudents(options.students); }
+    catch (cause) { setLoadError(cause instanceof Error ? cause.message : 'Certificate options could not be loaded.'); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
+    if (!selectedStudent) return;
     void action.run(async () => {
-      // Mock API call to issue certificate
-      await new Promise(r => setTimeout(r, 1000));
-    }, 'Certificate issued successfully. PDF download started.');
+      const result = await api.branchAdmin.issueCertificate({ studentId: selectedStudent.studentId, templateId: template, branchId: selectedStudent.branchId });
+      setIssuedId(result.certificate.certificateId);
+      setPreview(false);
+    }, 'Certificate issued and saved to the student record.');
   };
 
   return (
@@ -973,43 +941,42 @@ function CertificatesView() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
         <Card hoverable={false}>
           <h2 style={{ fontSize: '18px' }}>Issue Certificate</h2>
-          <form onSubmit={submit} style={{ ...form, marginTop: '16px' }}>
+          <form onSubmit={submit} style={{ ...form, marginTop: '16px' }} aria-busy={action.busy}>
             <label style={label}>
               Select Student
-              <input required style={field} placeholder="Enter Student ID or Name" value={student} onChange={e => setStudent(e.target.value)} />
+              <select required style={field} value={studentKey} disabled={loading} onChange={e => { setStudentKey(e.target.value); setPreview(false); setIssuedId(''); }}><option value="">Choose a student…</option>{students.map((item) => <option key={`${item.studentId}:${item.branchId}`} value={`${item.studentId}:${item.branchId}`}>{item.studentName} · {item.gradeName} · {item.branchName}</option>)}</select>
             </label>
             <label style={label}>
               Select Template
-              <select required style={field} value={template} onChange={e => setTemplate(e.target.value)}>
+              <select required style={field} value={template} disabled={loading} onChange={e => { setTemplate(e.target.value); setPreview(false); setIssuedId(''); }}>
                 <option value="" disabled>Choose a template...</option>
                 {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
             </label>
             
-            {template && student && (
+            {template && selectedStudent && (
               <div style={{ marginTop: '12px', padding: '16px', background: 'var(--color-surface)', border: '1px solid var(--border)', borderRadius: '8px' }}>
-                <h3 style={{ fontSize: '14px', marginBottom: '12px' }}>Auto-filled Data (Editable)</h3>
-                <label style={label}>Student Name<input style={field} defaultValue="Aakash Bista" /></label>
-                <div style={{ height: '12px' }} />
-                <label style={label}>Course / Achievement<input style={field} defaultValue="Advanced Physics (Grade 12)" /></label>
-                <div style={{ height: '12px' }} />
-                <label style={label}>Date of Issue<input style={field} type="date" defaultValue="2026-08-15" /></label>
+                <h3 style={{ fontSize: '14px', marginBottom: '12px' }}>Certificate details</h3>
+                <p><strong>{selectedStudent.studentName}</strong><br /><span style={{ color: 'var(--text-muted)' }}>{selectedStudent.gradeName} · {selectedStudent.branchName}</span></p>
+                <p style={{ marginTop: 10, color: 'var(--text-muted)' }}>{templates.find((item) => item.id === template)?.name}</p>
                 <Button type="button" variant="outline" style={{ marginTop: '16px', width: '100%' }} onClick={() => setPreview(true)}>Generate Preview</Button>
               </div>
             )}
             
-            <Feedback message={action.message} error={action.error} />
+            <Feedback message={action.message} error={loadError || action.error} />
+            {loading ? <p aria-busy="true" style={{ color: 'var(--text-muted)' }}>Loading students and templates…</p> : !loadError && (!students.length || !templates.length) ? <p role="status" style={{ color: 'var(--text-muted)' }}>{!templates.length ? 'Create a certificate template before issuing certificates.' : 'No enrolled students are available in your branch.'}</p> : null}
             <Button type="submit" disabled={!preview || action.busy}>{action.busy ? 'Issuing...' : 'Issue & Download PDF'}</Button>
+            {issuedId ? <Button type="button" variant="outline" onClick={() => window.open(`${API_BASE_URL}/certificates/${encodeURIComponent(issuedId)}/download`, '_blank', 'noopener,noreferrer')}>Download issued PDF</Button> : null}
           </form>
         </Card>
         
         <Card hoverable={false} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '400px', background: 'var(--color-surface)' }}>
-          {preview ? (
+          {preview && selectedStudent ? (
             <div style={{ width: '100%', height: '100%', border: '2px dashed var(--color-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', textAlign: 'center' }}>
               <div>
                 <span className="material-symbols-outlined" style={{ fontSize: '48px', color: 'var(--color-primary)' }}>verified</span>
-                <h3 style={{ fontSize: '18px', marginTop: '12px' }}>Certificate Preview Ready</h3>
-                <p style={{ color: 'var(--text-muted)', fontSize: '14px', marginTop: '8px' }}>Visual rendering of the generated certificate will appear here.</p>
+                <h3 style={{ fontSize: '18px', marginTop: '12px' }}>{templates.find((item) => item.id === template)?.name}</h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '14px', marginTop: '8px' }}>Prepared for {selectedStudent.studentName}, {selectedStudent.gradeName}, at {selectedStudent.branchName}.</p>
               </div>
             </div>
           ) : (
@@ -1869,4 +1836,4 @@ function ParentMessagesView() {
   </Page>;
 }
 
-export function BranchAdminWorkspace() { const path = useLocation().pathname; if (path.includes('appointments')) return <AppointmentsView />; if (path.includes('leave-requests')) return <LiveTeacherWorkflow mode="leaves" />; if (path.includes('petty-cash')) return <PettyCashView />; if (path.includes('student-exceptions')) return <StudentExceptions />; if (path.includes('classes')) return <BranchClassesView />; if (path.includes('resource-logs')) return <ResourceTasks />; if (path.includes('academic-calendar')) return <BranchCalendarView />; if (path.includes('messages')) return <ParentMessagesView />; if (path.includes('social-media') || path.includes('announcements')) return <Drafting />; if (path.includes('attendance')) return <LiveTeacherWorkflow mode="attendance" />; if (path.includes('homework')) return <LiveTeacherWorkflow mode="homework" />; if (path.includes('results')) return <LiveTeacherWorkflow mode="results" />; if (path.includes('syllabus')) return <LiveTeacherWorkflow mode="syllabus" />; if (path.includes('fees')) return <FeeBillingView />; if (path.includes('certificates')) return <CertificatesView />; if (path.includes('timetable')) return <TimetableView />; if (path.includes('teachers')) return <LiveBranchTeachersView />; if (path.includes('students')) return <BranchStudentsView />; return <Page title="Branch operations" description="This workspace is limited to your assigned physical branch."><Card hoverable={false}>Choose a branch operation from the navigation.</Card></Page>; }
+export function BranchAdminWorkspace() { const path = useLocation().pathname; if (path.includes('appointments')) return <AppointmentsView />; if (path.includes('leave-requests')) return <LiveTeacherWorkflow mode="leaves" />; if (path.includes('petty-cash')) return <PettyCashView />; if (path.includes('student-exceptions')) return <StudentExceptions />; if (path.includes('classes')) return <BranchClassesView />; if (path.includes('resource-logs')) return <ResourceTasks />; if (path.includes('academic-calendar')) return <BranchCalendarView />; if (path.includes('messages')) return <ParentMessagesView />; if (path.includes('attendance')) return <LiveTeacherWorkflow mode="attendance" />; if (path.includes('homework')) return <LiveTeacherWorkflow mode="homework" />; if (path.includes('results')) return <LiveTeacherWorkflow mode="results" />; if (path.includes('syllabus')) return <LiveTeacherWorkflow mode="syllabus" />; if (path.includes('fees')) return <FeeBillingView />; if (path.includes('certificates')) return <CertificatesView />; if (path.includes('timetable')) return <TimetableView />; if (path.includes('teachers')) return <LiveBranchTeachersView />; if (path.includes('students')) return <BranchStudentsView />; return <Page title="Branch operations" description="This workspace is limited to your assigned physical branch."><Card hoverable={false}>Choose a branch operation from the navigation.</Card></Page>; }

@@ -158,6 +158,39 @@ function validateNewUserBody(body: any): { firstName: string; lastName: string; 
   };
 }
 
+function validateAdmissionDetails(body: unknown) {
+  return parseStrictObject(body, {
+    fields: {
+      admittedAt: { required: true, maxLength: 40, message: 'Admission date and time are required.' },
+      dateOfBirth: { required: true, maxLength: 10, pattern: /^\d{4}-\d{2}-\d{2}$/, message: 'A valid student date of birth is required.' },
+      gender: { required: true, maxLength: 30, message: 'Student gender is required.' },
+      bloodGroup: { required: false, maxLength: 10, message: 'Blood group is too long.' },
+      nationality: { required: true, maxLength: 80, message: 'Student nationality is required.' },
+      permanentAddress: { required: true, maxLength: 500, message: 'Student permanent address is required.' },
+      temporaryAddress: { required: false, maxLength: 500, message: 'Student temporary address is too long.' },
+      school: { required: false, maxLength: 200, message: 'School name is too long.' },
+      medicalNotes: { required: false, maxLength: 2000, message: 'Medical notes are too long.' },
+      fatherName: { required: true, maxLength: 200, message: "Father's full name is required." },
+      fatherPhone: { required: true, maxLength: 30, pattern: /^[0-9+()\-\s]+$/, message: "A valid father's phone number is required." },
+      fatherEmail: { required: false, maxLength: 254, pattern: /^$|^[^\s@]+@[^\s@]+\.[^\s@]+$/, normalize: normalizeEmail, message: "Father's email is invalid." },
+      fatherOccupation: { required: false, maxLength: 150, message: "Father's occupation is too long." },
+      motherName: { required: true, maxLength: 200, message: "Mother's full name is required." },
+      motherPhone: { required: true, maxLength: 30, pattern: /^[0-9+()\-\s]+$/, message: "A valid mother's phone number is required." },
+      motherEmail: { required: false, maxLength: 254, pattern: /^$|^[^\s@]+@[^\s@]+\.[^\s@]+$/, normalize: normalizeEmail, message: "Mother's email is invalid." },
+      motherOccupation: { required: false, maxLength: 150, message: "Mother's occupation is too long." },
+      optionalParentName: { required: false, maxLength: 200, message: "Optional parent's name is too long." },
+      optionalParentPhone: { required: false, maxLength: 30, pattern: /^$|^[0-9+()\-\s]+$/, message: "Optional parent's phone number is invalid." },
+      optionalParentEmail: { required: false, maxLength: 254, pattern: /^$|^[^\s@]+@[^\s@]+\.[^\s@]+$/, normalize: normalizeEmail, message: "Optional parent's email is invalid." },
+      optionalParentOccupation: { required: false, maxLength: 150, message: "Optional parent's occupation is too long." },
+      optionalParentRelationship: { required: false, maxLength: 80, message: "Optional parent's relationship is too long." },
+      primaryParent: { required: true, maxLength: 30, pattern: /^(Father|Mother|Optional parent)$/, message: 'Select which recorded parent receives account credentials.' },
+      emergencyContactName: { required: true, maxLength: 200, message: 'Emergency contact name is required.' },
+      emergencyContactPhone: { required: true, maxLength: 30, pattern: /^[0-9+()\-\s]+$/, message: 'A valid emergency contact phone is required.' },
+      emergencyContactRelationship: { required: true, maxLength: 80, message: 'Emergency contact relationship is required.' },
+    },
+  });
+}
+
 // --- Caller capabilities: drives what the People UI can do ---
 router.get('/me', authMiddleware, async (req: TenantRequest, res: Response) => {
   const user = req.user as UserPayload;
@@ -189,7 +222,7 @@ router.get('/me', authMiddleware, async (req: TenantRequest, res: Response) => {
 // Admission creates inactive Student/Parent accounts and a branch-priced invoice.
 // Logins are activated and delivered by SMS only after that invoice is paid.
 router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Response) => {
-  const admissionShape = parseStrictKeys(req.body, ['branchId', 'gradeId', 'classId', 'student', 'parent']);
+  const admissionShape = parseStrictKeys(req.body, ['branchId', 'gradeId', 'classId', 'student', 'parent', 'admissionDetails']);
   if (!admissionShape.success) return res.status(400).json({ error: admissionShape.error });
   const caller = req.user as UserPayload;
   const tenantAdmin = isTenantAdmin(caller);
@@ -203,9 +236,10 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
 
   const studentFields = validateNewUserBody(admissionShape.data.student);
   const parentFields = validateNewUserBody(admissionShape.data.parent);
-  if (!branchId || !gradeId || !classId || !studentFields || !parentFields) {
+  const admissionDetails = validateAdmissionDetails(admissionShape.data.admissionDetails);
+  if (!branchId || !gradeId || !classId || !studentFields || !parentFields || !admissionDetails.success) {
     return res.status(400).json({
-      error: 'branchId, gradeId, regular class, and complete student and parent identity details are required.',
+      error: admissionDetails.success ? 'Branch, grade, regular class, and complete student and primary guardian identity details are required.' : admissionDetails.error,
     });
   }
 
@@ -235,6 +269,22 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
     bcrypt.hash(parentPassword, 10),
   ]);
   const now = new Date();
+  const admittedAt = new Date(admissionDetails.data.admittedAt);
+  if (Number.isNaN(admittedAt.getTime())) {
+    return res.status(400).json({ error: 'A valid admission date and time are required.' });
+  }
+  const admissionNumber = `ADM-${admittedAt.toISOString().slice(0, 10).replaceAll('-', '')}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+  const savedAdmissionRecord = {
+    ...admissionDetails.data,
+    primaryGuardian: {
+      name: `${parentFields.firstName} ${parentFields.lastName}`.trim(),
+      email: parentFields.email,
+      phone: parentFields.phone,
+      relationship: admissionDetails.data.primaryParent,
+    },
+    admittedBy: { id: req.user!.id, name: `${req.user!.firstName} ${req.user!.lastName}`.trim() },
+    admittedAt: admittedAt.toISOString(),
+  };
   const dueDate = new Date(now);
   dueDate.setDate(dueDate.getDate() + 7);
 
@@ -260,12 +310,14 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
         data: {
           userId: studentUser.id,
           gradeId,
-          admissionDate: now,
-          emergencyContact: studentFields.phone || parentFields.phone,
+          admissionNumber,
+          admissionDate: admittedAt,
+          emergencyContact: admissionDetails.data.emergencyContactPhone,
+          admissionRecord: savedAdmissionRecord,
           admissionStatus: branch.admissionFee > 0 ? 'PENDING_PAYMENT' : 'READY_FOR_LOGIN',
         },
       });
-      await tx.enrollment.create({ data: { studentId: student.id, courseId: regularClass.courseId, classId: regularClass.id, status: 'BLOCKED', admissionDate: now } });
+      await tx.enrollment.create({ data: { studentId: student.id, courseId: regularClass.courseId, classId: regularClass.id, status: 'BLOCKED', admissionDate: admittedAt } });
 
       const parentUser = await tx.user.create({
         data: {
@@ -302,7 +354,7 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
           status: branch.admissionFee > 0 ? 'UNPAID' : 'PAID',
         },
       });
-      return { student, parent, invoice };
+      return { student, parent, invoice, tenant };
     });
 
     const delivery = branch.admissionFee === 0
@@ -320,9 +372,21 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
         branchId,
         gradeId,
         classId: regularClass.id,
+        admissionNumber,
+        admittedAt: admittedAt.toISOString(),
         status: result.student.admissionStatus,
         invoiceId: result.invoice.id,
         admissionFee: result.invoice.netPayable,
+        record: {
+          institutionName: result.tenant.name,
+          branchName: branch.name,
+          branchAddress: branch.address,
+          gradeName: grade.name,
+          className: regularClass.name,
+          student: { ...studentFields, ...admissionDetails.data },
+          primaryGuardian: savedAdmissionRecord.primaryGuardian,
+          admittedBy: savedAdmissionRecord.admittedBy,
+        },
       },
       loginDelivery: delivery,
     });
@@ -883,7 +947,9 @@ router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Respo
         _count: { _all: true },
       });
       detail.student = {
+        admissionNumber: user.student.admissionNumber,
         admissionDate: user.student.admissionDate,
+        admissionRecord: user.student.admissionRecord,
         emergencyContact: user.student.emergencyContact,
         studentId: user.student.id,
         grade: user.student.grade?.name ?? null,

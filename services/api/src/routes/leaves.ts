@@ -8,6 +8,61 @@ import { canAccessBranch, hasBranchPermission, isTenantAdmin } from '../utils/ac
 
 const router = Router();
 
+// Approval queues are read from the persisted leave workflow. Branch admins
+// see requests for branches they manage; tenant admins see institution-wide
+// records, including Long Sick requests awaiting Level 2 approval.
+router.get('/', authMiddleware, async (req: TenantRequest, res: Response) => {
+  try {
+    const tenantAdmin = isTenantAdmin(req.user!);
+    const branchIds = req.user!.roles
+      .filter((role: any) => role.branchId && hasBranchPermission(req.user!, 'approve_leave_l1', role.branchId))
+      .map((role: any) => role.branchId as string);
+    if (!tenantAdmin && branchIds.length === 0) {
+      return res.status(403).json({ error: 'You do not have access to a leave approval queue.' });
+    }
+
+    const requestedLevel = String(req.query.level || '').toUpperCase();
+    const statusFilter: LeaveStatus[] | undefined = requestedLevel === 'L2'
+      ? ['APPROVED_LEVEL1', 'APPROVED_LEVEL2', 'REJECTED']
+      : requestedLevel === 'L1'
+        ? ['PENDING', 'APPROVED_LEVEL1', 'APPROVED_LEVEL2', 'REJECTED']
+        : undefined;
+    const leaves = await prisma.leave.findMany({
+      where: {
+        tenantId: req.tenantId!,
+        ...(tenantAdmin ? {} : { branchId: { in: branchIds } }),
+        ...(requestedLevel === 'L2' ? { leaveType: 'LONG_SICK' } : {}),
+        ...(statusFilter ? { status: { in: statusFilter } } : {}),
+      },
+      include: {
+        user: { select: { firstName: true, lastName: true } },
+        branch: { select: { name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+
+    return res.json({
+      leaves: leaves.map((leave) => ({
+        id: leave.id,
+        staffName: `${leave.user.firstName} ${leave.user.lastName}`.trim(),
+        branchId: leave.branchId,
+        branchName: leave.branch.name,
+        leaveType: leave.leaveType,
+        startDate: leave.startDate,
+        endDate: leave.endDate,
+        reason: leave.reason,
+        status: leave.status,
+        remarks: leave.remarks,
+        approvedBy: leave.approvedBy,
+        createdAt: leave.createdAt,
+      })),
+    });
+  } catch {
+    return res.status(500).json({ error: 'Failed to load leave requests.' });
+  }
+});
+
 // 1. Submit a Leave / Early Out Request (Staff/Parent)
 router.post(
   '/request',
