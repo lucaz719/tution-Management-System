@@ -252,6 +252,7 @@ export const api = {
         invoices: Array<{ id: string; invoiceType: string; netPayable: number; status: string; overdue: boolean; dueDate: string; billingCycleStart: string; billingCycleEnd: string; paymentDate: string | null }>;
       }>(`/finances/students/${studentId}/invoices`);
     },
+    getNepalPayQr: async (invoiceId: string) => request<{ invoiceId: string; merchantName: string; merchantCity: string; amount: number; currency: string; studentName: string; qrString: string }>(`/finances/nepalpay-qr/${encodeURIComponent(invoiceId)}`),
     payInvoice: async (invoiceId: string, transactionId?: string) => {
       return request<{
         message: string;
@@ -582,6 +583,7 @@ export const api = {
       request<{ message: string }>(`/appointments/respond/${encodeURIComponent(appointmentId)}`, { method: 'POST', body: JSON.stringify(payload) }),
     decideLeave: async (leaveId: string, action: 'APPROVE' | 'REJECT', remarks?: string) =>
       request<{ message: string; leave: any }>(`/leaves/approve/${leaveId}`, { method: 'POST', body: JSON.stringify({ action, remarks }) }),
+    getLeaves: async (level: 'L1' | 'L2') => request<{ leaves: Array<{ id: string; staffName: string; branchId: string; branchName: string; leaveType: string; startDate: string; endDate: string; reason: string; status: string; remarks: string | null; approvedBy: string | null; createdAt: string }> }>(`/leaves?level=${level}`),
     emergencyDeparture: async (payload: { studentId: string; branchId: string; reason: string; collectedBy?: string; departureTime?: string }) =>
       request<{ message: string; leave: any }>('/leaves/emergency-out', { method: 'POST', body: JSON.stringify(payload) }),
     addRemark: async (payload: { studentId: string; subject: string; message: string; parentVisible: boolean }) =>
@@ -592,12 +594,11 @@ export const api = {
       request<{ message: string; event: any }>('/academic-events', { method: 'POST', body: JSON.stringify(payload) }),
     issueCertificate: async (payload: { studentId: string; templateId: string; branchId: string }) =>
       request<{ message: string; certificate: any }>('/certificates/issue', { method: 'POST', body: JSON.stringify(payload) }),
+    getCertificateOptions: async () => request<{ templates: Array<{ id: string; name: string; type: string }>; students: Array<{ studentId: string; studentName: string; gradeName: string; branchId: string; branchName: string }> }>('/certificates/options'),
     completeMaintenanceTask: async (taskId: string) =>
       request<{ message: string; task: any }>(`/resources/tasks/complete/${taskId}`, { method: 'POST' }),
     grantFeeOverride: async (payload: { studentId: string; branchId: string; scope: 'ONE_SESSION' | 'ONE_DAY'; reason: string }) =>
       request<{ message: string; override: any }>('/branch-admin/fee-overrides', { method: 'POST', body: JSON.stringify(payload) }),
-    createSocialDraft: async (payload: { branchId: string; text: string; platforms: string[]; mediaUrls: string[]; proposedTime?: string }) =>
-      request<{ message: string; draft: any }>('/branch-admin/social-drafts', { method: 'POST', body: JSON.stringify(payload) }),
     getParentContacts: async () => request<{ contacts: Array<{ studentId: string; studentName: string; gradeName: string; branchName: string; parentId: string; parentName: string; parentEmail: string; parentPhone: string }> }>('/communication/admin/parent-contacts'),
     getParentThread: async (studentId: string, parentId: string) => request<{ messages: Array<{ id: string; senderId: string; receiverId: string; messageText: string; createdAt: string; sender: { firstName: string; lastName: string } }> }>(`/communication/messages/thread/${encodeURIComponent(studentId)}?teacherId=${encodeURIComponent(parentId)}`),
     sendParentMessage: async (payload: { studentId: string; receiverId: string; messageText: string }) => request<{ message: string }>('/communication/messages', { method: 'POST', body: JSON.stringify(payload) }),

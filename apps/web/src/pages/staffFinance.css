@@ -281,3 +281,37 @@
 @media (prefers-reduced-motion: reduce) {
   .accountant-page *, .accountant-modal-layer *, .accountant-modal { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+.admission-fieldset { display: grid; gap: 12px; margin: 0; padding: 16px; border: 1px solid var(--border); border-radius: 10px; }
+.admission-fieldset legend { padding: 0 6px; font-weight: 700; color: var(--color-text); }
+.admission-fieldset label { display: grid; gap: 6px; font-size: 13px; font-weight: 700; color: var(--color-text); }
+.admission-result-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+.admission-print-record { margin-top: 20px; padding: 24px; border: 1px solid var(--border); color: var(--color-text); background: var(--color-surface); }
+.admission-print-record > header { display: flex; justify-content: space-between; gap: 24px; padding-bottom: 16px; border-bottom: 2px solid var(--color-primary); }
+.admission-print-record > header h1 { font-size: 22px; }
+.admission-print-record > header > div:last-child { display: grid; gap: 4px; text-align: right; }
+.admission-print-record h2 { margin: 18px 0 8px; font-size: 15px; color: var(--color-primary); }
+.admission-print-record dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; border: 1px solid var(--border); }
+.admission-print-record dl > div { display: grid; grid-template-columns: minmax(120px, .8fr) 1.2fr; border-bottom: 1px solid var(--border); }
+.admission-print-record dt, .admission-print-record dd { margin: 0; padding: 7px 9px; font-size: 12px; overflow-wrap: anywhere; }
+.admission-print-record dt { background: var(--color-surface-subtle, rgba(21,96,189,.06)); font-weight: 700; }
+.admission-print-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.admission-print-columns section { padding: 0 12px 12px; border: 1px solid var(--border); }
+.admission-print-columns p { font-size: 12px; line-height: 1.6; }
+.admission-print-record footer { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; margin-top: 28px; font-size: 12px; }
+.admission-print-record footer > div { display: grid; gap: 4px; }
+.admission-signature { min-height: 54px; align-content: end; border-bottom: 1px solid currentColor; }
+
+@media print {
+  body * { visibility: hidden !important; }
+  .admission-print-record, .admission-print-record * { visibility: visible !important; }
+  .admission-print-record { position: absolute; inset: 0; width: 100%; margin: 0; padding: 12mm; border: 0; color: #111; background: #fff; print-color-adjust: exact; }
+  .admission-print-record dl, .admission-print-record dl > div, .admission-print-columns section { border-color: #999; }
+  .admission-print-record dt { background: #eee; }
+  @page { size: A4; margin: 8mm; }
+}
+
+@media (max-width: 700px) {
+  .admission-print-record > header, .admission-print-columns { grid-template-columns: 1fr; display: grid; }
+  .admission-print-record > header > div:last-child { text-align: left; }
+  .admission-print-record dl { grid-template-columns: 1fr; }
+}

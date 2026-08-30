@@ -234,25 +234,62 @@ export function TenantHrPage() {
 
 interface GradeOption { id: string; name: string; admissionFee?: number | string; }
 interface AdmissionResult {
-  admission: { studentId: string; status: 'PENDING_PAYMENT' | 'READY_FOR_LOGIN' | 'ACTIVE'; admissionFee: number | string };
+  admission: {
+    studentId: string; admissionNumber: string; admittedAt: string; status: 'PENDING_PAYMENT' | 'READY_FOR_LOGIN' | 'ACTIVE'; admissionFee: number | string;
+    record: { institutionName: string; branchName: string; branchAddress: string; gradeName: string; className: string; admittedBy: { id: string; name: string }; primaryGuardian: { name: string; email: string; phone: string; relationship: string }; student: Record<string, string> };
+  };
   loginDelivery: { delivered: boolean } | null;
   message: string;
+}
+
+function AdmissionPrintRecord({ result }: { result: AdmissionResult }) {
+  const { admission } = result;
+  const { record } = admission;
+  const student = record.student;
+  const details = [
+    ['Admission number', admission.admissionNumber], ['Admitted', new Date(admission.admittedAt).toLocaleString('en-NP')],
+    ['Student', `${student.firstName} ${student.lastName}`], ['Date of birth', student.dateOfBirth], ['Gender', student.gender],
+    ['Blood group', student.bloodGroup || '—'], ['Nationality', student.nationality], ['Student phone', student.phone], ['Student email', student.email],
+    ['Grade', record.gradeName], ['Class', record.className], ['Permanent address', student.permanentAddress],
+    ['Temporary address', student.temporaryAddress || '—'], ['School', student.school || '—'], ['Medical/accessibility notes', student.medicalNotes || 'None recorded'],
+  ];
+  return <section className="admission-print-record" aria-label="Printable admission record">
+    <header><div><h1>{record.institutionName}</h1><p>{record.branchName} · {record.branchAddress}</p></div><div><strong>STUDENT ADMISSION RECORD</strong><span>{admission.admissionNumber}</span></div></header>
+    <h2>Student and admission information</h2><dl>{details.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+    <div className="admission-print-columns"><section><h2>Father</h2><p><strong>{student.fatherName}</strong><br />{student.fatherPhone}<br />{student.fatherEmail || 'No email'}<br />{student.fatherOccupation || 'Occupation not recorded'}</p></section><section><h2>Mother</h2><p><strong>{student.motherName}</strong><br />{student.motherPhone}<br />{student.motherEmail || 'No email'}<br />{student.motherOccupation || 'Occupation not recorded'}</p></section></div>
+    {student.optionalParentName ? <div className="admission-print-columns"><section><h2>Optional parent / guardian</h2><p><strong>{student.optionalParentName}</strong> ({student.optionalParentRelationship || 'Relationship not recorded'})<br />{student.optionalParentPhone || 'No phone'}<br />{student.optionalParentEmail || 'No email'}<br />{student.optionalParentOccupation || 'Occupation not recorded'}</p></section></div> : null}
+    <div className="admission-print-columns"><section><h2>Primary parent account</h2><p><strong>{record.primaryGuardian.name}</strong> ({record.primaryGuardian.relationship})<br />{record.primaryGuardian.phone}<br />{record.primaryGuardian.email}</p></section><section><h2>Emergency contact</h2><p><strong>{student.emergencyContactName}</strong> ({student.emergencyContactRelationship})<br />{student.emergencyContactPhone}</p></section></div>
+    <footer><div><span>Admitted by</span><strong>{record.admittedBy.name}</strong></div><div><span>Admission date and time</span><strong>{new Date(admission.admittedAt).toLocaleString('en-NP')}</strong></div><div className="admission-signature"><span>Parent/guardian signature</span></div><div className="admission-signature"><span>Authorized signature</span></div></footer>
+  </section>;
 }
 export function TenantAdmissionsPage() {
   const { showToast } = useToast();
   const [branches, setBranches] = useState<Branch[]>([]); const [grades, setGrades] = useState<GradeOption[]>([]); const [classes, setClasses] = useState<any[]>([]);
-  const [busy, setBusy] = useState(false); const [result, setResult] = useState<AdmissionResult | null>(null);
-  const [form, setForm] = useState({ branchId: '', gradeId: '', classId: '', studentFirst: '', studentLast: '', studentEmail: '', studentPhone: '', parentFirst: '', parentLast: '', parentEmail: '', parentPhone: '' });
+  const [busy, setBusy] = useState(false); const [result, setResult] = useState<AdmissionResult | null>(null); const [printAfterSave, setPrintAfterSave] = useState(false);
+  const localDateTime = () => { const value = new Date(); value.setMinutes(value.getMinutes() - value.getTimezoneOffset()); return value.toISOString().slice(0, 16); };
+  const [form, setForm] = useState({ branchId: '', gradeId: '', classId: '', admittedAt: localDateTime(), studentFirst: '', studentLast: '', studentEmail: '', studentPhone: '', dateOfBirth: '', gender: '', bloodGroup: '', nationality: 'Nepali', permanentAddress: '', temporaryAddress: '', school: '', medicalNotes: '', fatherName: '', fatherPhone: '', fatherEmail: '', fatherOccupation: '', motherName: '', motherPhone: '', motherEmail: '', motherOccupation: '', optionalParentName: '', optionalParentPhone: '', optionalParentEmail: '', optionalParentOccupation: '', optionalParentRelationship: '', primaryParent: '', emergencyContactName: '', emergencyContactPhone: '', emergencyContactRelationship: '' });
   useEffect(() => { void Promise.all([request<{ branches: Branch[] }>('/branches'), request<{ grades: GradeOption[] }>('/grades'), request<{ classes: any[] }>('/courses/classes')]).then(([b, g, c]) => { setBranches(b.branches); setGrades(g.grades); setClasses(c.classes); const branchId = b.branches[0]?.id ?? ''; const gradeId = g.grades[0]?.id ?? ''; const classId = c.classes.find((item) => item.branchId === branchId && item.gradeId === gradeId && item.courseType === 'REGULAR')?.id ?? ''; setForm((old) => ({ ...old, branchId, gradeId, classId })); }).catch((next) => showToast(errorMessage(next), 'error')); }, []);
+  useEffect(() => { if (result && printAfterSave) { setPrintAfterSave(false); window.setTimeout(() => window.print(), 0); } }, [result, printAfterSave]);
   const availableClasses = classes.filter((item) => item.branchId === form.branchId && item.gradeId === form.gradeId && item.courseType === 'REGULAR');
+  const requiredAdmissionFields = ['branchId','gradeId','classId','admittedAt','studentFirst','studentLast','studentEmail','studentPhone','dateOfBirth','gender','nationality','permanentAddress','fatherName','fatherPhone','motherName','motherPhone','primaryParent','emergencyContactName','emergencyContactPhone','emergencyContactRelationship'] as const;
+  const selectedPrimaryEmail = form.primaryParent === 'Father' ? form.fatherEmail : form.primaryParent === 'Mother' ? form.motherEmail : form.primaryParent === 'Optional parent' ? form.optionalParentEmail : '';
+  const optionalParentComplete = form.primaryParent !== 'Optional parent' || Boolean(form.optionalParentName.trim() && form.optionalParentPhone.trim() && form.optionalParentEmail.trim());
+  const canPrint = requiredAdmissionFields.every((key) => form[key].trim()) && Boolean(selectedPrimaryEmail.trim()) && optionalParentComplete && !busy;
   const submit = async (event: FormEvent) => {
-    event.preventDefault(); if (form.studentEmail === form.parentEmail) return showToast('Student and parent emails must be different.', 'error'); setBusy(true);
+    event.preventDefault();
+    const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    const shouldPrint = submitter?.value === 'save-and-print';
+    setPrintAfterSave(shouldPrint); setBusy(true);
     try {
-      const admission = await request<AdmissionResult>('/users/admissions', { method: 'POST', body: JSON.stringify({ branchId: form.branchId, gradeId: form.gradeId, classId: form.classId, student: { firstName: form.studentFirst, lastName: form.studentLast, email: form.studentEmail, phone: form.studentPhone }, parent: { firstName: form.parentFirst, lastName: form.parentLast, email: form.parentEmail, phone: form.parentPhone } }) });
+      const admissionDetails = Object.fromEntries(Object.entries(form).filter(([key]) => ['admittedAt','dateOfBirth','gender','bloodGroup','nationality','permanentAddress','temporaryAddress','school','medicalNotes','fatherName','fatherPhone','fatherEmail','fatherOccupation','motherName','motherPhone','motherEmail','motherOccupation','optionalParentName','optionalParentPhone','optionalParentEmail','optionalParentOccupation','optionalParentRelationship','primaryParent','emergencyContactName','emergencyContactPhone','emergencyContactRelationship'].includes(key)));
+      const selectedParent = form.primaryParent === 'Father' ? { name: form.fatherName, email: form.fatherEmail, phone: form.fatherPhone } : form.primaryParent === 'Mother' ? { name: form.motherName, email: form.motherEmail, phone: form.motherPhone } : { name: form.optionalParentName, email: form.optionalParentEmail, phone: form.optionalParentPhone };
+      if (form.studentEmail.trim().toLowerCase() === selectedParent.email.trim().toLowerCase()) throw new Error('Student and primary parent emails must be different.');
+      const nameParts = selectedParent.name.trim().split(/\s+/); const firstName = nameParts.shift() ?? ''; const lastName = nameParts.join(' ') || firstName;
+      const admission = await request<AdmissionResult>('/users/admissions', { method: 'POST', body: JSON.stringify({ branchId: form.branchId, gradeId: form.gradeId, classId: form.classId, student: { firstName: form.studentFirst, lastName: form.studentLast, email: form.studentEmail, phone: form.studentPhone }, parent: { firstName, lastName, email: selectedParent.email, phone: selectedParent.phone }, admissionDetails }) });
       setResult(admission); showToast(admission.message, admission.loginDelivery && !admission.loginDelivery.delivered ? 'error' : 'success');
-    } catch (next) { showToast(errorMessage(next), 'error'); } finally { setBusy(false); }
+    } catch (next) { setPrintAfterSave(false); showToast(errorMessage(next), 'error'); } finally { setBusy(false); }
   };
-  const acknowledge = () => { setResult(null); setForm((old) => ({ ...old, studentFirst: '', studentLast: '', studentEmail: '', studentPhone: '', parentFirst: '', parentLast: '', parentEmail: '', parentPhone: '' })); };
+  const acknowledge = () => { setResult(null); setForm((old) => ({ ...old, admittedAt: localDateTime(), studentFirst: '', studentLast: '', studentEmail: '', studentPhone: '', dateOfBirth: '', gender: '', bloodGroup: '', permanentAddress: '', temporaryAddress: '', school: '', medicalNotes: '', fatherName: '', fatherPhone: '', fatherEmail: '', fatherOccupation: '', motherName: '', motherPhone: '', motherEmail: '', motherOccupation: '', optionalParentName: '', optionalParentPhone: '', optionalParentEmail: '', optionalParentOccupation: '', optionalParentRelationship: '', primaryParent: '', emergencyContactName: '', emergencyContactPhone: '', emergencyContactRelationship: '' })); };
   const selectedBranch = branches.find((branch) => branch.id === form.branchId);
   return <div style={{ display: 'grid', gap: 18 }}><Header title="Admissions" description="Complete admission first. Login IDs activate and are sent to the recorded phone numbers only after the branch fee is paid."/>
     {!result ? <Card hoverable={false}><form onSubmit={(e) => void submit(e)} style={{ display: 'grid', gap: 16 }} aria-busy={busy}>
@@ -260,84 +297,25 @@ export function TenantAdmissionsPage() {
         <label>Branch<select required style={input} value={form.branchId} onChange={(e) => { const branchId = e.target.value; const classId = classes.find((item) => item.branchId === branchId && item.gradeId === form.gradeId && item.courseType === 'REGULAR')?.id ?? ''; setForm((old) => ({ ...old, branchId, classId })); }}>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
         <label>Grade<select required style={input} value={form.gradeId} onChange={(e) => { const gradeId = e.target.value; const classId = classes.find((item) => item.branchId === form.branchId && item.gradeId === gradeId && item.courseType === 'REGULAR')?.id ?? ''; setForm((old) => ({ ...old, gradeId, classId })); }}>{grades.map((grade) => <option key={grade.id} value={grade.id}>{grade.name}</option>)}</select></label>
         <label>Regular class<select required style={input} value={form.classId} onChange={(e) => setForm((old) => ({ ...old, classId: e.target.value }))}><option value="">Select class</option>{availableClasses.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.courseName}</option>)}</select>{!availableClasses.length ? <small style={{ color: 'var(--color-error)' }}>Create a regular class for this branch and grade before admission.</small> : null}</label>
+        <label>Admission date and time *<input required type="datetime-local" style={input} value={form.admittedAt} onChange={(e) => setForm((old) => ({ ...old, admittedAt: e.target.value }))}/></label>
       </div>
       <div role="note" style={{ padding: 14, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--color-surface)' }}>
         <strong>Admission fee for this branch: NPR {Number(selectedBranch?.admissionFee ?? 0).toLocaleString()}</strong>
         <p style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 13 }}>Tenant Admin can edit this amount independently in Branches.</p>
       </div>
-      <h3>Student details</h3><div style={grid}>{[['studentFirst','First name'],['studentLast','Last name'],['studentEmail','Email'],['studentPhone','Phone']].map(([key, text]) => <label key={key}>{text}<input required style={input} type={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : 'text'} autoComplete={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : key.includes('First') ? 'given-name' : 'family-name'} value={form[key as keyof typeof form]} onChange={(e) => setForm((old) => ({ ...old, [key]: e.target.value }))}/></label>)}</div>
-      <h3>Parent or guardian details</h3><div style={grid}>{[['parentFirst','First name'],['parentLast','Last name'],['parentEmail','Email'],['parentPhone','Phone']].map(([key, text]) => <label key={key}>{text}<input required style={input} type={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : 'text'} autoComplete={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : key.includes('First') ? 'given-name' : 'family-name'} value={form[key as keyof typeof form]} onChange={(e) => setForm((old) => ({ ...old, [key]: e.target.value }))}/></label>)}</div>
-      <Button disabled={busy || !form.branchId || !form.gradeId || !form.classId} type="submit">{busy ? 'Saving admission…' : 'Complete admission'}</Button>
-    </form></Card> : <Card hoverable={false}><StatusBadge variant={result.admission.status === 'ACTIVE' ? 'success' : 'warning'}>{result.admission.status === 'ACTIVE' ? 'Active' : 'Payment pending'}</StatusBadge><h3 style={{ marginTop: 12 }}>Admission recorded</h3><div role="status" style={{ padding: 16, marginTop: 12, background: 'var(--color-warning-soft)', borderRadius: 10 }}><strong>{result.message}</strong><p style={{ marginTop: 12 }}>Amount due: <strong>NPR {Number(result.admission.admissionFee).toLocaleString()}</strong></p><p style={{ marginTop: 10, color: 'var(--text-muted)' }}>After confirmed payment, student and parent login IDs and temporary passwords are sent automatically to their admission phone numbers.</p><Button style={{ marginTop: 12 }} onClick={acknowledge}>Start another admission</Button></div></Card>}
+      <fieldset className="admission-fieldset"><legend>Student details</legend><div style={grid}>{[['studentFirst','First name'],['studentLast','Last name'],['studentEmail','Email'],['studentPhone','Phone']].map(([key, text]) => <label key={key}>{text} *<input required style={input} type={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : 'text'} autoComplete={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : key.includes('First') ? 'given-name' : 'family-name'} value={form[key as keyof typeof form]} onChange={(e) => setForm((old) => ({ ...old, [key]: e.target.value }))}/></label>)}<label>Date of birth *<input required type="date" max={new Date().toISOString().slice(0, 10)} style={input} value={form.dateOfBirth} onChange={(e) => setForm((old) => ({ ...old, dateOfBirth: e.target.value }))}/></label><label>Gender *<select required style={input} value={form.gender} onChange={(e) => setForm((old) => ({ ...old, gender: e.target.value }))}><option value="">Select gender</option><option>Male</option><option>Female</option><option>Other</option><option>Prefer not to say</option></select></label><label>Blood group<input style={input} value={form.bloodGroup} onChange={(e) => setForm((old) => ({ ...old, bloodGroup: e.target.value }))} placeholder="O+" /></label><label>Nationality *<input required style={input} value={form.nationality} onChange={(e) => setForm((old) => ({ ...old, nationality: e.target.value }))}/></label><label>School<input style={input} value={form.school} onChange={(e) => setForm((old) => ({ ...old, school: e.target.value }))}/></label></div><label>Permanent address *<textarea required style={{ ...input, minHeight: 72 }} value={form.permanentAddress} onChange={(e) => setForm((old) => ({ ...old, permanentAddress: e.target.value }))}/></label><label>Temporary address<textarea style={{ ...input, minHeight: 72 }} value={form.temporaryAddress} onChange={(e) => setForm((old) => ({ ...old, temporaryAddress: e.target.value }))}/></label><label>Medical conditions, allergies, or accessibility notes<textarea style={{ ...input, minHeight: 72 }} value={form.medicalNotes} onChange={(e) => setForm((old) => ({ ...old, medicalNotes: e.target.value }))}/></label></fieldset>
+      <fieldset className="admission-fieldset"><legend>Father's details</legend><div style={grid}>{[['fatherName','Full name *'],['fatherPhone','Phone *'],['fatherEmail','Email'],['fatherOccupation','Occupation']].map(([key, text]) => <label key={key}>{text}<input required={key === 'fatherName' || key === 'fatherPhone'} style={input} type={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : 'text'} value={form[key as keyof typeof form]} onChange={(e) => setForm((old) => ({ ...old, [key]: e.target.value }))}/></label>)}</div></fieldset>
+      <fieldset className="admission-fieldset"><legend>Mother's details</legend><div style={grid}>{[['motherName','Full name *'],['motherPhone','Phone *'],['motherEmail','Email'],['motherOccupation','Occupation']].map(([key, text]) => <label key={key}>{text}<input required={key === 'motherName' || key === 'motherPhone'} style={input} type={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : 'text'} value={form[key as keyof typeof form]} onChange={(e) => setForm((old) => ({ ...old, [key]: e.target.value }))}/></label>)}</div></fieldset>
+      <fieldset className="admission-fieldset"><legend>Optional parent or guardian</legend><p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Leave this section empty if only the father and mother should be recorded.</p><div style={grid}>{[['optionalParentName','Full name'],['optionalParentPhone','Phone'],['optionalParentEmail','Email'],['optionalParentOccupation','Occupation'],['optionalParentRelationship','Relationship']].map(([key, text]) => <label key={key}>{text}<input style={input} type={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : 'text'} value={form[key as keyof typeof form]} onChange={(e) => setForm((old) => ({ ...old, [key]: e.target.value }))}/></label>)}</div></fieldset>
+      <fieldset className="admission-fieldset"><legend>Primary parent account</legend><p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Select one parent already entered above. Their email and phone will be used automatically for account credentials.</p><label htmlFor="admission-primary-parent">Parent receiving credentials *<select id="admission-primary-parent" required style={input} value={form.primaryParent} onChange={(e) => setForm((old) => ({ ...old, primaryParent: e.target.value }))}><option value="">Select recorded parent</option><option value="Father" disabled={!form.fatherName || !form.fatherPhone || !form.fatherEmail}>Father{!form.fatherEmail ? ' — add email first' : ''}</option><option value="Mother" disabled={!form.motherName || !form.motherPhone || !form.motherEmail}>Mother{!form.motherEmail ? ' — add email first' : ''}</option><option value="Optional parent" disabled={!form.optionalParentName || !form.optionalParentPhone || !form.optionalParentEmail}>Optional parent{!form.optionalParentEmail ? ' — complete optional parent first' : ''}</option></select></label></fieldset>
+      <fieldset className="admission-fieldset"><legend>Emergency contact</legend><div style={grid}>{[['emergencyContactName','Full name *'],['emergencyContactPhone','Phone *'],['emergencyContactRelationship','Relationship *']].map(([key, text]) => <label key={key}>{text}<input required style={input} type={key.includes('Phone') ? 'tel' : 'text'} value={form[key as keyof typeof form]} onChange={(e) => setForm((old) => ({ ...old, [key]: e.target.value }))}/></label>)}</div></fieldset>
+      <div className="admission-result-actions">
+        <Button disabled={busy || !form.branchId || !form.gradeId || !form.classId || !form.admittedAt} type="submit">{busy ? 'Saving admission…' : 'Complete admission'}</Button>
+        <Button variant="outline" type="submit" name="admission-action" value="save-and-print" disabled={!canPrint} title={canPrint ? 'Save the admission and open the printable record' : 'Complete every required field to enable printing'}><span className="material-symbols-outlined" aria-hidden="true">print</span>Save and print admission</Button>
+      </div>
+      {!canPrint && !busy ? <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 13 }}>Complete all required fields to enable printing.</p> : null}
+    </form></Card> : <Card hoverable={false}><StatusBadge variant={result.admission.status === 'ACTIVE' ? 'success' : 'warning'}>{result.admission.status === 'ACTIVE' ? 'Active' : 'Payment pending'}</StatusBadge><h3 style={{ marginTop: 12 }}>Admission recorded</h3><div role="status" style={{ padding: 16, marginTop: 12, background: 'var(--color-warning-soft)', borderRadius: 10 }}><strong>{result.message}</strong><p style={{ marginTop: 12 }}>Amount due: <strong>NPR {Number(result.admission.admissionFee).toLocaleString()}</strong></p><p style={{ marginTop: 10, color: 'var(--text-muted)' }}>After confirmed payment, student and parent login IDs and temporary passwords are sent automatically to their admission phone numbers.</p></div><AdmissionPrintRecord result={result} /><div className="admission-result-actions"><Button onClick={() => window.print()}><span className="material-symbols-outlined" aria-hidden="true">print</span>Print admission record</Button><Button variant="outline" onClick={acknowledge}>Start another admission</Button></div></Card>}
   </div>;
-}
-
-interface SocialPost { id: string; branchId: string; author: string; content: string; platforms: string[]; scheduledTime: string; status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'PUBLISHED'; }
-
-export function TenantSocialMediaPage() {
-  const { showToast } = useToast();
-  const loader = useCallback(async () => {
-    // Note: Mocking data if API is not yet wired
-    try {
-      const res = await request<{ posts: SocialPost[] }>('/social-media/posts?status=PENDING');
-      return res.posts;
-    } catch {
-      return [
-        { id: '1', branchId: 'BR-01', author: 'Sanjay Rai', content: 'Happy Independence Day from our branch!', platforms: ['Facebook', 'Instagram'], scheduledTime: '2026-08-15T10:00:00Z', status: 'PENDING' }
-      ] as SocialPost[];
-    }
-  }, []);
-  const { data, loading, error, reload } = useRemote(loader);
-  const [busy, setBusy] = useState('');
-
-  const mutate = async (id: string, action: 'APPROVE' | 'REJECT' | 'PUBLISH') => {
-    setBusy(id);
-    try {
-      const endpoint = `/social-media/posts/${id}/${action.toLowerCase()}`;
-      await request(endpoint, { method: 'POST' });
-      showToast(`Post ${action.toLowerCase()}d successfully.`, 'success');
-      await reload();
-    } catch (next) {
-      showToast(errorMessage(next), 'error');
-    } finally {
-      setBusy('');
-    }
-  };
-
-  const posts = data ?? [];
-
-  return (
-    <div style={{ display: 'grid', gap: 18 }}>
-      <Header title="Social Media Approval Queue" description="Review, approve, reject, or publish social media posts submitted by branch admins." />
-      {loading ? <RemoteState kind="loading" /> : error ? <RemoteState kind="error" message={errorMessage(error)} onRetry={() => void reload()} /> :
-        !posts.length ? <RemoteState kind="empty" message="No pending social media posts." /> :
-        <Card hoverable={false}>
-          {posts.map((post) => (
-            <div key={post.id} style={row}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                <div>
-                  <strong style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {post.platforms.map(p => <StatusBadge key={p} variant="info">{p}</StatusBadge>)}
-                  </strong>
-                  <p style={{ marginTop: 8, fontSize: 14 }}>{post.content}</p>
-                  <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
-                    Branch: {post.branchId} · Author: {post.author} · Scheduled: {new Date(post.scheduledTime).toLocaleString()}
-                  </p>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <StatusBadge variant="warning">{post.status}</StatusBadge>
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                <Button disabled={busy === post.id} onClick={() => void mutate(post.id, 'APPROVE')}>Approve (Queue for schedule)</Button>
-                <Button disabled={busy === post.id} variant="outline" onClick={() => void mutate(post.id, 'PUBLISH')}>Publish Now</Button>
-                <Button disabled={busy === post.id} variant="danger" onClick={() => void mutate(post.id, 'REJECT')}>Reject</Button>
-              </div>
-            </div>
-          ))}
-        </Card>}
-    </div>
-  );
 }
 
 export function TenantCertificatesPage() {
@@ -420,19 +398,27 @@ export function TenantCertificatesPage() {
 
 export function TenantLeaveRequestsPage() {
   const { showToast } = useToast();
-  // Mock data for leave requests escalated to Level 2
-  const [requests, setRequests] = useState([
-    { id: 'LR-101', staffName: 'Sanjay Rai', branch: 'BR-01', type: 'SICK_LEAVE', duration: '5 Days', startDate: '2026-08-20', status: 'PENDING_L2', reason: 'Severe viral infection, doctor recommended rest.', l1Approver: 'Branch Admin (Aisha)' },
-    { id: 'LR-102', staffName: 'Rina Karki', branch: 'BR-02', type: 'MATERNITY', duration: '90 Days', startDate: '2026-09-01', status: 'PENDING_L2', reason: 'Expected due date in early September.', l1Approver: 'Branch Admin (Bikash)' },
-  ]);
+  const [requests, setRequests] = useState<Awaited<ReturnType<typeof api.branchAdmin.getLeaves>>['leaves']>([]);
   const [busy, setBusy] = useState('');
+  const [decisionRemarks, setDecisionRemarks] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true); setLoadError('');
+    try { setRequests((await api.branchAdmin.getLeaves('L2')).leaves); }
+    catch (next) { setLoadError(errorMessage(next)); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
 
   const mutate = async (id: string, action: 'APPROVE' | 'REJECT') => {
     setBusy(id);
     try {
-      // Mock API delay
-      await new Promise(r => setTimeout(r, 800));
-      setRequests(old => old.map(r => r.id === id ? { ...r, status: action === 'APPROVE' ? 'APPROVED' : 'REJECTED' } : r));
+      const remarks = action === 'REJECT' ? decisionRemarks[id]?.trim() : undefined;
+      if (action === 'REJECT' && !remarks) return;
+      await api.branchAdmin.decideLeave(id, action, remarks);
+      await load();
       showToast(`Leave request ${action.toLowerCase()}d at Level 2.`, 'success');
     } catch (next) {
       showToast(errorMessage(next), 'error');
@@ -441,8 +427,8 @@ export function TenantLeaveRequestsPage() {
     }
   };
 
-  const pending = requests.filter(r => r.status === 'PENDING_L2');
-  const history = requests.filter(r => r.status !== 'PENDING_L2');
+  const pending = requests.filter(r => r.status === 'APPROVED_LEVEL1');
+  const history = requests.filter(r => r.status !== 'APPROVED_LEVEL1');
 
   return (
     <div style={{ display: 'grid', gap: 18 }}>
@@ -450,27 +436,28 @@ export function TenantLeaveRequestsPage() {
       
       <Card hoverable={false}>
         <h3 style={{ fontSize: '18px', marginBottom: '16px' }}>Pending Final Approval</h3>
-        {!pending.length ? <RemoteState kind="empty" message="No pending Level 2 leave requests." /> : 
+        {loading ? <RemoteState kind="loading" message="Loading Level 2 leave requests…" /> : loadError ? <RemoteState kind="error" message={loadError} onRetry={() => void load()} /> : !pending.length ? <RemoteState kind="empty" message="No pending Level 2 leave requests." /> :
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             {pending.map(req => (
               <div key={req.id} style={{ ...row, padding: '16px', border: '1px solid var(--border)', borderRadius: '8px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div>
-                    <strong style={{ fontSize: '15px' }}>{req.staffName}</strong> <span style={{ color: 'var(--text-muted)' }}>({req.branch})</span>
+                    <strong style={{ fontSize: '15px' }}>{req.staffName}</strong> <span style={{ color: 'var(--text-muted)' }}>({req.branchName})</span>
                     <div style={{ marginTop: '8px', display: 'flex', gap: '12px', fontSize: '13px' }}>
-                      <span style={{ fontWeight: 600 }}>{req.type.replace('_', ' ')}</span>
-                      <span>{req.duration}</span>
-                      <span>Starts: {req.startDate}</span>
+                      <span style={{ fontWeight: 600 }}>{req.leaveType.replaceAll('_', ' ')}</span>
+                      <span>{Math.max(1, Math.ceil((new Date(req.endDate).getTime() - new Date(req.startDate).getTime()) / 86_400_000) + 1)} days</span>
+                      <span>Starts: {new Date(req.startDate).toLocaleDateString('en-NP')}</span>
                     </div>
                     <p style={{ marginTop: '8px', fontSize: '14px', color: 'var(--text-muted)' }}>"{req.reason}"</p>
-                    <p style={{ marginTop: '8px', fontSize: '12px', color: 'var(--color-primary)' }}>Level 1 Approved by: {req.l1Approver}</p>
+                    <p style={{ marginTop: '8px', fontSize: '12px', color: 'var(--color-primary)' }}>Level 1 approval recorded by the assigned Branch Admin.</p>
                   </div>
                   <StatusBadge variant="warning">L2 Review</StatusBadge>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
                   <Button disabled={busy === req.id} onClick={() => void mutate(req.id, 'APPROVE')}>Approve Leave</Button>
-                  <Button disabled={busy === req.id} variant="danger" onClick={() => void mutate(req.id, 'REJECT')}>Reject Leave</Button>
+                  <Button disabled={busy === req.id || !decisionRemarks[req.id]?.trim()} variant="danger" onClick={() => void mutate(req.id, 'REJECT')}>Reject Leave</Button>
                 </div>
+                <label style={{ display: 'grid', gap: 6, marginTop: 12, fontSize: 13, fontWeight: 700 }} htmlFor={`leave-remarks-${req.id}`}>Rejection reason<textarea id={`leave-remarks-${req.id}`} style={{ ...input, minHeight: 72 }} maxLength={2000} value={decisionRemarks[req.id] ?? ''} onChange={(event) => setDecisionRemarks((old) => ({ ...old, [req.id]: event.target.value }))} placeholder="Required only when rejecting" /></label>
               </div>
             ))}
           </div>
@@ -484,7 +471,7 @@ export function TenantLeaveRequestsPage() {
             {history.map(req => (
               <div key={req.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', borderBottom: '1px solid var(--border)' }}>
                 <div>
-                  <strong>{req.staffName}</strong> · {req.type.replace('_', ' ')} ({req.duration})
+                  <strong>{req.staffName}</strong> · {req.leaveType.replaceAll('_', ' ')} ({req.branchName})
                 </div>
                 <StatusBadge variant={req.status === 'APPROVED' ? 'success' : 'error'}>{req.status}</StatusBadge>
               </div>

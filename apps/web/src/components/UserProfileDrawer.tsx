@@ -22,7 +22,9 @@ interface Profile {
   roles: Array<{ role: string; branchName: string | null }>;
   detail: {
     student?: {
+      admissionNumber: string | null;
       admissionDate: string;
+      admissionRecord: Record<string, any> | null;
       emergencyContact: string;
       studentId: string;
       grade: string | null;
@@ -343,6 +345,25 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
               {profile.detail.student ? (
                 <>
                   <div>
+                    <div style={sectionTitle}>Admission record</div>
+                    {profile.detail.student.admissionRecord ? (() => {
+                      const record = profile.detail.student!.admissionRecord!;
+                      const values: Array<[string, unknown]> = [
+                        ['Admission number', profile.detail.student!.admissionNumber],
+                        ['Admission date and time', new Date(profile.detail.student!.admissionDate).toLocaleString('en-NP')],
+                        ['Date of birth', record.dateOfBirth], ['Gender', record.gender], ['Blood group', record.bloodGroup],
+                        ['Nationality', record.nationality], ['School', record.school], ['Permanent address', record.permanentAddress],
+                        ['Temporary address', record.temporaryAddress], ['Medical/accessibility notes', record.medicalNotes],
+                        ['Father', record.fatherName], ["Father's phone", record.fatherPhone], ["Father's email", record.fatherEmail], ["Father's occupation", record.fatherOccupation],
+                        ['Mother', record.motherName], ["Mother's phone", record.motherPhone], ["Mother's email", record.motherEmail], ["Mother's occupation", record.motherOccupation],
+                        ['Optional parent / guardian', record.optionalParentName], ['Relationship', record.optionalParentRelationship], ['Optional parent phone', record.optionalParentPhone], ['Optional parent email', record.optionalParentEmail], ['Optional parent occupation', record.optionalParentOccupation],
+                        ['Primary parent account', record.primaryParent], ['Emergency contact', record.emergencyContactName], ['Emergency phone', record.emergencyContactPhone], ['Emergency relationship', record.emergencyContactRelationship],
+                        ['Admitted by', record.admittedBy?.name],
+                      ];
+                      return <dl style={{ ...rowCard, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px 16px', margin: 0 }}>{values.filter(([, value]) => value).map(([label, value]) => <div key={label}><dt style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</dt><dd style={{ margin: '4px 0 0', fontSize: 13.5, overflowWrap: 'anywhere' }}>{String(value)}</dd></div>)}</dl>;
+                    })() : <div style={rowCard}><p style={{ color: 'var(--text-muted)', fontSize: 13 }}>No detailed admission record was saved for this student.</p></div>}
+                  </div>
+                  <div>
                     <div style={sectionTitle}>Fees</div>
                     <div style={{ ...rowCard, marginBottom: '10px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -517,8 +538,8 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                   <div style={{ marginTop: '16px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                       <div style={sectionTitle as React.CSSProperties}>Timetable</div>
-                      <Button variant="outline" onClick={() => showToast('Timetable add functionality mock', 'info')} style={{ minHeight: '30px', height: '30px', padding: '4px 12px', fontSize: '12.5px' }}>
-                        <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>add</span> Add Session
+                      <Button variant="outline" onClick={() => { window.location.assign(window.location.pathname.startsWith('/branch') ? '/branch/timetable' : '/tenant/timetables'); }} style={{ minHeight: '40px', padding: '4px 12px', fontSize: '12.5px' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>calendar_month</span> Manage Timetable
                       </Button>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -529,14 +550,7 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                               <div style={{ fontSize: '13.5px', fontWeight: 700 }}>{session.subject}</div>
                               <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{session.day} · {session.time} · Room {session.room}</div>
                             </div>
-                            <div style={{ display: 'flex', gap: '4px' }}>
-                              <button type="button" onClick={() => showToast('Timetable edit mock', 'info')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-primary)', display: 'grid', placeItems: 'center', padding: '4px' }}>
-                                <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>edit</span>
-                              </button>
-                              <button type="button" onClick={() => { if(window.confirm('Delete session?')) { showToast('Session deleted (mock)', 'success') } }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-error)', display: 'grid', placeItems: 'center', padding: '4px' }}>
-                                <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>delete</span>
-                              </button>
-                            </div>
+                            <StatusBadge variant="info">Scheduled</StatusBadge>
                           </div>
                         ))
                       ) : (

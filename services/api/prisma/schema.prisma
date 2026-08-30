@@ -349,12 +349,14 @@ model Grade {
 // 7. Student Records
 model Student {
   id                  String                   @id @default(uuid())
+  admissionNumber     String?                  @unique
   userId              String                   @unique
   user                User                     @relation(fields: [userId], references: [id])
   gradeId             String?
   grade               Grade?                   @relation(fields: [gradeId], references: [id])
   admissionDate       DateTime
   emergencyContact    String
+  admissionRecord     Json?
   admissionStatus     AdmissionStatus          @default(PENDING_PAYMENT)
   createdAt           DateTime                 @default(now())
   updatedAt           DateTime                 @updatedAt
@@ -1016,22 +1018,6 @@ model FeeAccessOverride {
   createdAt     DateTime @default(now())
 
   @@index([tenantId, branchId, studentId, createdAt])
-}
-
-model BranchSocialDraft {
-  id           String    @id @default(uuid())
-  tenantId     String
-  branchId     String
-  authorId     String
-  text         String
-  mediaUrls    Json?
-  platforms    Json
-  proposedTime DateTime?
-  status       String    @default("DRAFT")
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-
-  @@index([tenantId, branchId, authorId, status])
 }
 
 // 28. Canteen Management

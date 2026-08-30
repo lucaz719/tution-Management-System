@@ -8,6 +8,49 @@ import PDFDocument from 'pdfkit';
 
 const router = Router();
 
+router.get('/options', authMiddleware, async (req: TenantRequest, res: Response) => {
+  try {
+    const [templates, students] = await Promise.all([
+      prisma.certificateTemplate.findMany({
+        where: { tenantId: req.tenantId! },
+        select: { id: true, name: true, type: true },
+        orderBy: { name: 'asc' },
+      }),
+      prisma.student.findMany({
+        where: {
+          user: { tenantId: req.tenantId! },
+          enrollments: { some: { status: { in: ['ACTIVE', 'BLOCKED'] } } },
+        },
+        select: {
+          id: true,
+          user: { select: { firstName: true, lastName: true } },
+          grade: { select: { name: true } },
+          enrollments: {
+            where: { status: { in: ['ACTIVE', 'BLOCKED'] } },
+            select: { class: { select: { branch: { select: { id: true, name: true } } } } },
+          },
+        },
+        orderBy: { user: { firstName: 'asc' } },
+      }),
+    ]);
+    const options = students.flatMap((student) => {
+      const branches = [...new Map(student.enrollments.map((entry) => [entry.class.branch.id, entry.class.branch])).values()];
+      return branches
+        .filter((branch) => isTenantAdmin(req.user!) || canAccessBranch(req.user!, branch.id))
+        .map((branch) => ({
+          studentId: student.id,
+          studentName: `${student.user.firstName} ${student.user.lastName}`.trim(),
+          gradeName: student.grade?.name ?? 'Ungraded',
+          branchId: branch.id,
+          branchName: branch.name,
+        }));
+    });
+    return res.json({ templates, students: options });
+  } catch {
+    return res.status(500).json({ error: 'Failed to load certificate options.' });
+  }
+});
+
 router.get(
   '/:certificateId/download',
   authMiddleware,

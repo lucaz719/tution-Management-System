@@ -6,7 +6,6 @@ import { KPICard } from '../components/ui/KPICard';
 import { ProgressRing } from '../components/ui/ProgressRing';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { TimetableList, type TimetableListItem } from '../components/ui/TimetableList';
-import { useToast } from '../components/ui/Toast';
 import { api, type BranchAdminDashboardData } from '../services/api';
 
 const money = (value: number) => `NPR ${Number(value || 0).toLocaleString('en-NP')}`;
@@ -51,66 +50,19 @@ function Empty({ children }: { children: string }) {
 }
 
 export function BranchAdminDashboard() {
-  const { showToast } = useToast();
   const [data, setData] = useState<BranchAdminDashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
-  const [approvingId, setApprovingId] = useState('');
   const navigate = useNavigate();
-
-  // Mock data for the new widgets
-  const activeStudentsByCourse = [
-    { course: 'Grade 10 Science', students: 45 },
-    { course: 'Grade 10 Math', students: 42 },
-    { course: 'Grade 12 Physics', students: 30 },
-    { course: 'IELTS Prep', students: 15 },
-  ];
-
-  const staffPerformance = [
-    { name: 'Sanjay Rai', role: 'Teacher', score: 92 },
-    { name: 'Aisha Tamang', role: 'Accountant', score: 88 },
-    { name: 'Bikash Thapa', role: 'Admin', score: 95 },
-  ];
-
-  const pendingApprovals = [
-    { id: 'PC-102', type: 'Petty Cash', desc: 'Office supplies', requester: 'Aisha', status: 'Pending L1' },
-    { id: 'LR-50', type: 'Leave', desc: 'Casual Leave (1 day)', requester: 'Sanjay', status: 'Pending' },
-    { id: 'EC-05', type: 'Exit Clearance', desc: 'Return of library books', requester: 'Student: Rina', status: 'Pending' }
-  ];
-
-  const escalatedTasks = [
-    { id: 'MT-01', issue: 'Projector broken in Room 302', duration: 'Overdue by 2 days', assignedTo: 'Maintenance Team' }
-  ];
 
   const loadBranchData = useCallback(async (branchId?: string) => {
     setIsLoading(true);
     setError('');
     try {
       setData(normalizeDashboard(await api.branchAdmin.getDashboard(branchId)));
-    } catch (loadError: any) {
-      // If 404 (no branch assigned) or 403, show demo data so the dashboard still renders
-      if (loadError?.status === 404 || loadError?.status === 403) {
-        setData({
-          branches: [{ id: 'demo', name: 'Demo Branch' }],
-          selectedBranch: { id: 'demo', name: 'Demo Branch' },
-          generatedAt: new Date().toISOString(),
-          metrics: {
-            teacherAttendance: { present: 4, total: 6, rate: 67 },
-            studentAttendance: { present: 38, total: 45, rate: 84 },
-            blockedStudents: 2,
-            pendingInvoices: 5,
-            outstandingAmount: 25000,
-            pendingAppointments: 0,
-          },
-          timetable: [],
-          resources: [],
-          pettyCash: [],
-          appointments: [],
-        });
-      } else {
-        setData(null);
-        setError(loadError instanceof Error ? loadError.message : 'Unable to load this branch dashboard.');
-      }
+    } catch (loadError) {
+      setData(null);
+      setError(loadError instanceof Error ? loadError.message : 'Unable to load this branch dashboard.');
     } finally {
       setIsLoading(false);
     }
@@ -127,28 +79,14 @@ export function BranchAdminDashboard() {
     ...sessionStatus(item.status),
   })), [data]);
 
-  const handleApprove = async (id: string, type: string) => {
-    setApprovingId(id);
-    try {
-      // Mock API call based on type
-      await new Promise(resolve => setTimeout(resolve, 800));
-      showToast(`${type} approved successfully.`, 'success');
-      // In a real app, this would refresh the data
-    } catch (approvalError) {
-      showToast(approvalError instanceof Error ? approvalError.message : 'Approval failed.', 'error');
-    } finally {
-      setApprovingId('');
-    }
-  };
-
   const QuickAccessItem = ({ icon, label, path }: { icon: string, label: string, path: string }) => (
-    <div 
+    <button type="button"
       onClick={() => navigate(path)}
       style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', cursor: 'pointer', padding: '16px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.1)', background: '#F8FAFC' }}
     >
       <span className="material-symbols-outlined" style={{ fontSize: '28px', color: 'var(--color-primary)' }}>{icon}</span>
       <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text)', textAlign: 'center' }}>{label}</span>
-    </div>
+    </button>
   );
 
   if (error) {
@@ -220,99 +158,6 @@ export function BranchAdminDashboard() {
       </div>
       {isLoading ? <Empty>Loading appointment requests...</Empty> : data?.appointments.length ? <div style={{ display: 'grid', gap: '10px' }}>{data.appointments.map((appointment) => <div key={appointment.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', padding: '12px 0', borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}><div><strong style={{ fontSize: '14px' }}>{appointment.student}</strong><p style={{ marginTop: '3px', color: 'var(--text-muted)', fontSize: '12px' }}>{appointment.parent} · {appointment.description}</p></div><Button variant="outline" onClick={() => navigate('/branch/appointments')}>Review</Button></div>)}</div> : <Empty>No pending appointment requests.</Empty>}
     </Card>
-
-    {/* New Row: Active Students Breakdown & Staff Performance */}
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '18px' }}>
-      <Card hoverable={false}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3 style={{ fontSize: '16px', fontWeight: 600 }}>Active Students</h3>
-          <span className="material-symbols-outlined" style={{ cursor: 'pointer', fontSize: '20px', color: 'var(--text-muted)' }} onClick={() => navigate('/branch/students')} title="View Students">open_in_new</span>
-        </div>
-        <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '16px', marginTop: '4px' }}>Breakdown by course/class.</p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {activeStudentsByCourse.map((item, idx) => (
-            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', borderBottom: '1px solid rgba(21, 96, 189, 0.1)' }}>
-              <span style={{ fontWeight: 600, fontSize: '14px' }}>{item.course}</span>
-              <StatusBadge variant="info">{item.students} enrolled</StatusBadge>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      <Card hoverable={false}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3 style={{ fontSize: '16px', fontWeight: 600 }}>Staff Performance</h3>
-          <span className="material-symbols-outlined" style={{ cursor: 'pointer', fontSize: '20px', color: 'var(--text-muted)' }} onClick={() => navigate('/branch/staff')} title="View Staff">open_in_new</span>
-        </div>
-        <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '16px', marginTop: '4px' }}>Local branch assessment scores for local staff.</p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {staffPerformance.map((staff, idx) => (
-            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: 'var(--color-surface)', borderRadius: '8px' }}>
-              <div>
-                <div style={{ fontWeight: 600, fontSize: '14px' }}>{staff.name}</div>
-                <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{staff.role}</div>
-              </div>
-              <div style={{ fontWeight: 700, color: 'var(--color-success)' }}>{staff.score}/100</div>
-            </div>
-          ))}
-        </div>
-      </Card>
-    </div>
-
-    {/* New Row: Generalized Pending Approvals Queue & Escalated Tasks */}
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '18px' }}>
-      <Card hoverable={false}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <h3 style={{ fontSize: '16px', fontWeight: 600 }}>Pending Approvals</h3>
-          <span className="material-symbols-outlined" style={{ cursor: 'pointer', fontSize: '20px', color: 'var(--text-muted)' }} onClick={() => navigate('/branch/leave-requests')} title="View Approvals">open_in_new</span>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {pendingApprovals.map((req) => 
-            <div key={req.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(21, 96, 189, 0.1)', background: '#FFFFFF', flexWrap: 'wrap' }}>
-              <div>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <StatusBadge variant="info">{req.type}</StatusBadge>
-                  <span style={{ fontWeight: 700, fontSize: '14px', color: 'var(--color-text)' }}>{req.desc}</span>
-                </div>
-                <p style={{ marginTop: '6px', fontSize: '12px', color: 'rgba(44, 62, 80, 0.68)' }}>By: {req.requester} · {req.status}</p>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Button variant="outline" disabled={approvingId === req.id} onClick={() => void handleApprove(req.id, req.type)} style={{ minHeight: '32px', height: '32px', padding: '4px 12px', borderColor: 'rgba(21, 96, 189, 0.18)' }}>
-                  Approve
-                </Button>
-                <Button variant="danger" disabled={approvingId === req.id} style={{ minHeight: '32px', height: '32px', padding: '4px 12px' }}>
-                  Reject
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
-      </Card>
-
-      <Card hoverable={false} style={{ border: '1px solid rgba(230, 57, 70, 0.2)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span className="material-symbols-outlined" style={{ color: 'var(--color-error)' }}>warning</span>
-            <h3 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--color-error)' }}>Escalated Maintenance</h3>
-          </div>
-          <span className="material-symbols-outlined" style={{ cursor: 'pointer', fontSize: '20px', color: 'var(--text-muted)' }} onClick={() => navigate('/branch/resource-logs')} title="View Resource Logs">open_in_new</span>
-        </div>
-        <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '16px', marginTop: '4px' }}>Tasks unresolved past Tenant Admin threshold.</p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {escalatedTasks.length === 0 ? <Empty>No escalated tasks.</Empty> : escalatedTasks.map((task) => (
-            <div key={task.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(230, 57, 70, 0.3)', background: 'var(--color-error-soft)' }}>
-              <div>
-                <div style={{ color: 'var(--color-error)', fontSize: '14px', fontWeight: 700 }}>{task.issue}</div>
-                <div style={{ marginTop: '4px', color: 'var(--color-error)', fontSize: '12px', opacity: 0.8 }}>Assigned to: {task.assignedTo} · {task.duration}</div>
-              </div>
-              <Button variant="outline" onClick={() => navigate('/branch/workspace')} style={{ minHeight: '32px', height: '32px', padding: '4px 12px', borderColor: 'var(--color-error)', color: 'var(--color-error)' }}>
-                Follow up
-              </Button>
-            </div>
-          ))}
-        </div>
-      </Card>
-    </div>
 
     {/* Original Sessions & Logs Row */}
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '18px' }}>
