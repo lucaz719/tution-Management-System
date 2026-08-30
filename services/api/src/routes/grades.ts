@@ -7,7 +7,7 @@ const router = Router();
 
 // The standard Nepali school ladder, used to seed a tenant's grades.
 const DEFAULT_GRADES = [
-  'Nursery', 'LKG', 'UKG',
+  'UKG',
   'Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5', 'Class 6',
   'Class 7', 'Class 8', 'Class 9', 'Class 10', 'Class 11', 'Class 12',
 ];
@@ -26,6 +26,7 @@ router.get('/', authMiddleware, async (req: TenantRequest, res: Response) => {
         name: g.name,
         sortOrder: g.sortOrder,
         monthlyFee: g.monthlyFee,
+        billingMode: g.billingMode,
         studentCount: g._count.students,
         courseCount: g._count.courses,
       })),
@@ -110,7 +111,14 @@ router.post('/seed-defaults', authMiddleware, hasPermission('manage_students'), 
     for (let i = 0; i < DEFAULT_GRADES.length; i++) {
       const name = DEFAULT_GRADES[i];
       if (have.has(name)) continue;
-      await prisma.grade.create({ data: { tenantId: req.tenantId!, name, sortOrder: i } });
+      await prisma.grade.create({
+        data: {
+          tenantId: req.tenantId!,
+          name,
+          sortOrder: i,
+          billingMode: name === 'Class 11' || name === 'Class 12' ? 'SUBJECT' : 'GRADE',
+        },
+      });
       created += 1;
     }
     return res.json({ message: `Added ${created} grade(s).`, created });

@@ -442,19 +442,19 @@ export const api = {
     },
   },
 
-  // Grade levels (Nursery … Class 12)
+  // Grade levels (UKG … Class 12)
   grades: {
     list: async () => {
-      const data = await request<{ grades: Array<{ id: string; name: string; sortOrder: number; studentCount: number }> }>('/grades');
+      const data = await request<{ grades: Array<{ id: string; name: string; sortOrder: number; monthlyFee: number; billingMode: 'GRADE' | 'SUBJECT'; studentCount: number; courseCount: number }> }>('/grades');
       return data.grades ?? [];
     },
     seedDefaults: async () => {
       return request<{ message: string; created: number }>('/grades/seed-defaults', { method: 'POST' });
     },
-    create: async (name: string, sortOrder?: number, monthlyFee?: number) => {
-      return request<{ message: string; grade: any }>('/grades', { method: 'POST', body: JSON.stringify({ name, sortOrder, monthlyFee }) });
+    create: async (name: string, sortOrder?: number, monthlyFee?: number, billingMode?: 'GRADE' | 'SUBJECT') => {
+      return request<{ message: string; grade: any }>('/grades', { method: 'POST', body: JSON.stringify({ name, sortOrder, monthlyFee, billingMode }) });
     },
-    update: async (id: string, changes: { name?: string; sortOrder?: number; monthlyFee?: number }) => {
+    update: async (id: string, changes: { name?: string; sortOrder?: number; monthlyFee?: number; billingMode?: 'GRADE' | 'SUBJECT' }) => {
       return request<{ message: string; grade: any }>(`/grades/${id}`, { method: 'PUT', body: JSON.stringify(changes) });
     },
     remove: async (id: string) => {
