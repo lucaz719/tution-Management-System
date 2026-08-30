@@ -1,10 +1,11 @@
 import { Router, Response } from 'express';
-import { CourseType, Prisma } from '@prisma/client';
+import { CourseType, GradeBillingMode, Prisma } from '@prisma/client';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { canAccessBranch, hasBranchPermission, isTenantAdmin } from '../utils/access-control';
 import { parsePlainRecord, parseStrictKeys, readFiniteNumber, readTrimmedString, type ValidationResult } from '../utils/request-validation';
+import { recurringInvoiceType } from '../utils/billing-rules';
 
 const router = Router();
 const COURSE_TYPES = new Set<string>(['REGULAR', 'MUSIC', 'SHORT_TERM', 'LONG_TERM', 'PERSONALIZED']);
@@ -149,23 +150,26 @@ router.post(
       }
 
       // Optional grade must belong to the tenant.
-      let resolvedGradeId: string | null = null;
+      let resolvedGrade: { id: string; billingMode: GradeBillingMode } | null = null;
       if (gradeId) {
-        const grade = await prisma.grade.findFirst({ where: { id: gradeId, tenantId: req.tenantId! } });
+        const grade = await prisma.grade.findFirst({ where: { id: gradeId, tenantId: req.tenantId! }, select: { id: true, billingMode: true } });
         if (!grade) {
           return res.status(404).json({ error: 'Grade not found in your institution.' });
         }
-        resolvedGradeId = grade.id;
+        resolvedGrade = grade;
       }
+
+      const resolvedIsExtraActivity = type.data !== CourseType.REGULAR || isExtraActivity.data;
+      const includedInGradePackage = type.data === CourseType.REGULAR && !resolvedIsExtraActivity && resolvedGrade?.billingMode === GradeBillingMode.GRADE;
 
       const course = await prisma.course.create({
         data: {
           tenantId: req.tenantId!, branchId: branchId.data,
-          gradeId: resolvedGradeId,
+          gradeId: resolvedGrade?.id ?? null,
           name: name.data,
           description,
-          type: type.data!, feeStructure: feeStructure.data,
-          isExtraActivity: isExtraActivity.data, isTaxExempt: isTaxExempt.data,
+          type: type.data!, feeStructure: includedInGradePackage ? { monthlyBase: 0 } : feeStructure.data,
+          isExtraActivity: resolvedIsExtraActivity, isTaxExempt: isTaxExempt.data,
           taxPercentage: typeof taxPercentage === 'number' ? taxPercentage : taxPercentage.data,
         },
       });
@@ -195,8 +199,8 @@ router.post(
         return res.status(404).json({ error: 'Branch not found in your institution.' });
       }
 
-      const grades = await prisma.grade.findMany({ where: { tenantId: req.tenantId! }, select: { id: true } });
-      const gradeIds = new Set(grades.map((g) => g.id));
+      const grades = await prisma.grade.findMany({ where: { tenantId: req.tenantId! }, select: { id: true, billingMode: true } });
+      const gradeModes = new Map(grades.map((g) => [g.id, g.billingMode]));
 
       const existing = await prisma.course.findMany({
         where: { tenantId: req.tenantId!, branchId },
@@ -212,7 +216,7 @@ router.post(
           results.push({ index, name, status: 'error', error: 'Course name is required.' });
           continue;
         }
-        if (gradeId && !gradeIds.has(gradeId)) {
+        if (gradeId && !gradeModes.has(gradeId)) {
           results.push({ index, name, status: 'error', error: 'Grade not found in your institution.' });
           continue;
         }
@@ -234,7 +238,7 @@ router.post(
             name,
             description: item.description,
             type: item.type,
-            feeStructure: { monthlyBase: fee },
+            feeStructure: { monthlyBase: gradeId && gradeModes.get(gradeId) === 'GRADE' && item.type === 'REGULAR' ? 0 : fee },
             isTaxExempt: item.isTaxExempt,
           },
         });
@@ -266,7 +270,7 @@ router.get(
         orderBy: { createdAt: 'desc' },
         include: {
           branch: { select: { name: true } },
-          grade: { select: { id: true, name: true } },
+          grade: { select: { id: true, name: true, billingMode: true } },
           _count: { select: { classes: true, enrollments: true } },
         },
       });
@@ -280,8 +284,10 @@ router.get(
           branchName: c.branch.name,
           gradeId: c.gradeId,
           gradeName: c.grade?.name ?? null,
+          gradeBillingMode: c.grade?.billingMode ?? null,
           feeStructure: c.feeStructure,
           isTaxExempt: c.isTaxExempt,
+          isExtraActivity: c.isExtraActivity,
           taxPercentage: Number(c.taxPercentage),
           classCount: c._count.classes,
           enrollmentCount: c._count.enrollments,
@@ -353,7 +359,7 @@ router.post(
 
     try {
       // 1. Fetch course and verify it belongs to the caller's tenant.
-      const course = await prisma.course.findUnique({ where: { id: courseId } });
+      const course = await prisma.course.findUnique({ where: { id: courseId }, include: { grade: { select: { billingMode: true } } } });
       if (!course || course.tenantId !== req.tenantId) {
         return res.status(404).json({ error: 'Course not found in your institution.' });
       }
@@ -411,7 +417,8 @@ router.post(
 
       const feeStructure = (course.feeStructure ?? {}) as { monthlyBase?: number };
       const base = Number(feeStructure.monthlyBase || 0);
-      const monthlyDelta = course.isTaxExempt ? base : base * (1 + Number(course.taxPercentage || 13) / 100);
+      const isRecurringCharge = recurringInvoiceType(course.grade?.billingMode ?? 'GRADE', course.isExtraActivity);
+      const monthlyDelta = isRecurringCharge ? (course.isTaxExempt ? base : base * (1 + Number(course.taxPercentage || 13) / 100)) : 0;
 
       return res.status(201).json({
         message: 'Student enrolled.',
@@ -1095,6 +1102,17 @@ router.put(
         if (!grade) {
           return res.status(404).json({ error: 'Grade not found in your institution.' });
         }
+      }
+
+      // Package-billed academic subjects never carry a second recurring fee.
+      // Normalize on the server so older clients cannot accidentally double-price them.
+      const targetGradeId = data.gradeId === undefined ? course.gradeId : typeof data.gradeId === 'string' ? data.gradeId : null;
+      const targetType = data.type === undefined ? course.type : data.type;
+      const targetIsExtraActivity = targetType !== CourseType.REGULAR || (data.isExtraActivity === undefined ? course.isExtraActivity : Boolean(data.isExtraActivity));
+      data.isExtraActivity = targetIsExtraActivity;
+      if (targetGradeId && targetType === CourseType.REGULAR && !targetIsExtraActivity) {
+        const targetGrade = await prisma.grade.findFirst({ where: { id: targetGradeId, tenantId: req.tenantId! }, select: { billingMode: true } });
+        if (targetGrade?.billingMode === GradeBillingMode.GRADE) data.feeStructure = { monthlyBase: 0 };
       }
 
       const updated = await prisma.course.update({ where: { id }, data });
