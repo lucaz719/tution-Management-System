@@ -312,6 +312,7 @@ export const api = {
       request<any>('/homework', { method: 'POST', body: JSON.stringify(payload) }),
     saveResultDraft: async (payload: any) => request<{ message: string; resultIds: string[] }>('/teacher/results', { method: 'POST', body: JSON.stringify(payload) }),
     shareResults: async (resultIds: string[]) => request<any>('/teacher/results/share', { method: 'POST', body: JSON.stringify({ resultIds }) }),
+    deleteResultDraft: async (resultId: string) => request<void>(`/teacher/results/${encodeURIComponent(resultId)}`, { method: 'DELETE' }),
     requestLeave: async (payload: { branchId: string; leaveType: string; startDate: string; endDate: string; reason: string }) =>
       request<any>('/leaves/request', { method: 'POST', body: JSON.stringify(payload) }),
   },
@@ -581,6 +582,9 @@ export const api = {
     getResultTemplate: async (resultId: string) => request<any>(`/branch-admin/result-definitions/${encodeURIComponent(resultId)}/template`),
     importResults: async (resultId: string, payload: { maximum: number; passMarks: number; rows: Array<{ studentId: string; score: number }> }) => request<{ message: string; imported: number }>(`/branch-admin/result-definitions/${encodeURIComponent(resultId)}/import`, { method: 'POST', body: JSON.stringify(payload) }),
     getResultReport: async (resultId: string) => request<any>(`/branch-admin/result-definitions/${encodeURIComponent(resultId)}/report`),
+    updateResultDefinition: async (resultId: string, payload: { title?: string; testDate?: string; isOpen?: boolean }) => request<any>(`/branch-admin/result-definitions/${encodeURIComponent(resultId)}`, { method: 'PUT', body: JSON.stringify(payload) }),
+    publishResultDefinition: async (resultId: string) => request<any>(`/branch-admin/result-definitions/${encodeURIComponent(resultId)}/publish`, { method: 'POST' }),
+    deleteResultDefinition: async (resultId: string) => request<void>(`/branch-admin/result-definitions/${encodeURIComponent(resultId)}`, { method: 'DELETE' }),
     getAppointments: async (branchId: string) => request<{ appointments: BranchAppointment[] }>(`/appointments/branch?branchId=${encodeURIComponent(branchId)}`),
     respondToAppointment: async (appointmentId: string, payload: { action: 'APPROVE' | 'REJECT'; scheduledTime?: string; remarks: string }) =>
       request<{ message: string }>(`/appointments/respond/${encodeURIComponent(appointmentId)}`, { method: 'POST', body: JSON.stringify(payload) }),

@@ -128,11 +128,11 @@ router.get('/teacher-workflows', async (req: TenantRequest, res: Response) => {
 });
 
 router.post('/result-definitions', async (req: TenantRequest, res: Response) => {
-  const { branchId, classId } = req.body; const title = String(req.body?.title || '').trim(); const subject = String(req.body?.subject || '').trim(); const testDate = new Date(req.body?.testDate);
+  const { branchId, classId } = req.body; const title = String(req.body?.title || '').trim(); const testDate = new Date(req.body?.testDate);
   if (!branchAllowed(req, branchId, 'manage_branch_calendar')) return res.status(403).json({ error: 'You cannot create results for this branch.' });
-  if (!classId || !title || !subject || Number.isNaN(testDate.getTime())) return res.status(400).json({ error: 'Class, result title, subject, and test date are required.' });
-  const klass = await prisma.class.findFirst({ where: { id: classId, branchId, course: { tenantId: req.tenantId! } } }); if (!klass) return res.status(404).json({ error: 'Class not found in this branch.' });
-  const definition = await prisma.resultDefinition.create({ data: { tenantId: req.tenantId!, branchId, classId, createdBy: req.user!.id, title, subject, testDate } });
+  if (!classId || !title || Number.isNaN(testDate.getTime())) return res.status(400).json({ error: 'Class, result title, and test date are required.' });
+  const klass = await prisma.class.findFirst({ where: { id: classId, branchId, course: { tenantId: req.tenantId! } }, include: { course: { select: { name: true } } } }); if (!klass) return res.status(404).json({ error: 'Class not found in this branch.' });
+  const definition = await prisma.resultDefinition.create({ data: { tenantId: req.tenantId!, branchId, classId, createdBy: req.user!.id, title, subject: klass.course.name, testDate } });
   return res.status(201).json({ message: 'Result created and made available to the assigned teacher.', definition });
 });
 
@@ -209,6 +209,34 @@ router.get('/result-definitions/:id/report', async (req: TenantRequest, res: Res
     event: { id: definition.id, title: definition.title, subject: definition.subject, testDate: definition.testDate, className: definition.class.name, gradeName: definition.class.course.grade?.name ?? 'Ungraded', branchName: definition.class.branch.name },
     results: definition.scores.map((score) => ({ id: score.id, studentId: score.studentId, admissionNumber: definition.class.enrollments.find((entry) => entry.studentId === score.studentId)?.student.admissionNumber ?? '', studentName: `${score.student.user.firstName} ${score.student.user.lastName}`.trim(), score: Number(score.score), maximum: Number(score.maximum), passMarks: Number(score.passMarks ?? 0), percentile: Number(score.percentile ?? 0), published: Boolean(score.publishedAt) })).sort((a, b) => a.studentName.localeCompare(b.studentName)),
   });
+});
+
+router.put('/result-definitions/:id', async (req: TenantRequest, res: Response) => {
+  const definition = await loadManagedResult(req, req.params.id);
+  if (!definition) return res.status(404).json({ error: 'Result event not found in a branch you manage.' });
+  const title = req.body?.title === undefined ? definition.title : String(req.body.title).trim();
+  const testDate = req.body?.testDate === undefined ? definition.testDate : new Date(req.body.testDate);
+  const isOpen = req.body?.isOpen === undefined ? definition.isOpen : req.body.isOpen;
+  if (!title || title.length > 160 || Number.isNaN(testDate.getTime()) || typeof isOpen !== 'boolean') return res.status(400).json({ error: 'Use a valid title, test date, and open status.' });
+  const updated = await prisma.resultDefinition.update({ where: { id: definition.id }, data: { title, testDate, isOpen } });
+  return res.json({ message: 'Result event updated.', definition: updated });
+});
+
+router.post('/result-definitions/:id/publish', async (req: TenantRequest, res: Response) => {
+  const definition = await loadManagedResult(req, req.params.id);
+  if (!definition) return res.status(404).json({ error: 'Result event not found in a branch you manage.' });
+  if (!definition.scores.length) return res.status(409).json({ error: 'Upload at least one result before publishing.' });
+  const publishedAt = new Date();
+  const update = await prisma.studentScore.updateMany({ where: { tenantId: req.tenantId!, resultDefinitionId: definition.id, publishedAt: null }, data: { publishedAt } });
+  return res.json({ message: `${update.count} result${update.count === 1 ? '' : 's'} published.`, published: update.count });
+});
+
+router.delete('/result-definitions/:id', async (req: TenantRequest, res: Response) => {
+  const definition = await loadManagedResult(req, req.params.id);
+  if (!definition) return res.status(404).json({ error: 'Result event not found in a branch you manage.' });
+  if (definition.scores.some((score) => score.publishedAt)) return res.status(409).json({ error: 'Published result events cannot be deleted. Close the event to prevent further entry.' });
+  await prisma.$transaction([prisma.studentScore.deleteMany({ where: { tenantId: req.tenantId!, resultDefinitionId: definition.id } }), prisma.resultDefinition.delete({ where: { id: definition.id } })]);
+  return res.status(204).send();
 });
 
 router.post('/fee-overrides', async (req: TenantRequest, res: Response) => {

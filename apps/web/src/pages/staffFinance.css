@@ -315,3 +315,59 @@
   .admission-print-record > header > div:last-child { text-align: left; }
   .admission-print-record dl { grid-template-columns: 1fr; }
 }
+
+.certificate-workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.result-event-summary,
+.result-danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--color-surface);
+}
+
+.result-event-summary p,
+.result-danger-zone p {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.result-event-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.result-danger-zone {
+  border-color: color-mix(in srgb, var(--color-error) 28%, var(--border));
+  background: var(--color-error-soft);
+}
+
+@media (max-width: 760px) {
+  .certificate-workspace-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .result-event-summary,
+  .result-danger-zone {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .result-event-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+  }
+}

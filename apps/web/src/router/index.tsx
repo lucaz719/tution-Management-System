@@ -43,6 +43,7 @@ const AcademicFees = lazy(() => import('../pages/AcademicFees').then((module) =>
 const AcademicGrades = lazy(() => import('../pages/AcademicGrades').then((module) => ({ default: module.AcademicGrades })));
 const BranchAdminDashboard = lazy(() => import('../pages/BranchAdminDashboard').then((module) => ({ default: module.BranchAdminDashboard })));
 const BranchAdminWorkspace = lazy(() => import('../pages/BranchAdminWorkspace').then((module) => ({ default: module.BranchAdminWorkspace })));
+const TenantResultsPage = lazy(() => import('../pages/BranchAdminWorkspace').then((module) => ({ default: module.BranchResultsView })));
 const TeacherPortal = lazy(() => import('../pages/TeacherPortal').then((module) => ({ default: module.TeacherPortal })));
 const ParentStudentPortal = lazy(() => import('../pages/ParentStudentPortal').then((module) => ({ default: module.ParentStudentPortal })));
 const StudentPortal = lazy(() => import('../pages/StudentPortal').then((module) => ({ default: module.StudentPortal })));
@@ -273,6 +274,7 @@ const router = createBrowserRouter([
               { path: '/tenant/timetables', element: <Suspense fallback={<FullPageSpinner />}><AcademicTimetables /></Suspense> },
               { path: '/tenant/fees', element: <Suspense fallback={<FullPageSpinner />}><AcademicFees /></Suspense> },
               { path: '/tenant/grades', element: <Suspense fallback={<FullPageSpinner />}><AcademicGrades /></Suspense> },
+              { path: '/tenant/results', element: <Suspense fallback={<FullPageSpinner />}><TenantResultsPage /></Suspense> },
               { path: '/tenant/control-center', element: <Suspense fallback={<FullPageSpinner />}><TenantControlCenter /></Suspense> },
               { path: '/tenant/settings', element: <Navigate to="/tenant/control-center" replace /> },
               { path: '/tenant/petty-cash', element: <Suspense fallback={<FullPageSpinner />}><TenantPettyCashPage /></Suspense> },
