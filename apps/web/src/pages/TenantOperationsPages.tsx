@@ -401,6 +401,7 @@ export function TenantLeaveRequestsPage() {
   const [requests, setRequests] = useState<Awaited<ReturnType<typeof api.branchAdmin.getLeaves>>['leaves']>([]);
   const [busy, setBusy] = useState('');
   const [decisionRemarks, setDecisionRemarks] = useState<Record<string, string>>({});
+  const [decisionErrors, setDecisionErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 
@@ -410,16 +411,25 @@ export function TenantLeaveRequestsPage() {
     catch (next) { setLoadError(errorMessage(next)); }
     finally { setLoading(false); }
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    const interval = window.setInterval(() => { void load(); }, 15_000);
+    return () => window.clearInterval(interval);
+  }, [load]);
 
   const mutate = async (id: string, action: 'APPROVE' | 'REJECT') => {
-    setBusy(id);
+    const remarks = decisionRemarks[id]?.trim();
+    if (action === 'REJECT' && !remarks) {
+      setDecisionErrors((current) => ({ ...current, [id]: 'Add a reason so the teacher understands why this request was rejected.' }));
+      document.getElementById(`leave-remarks-${id}`)?.focus();
+      return;
+    }
+    setBusy(id); setDecisionErrors((current) => ({ ...current, [id]: '' }));
     try {
-      const remarks = action === 'REJECT' ? decisionRemarks[id]?.trim() : undefined;
-      if (action === 'REJECT' && !remarks) return;
-      await api.branchAdmin.decideLeave(id, action, remarks);
+      await api.branchAdmin.decideLeave(id, action, action === 'REJECT' ? remarks : undefined);
       await load();
-      showToast(`Leave request ${action.toLowerCase()}d at Level 2.`, 'success');
+      setDecisionRemarks((current) => ({ ...current, [id]: '' }));
+      showToast(action === 'APPROVE' ? 'Leave approved. The teacher can now see the final decision.' : 'Leave rejected. The teacher can now see the reason.', 'success');
     } catch (next) {
       showToast(errorMessage(next), 'error');
     } finally {
@@ -453,11 +463,11 @@ export function TenantLeaveRequestsPage() {
                   </div>
                   <StatusBadge variant="warning">L2 Review</StatusBadge>
                 </div>
-                <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
-                  <Button disabled={busy === req.id} onClick={() => void mutate(req.id, 'APPROVE')}>Approve Leave</Button>
-                  <Button disabled={busy === req.id || !decisionRemarks[req.id]?.trim()} variant="danger" onClick={() => void mutate(req.id, 'REJECT')}>Reject Leave</Button>
+                <label style={{ display: 'grid', gap: 6, marginTop: 16, fontSize: 13, fontWeight: 700 }} htmlFor={`leave-remarks-${req.id}`}>Reason for rejection <span style={{ color: 'var(--text-muted)', fontSize: 12, fontWeight: 400 }}>Required only when rejecting.</span><textarea id={`leave-remarks-${req.id}`} style={{ ...input, minHeight: 72 }} maxLength={2000} value={decisionRemarks[req.id] ?? ''} aria-invalid={Boolean(decisionErrors[req.id]) || undefined} aria-describedby={decisionErrors[req.id] ? `leave-remarks-error-${req.id}` : undefined} onChange={(event) => { setDecisionRemarks((old) => ({ ...old, [req.id]: event.target.value })); if (decisionErrors[req.id]) setDecisionErrors((current) => ({ ...current, [req.id]: '' })); }} placeholder="Explain the decision to the teacher" />{decisionErrors[req.id] ? <span id={`leave-remarks-error-${req.id}`} role="alert" style={{ color: 'var(--color-error)', fontSize: 12 }}>{decisionErrors[req.id]}</span> : null}</label>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '16px', flexWrap: 'wrap' }}>
+                  <Button disabled={busy === req.id} onClick={() => void mutate(req.id, 'APPROVE')}>{busy === req.id ? 'Saving decision…' : 'Approve leave'}</Button>
+                  <Button disabled={busy === req.id} variant="danger" onClick={() => void mutate(req.id, 'REJECT')}>{busy === req.id ? 'Saving decision…' : 'Reject leave'}</Button>
                 </div>
-                <label style={{ display: 'grid', gap: 6, marginTop: 12, fontSize: 13, fontWeight: 700 }} htmlFor={`leave-remarks-${req.id}`}>Rejection reason<textarea id={`leave-remarks-${req.id}`} style={{ ...input, minHeight: 72 }} maxLength={2000} value={decisionRemarks[req.id] ?? ''} onChange={(event) => setDecisionRemarks((old) => ({ ...old, [req.id]: event.target.value }))} placeholder="Required only when rejecting" /></label>
               </div>
             ))}
           </div>
@@ -473,7 +483,7 @@ export function TenantLeaveRequestsPage() {
                 <div>
                   <strong>{req.staffName}</strong> · {req.leaveType.replaceAll('_', ' ')} ({req.branchName})
                 </div>
-                <StatusBadge variant={req.status === 'APPROVED' ? 'success' : 'error'}>{req.status}</StatusBadge>
+                <StatusBadge variant={req.status === 'APPROVED_LEVEL2' ? 'success' : 'error'}>{req.status === 'APPROVED_LEVEL2' ? 'Approved' : 'Rejected'}</StatusBadge>
               </div>
             ))}
           </div>

@@ -1803,6 +1803,13 @@ function LiveTeacherWorkflow({ mode }: { mode: 'attendance' | 'homework' | 'resu
   // Initial branch resolution is intentionally performed once; later changes call load from their controls.
   // oxlint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { void load('', date); }, []);
+  useEffect(() => {
+    if (mode !== 'leaves' || !branchId) return;
+    const interval = window.setInterval(() => { void load(branchId, date); }, 15_000);
+    return () => window.clearInterval(interval);
+    // The queue refreshes from the currently selected branch and date.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, branchId, date]);
   if (loading) return <Page title="Teacher workflows" description="Loading branch records…"><Card hoverable={false}><div aria-busy="true">Loading synchronized records…</div></Card></Page>;
   if (error || !data) return <Page title="Teacher workflows" description="Branch-scoped teacher operations."><Card hoverable={false}><Feedback message="" error={error} /><Button onClick={() => void load()}>Try again</Button></Card></Page>;
   const controls = <Card hoverable={false}><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 12 }}><label style={label}>Branch<select style={field} value={branchId} onChange={(event) => { setBranchId(event.target.value); void load(event.target.value, date); }}>{data.branches.map((branch: any) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>{mode === 'attendance' ? <label style={label}>Academic date<input style={field} type="date" value={date} onChange={(event) => { setDate(event.target.value); void load(branchId, event.target.value); }} /></label> : null}</div></Card>;

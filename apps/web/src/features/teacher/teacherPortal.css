@@ -43,6 +43,7 @@
 
 /* Prevent result controls from overflowing into adjacent grid columns. */
 .teacher-student-result-row>*{min-width:0}.teacher-student-result-row label{display:block;min-width:0}.teacher-form .teacher-student-result-row input{display:block;width:100%;max-width:100%;min-width:0}.teacher-form .teacher-student-result-row input[type=file]{overflow:hidden;font-size:12px}.teacher-form .teacher-student-result-row input[type=file]::file-selector-button{max-width:100%;margin-right:8px}
+.teacher-form-feedback{margin-top:8px;padding:12px 14px;border:1px solid var(--t-border);border-radius:7px;font-size:13px;font-weight:700;line-height:1.45}.teacher-form-feedback.is-success{border-color:color-mix(in srgb,var(--color-success) 30%,var(--t-border));background:var(--color-success-soft);color:var(--color-success)}.teacher-form-feedback.is-error{border-color:color-mix(in srgb,var(--color-error) 30%,var(--t-border));background:var(--color-error-soft);color:var(--color-error)}
 @media(max-width:900px){.teacher-student-result-row{grid-template-columns:minmax(0,1fr) 120px}.teacher-student-result-row>div{grid-column:1}.teacher-student-result-row>label:last-child{grid-column:1/-1;width:100%}}
 @media(max-width:520px){.teacher-student-result-row{grid-template-columns:1fr}.teacher-student-result-row>div,.teacher-student-result-row>label:last-child{grid-column:1}}
 
