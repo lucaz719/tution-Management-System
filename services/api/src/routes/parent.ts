@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware } from '../middleware/auth';
+import { studentBillingSummary } from '../utils/student-billing-summary';
 
 const router = Router();
 
@@ -97,6 +98,7 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
     }
     const student = link.student;
     const child = children.find((item) => item.id === student.id)!;
+    const billing = studentBillingSummary(student.grade, student.enrollments);
     const classIds = student.enrollments.map((enrollment) => enrollment.classId);
     const branchIds = [...new Set(student.enrollments.map((enrollment) => enrollment.class.branchId))];
     const [events, leaves, appointments, messages, remarks, scores, tenant, branchAdmins] = await Promise.all([
@@ -268,6 +270,7 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
       bookingWindowHours: tenant?.appointmentWindowHours ?? 24,
       children,
       selected: child,
+      billing,
       sessions,
       attendance,
       remarks: visibleRemarks,

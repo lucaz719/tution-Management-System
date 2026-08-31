@@ -14,6 +14,7 @@ import {
 import { UserPayload } from '@tms/types';
 import { canReleaseAdmissionLogins } from '../utils/billing-rules';
 import { activateAdmissionAndSendLogins } from '../utils/admission-logins';
+import { studentBillingSummary } from '../utils/student-billing-summary';
 import { parseStrictKeys, parseStrictObject, readTrimmedString } from '../utils/request-validation';
 
 const router = Router();
@@ -222,14 +223,15 @@ router.get('/me', authMiddleware, async (req: TenantRequest, res: Response) => {
 // Admission creates inactive Student/Parent accounts and a branch-priced invoice.
 // Logins are activated and delivered by SMS only after that invoice is paid.
 router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Response) => {
-  const admissionShape = parseStrictKeys(req.body, ['branchId', 'gradeId', 'classId', 'student', 'parent', 'admissionDetails']);
+  const admissionShape = parseStrictKeys(req.body, ['branchId', 'gradeId', 'classId', 'classIds', 'student', 'parent', 'admissionDetails']);
   if (!admissionShape.success) return res.status(400).json({ error: admissionShape.error });
   const caller = req.user as UserPayload;
   const tenantAdmin = isTenantAdmin(caller);
   const scopes = branchAdminScopes(caller);
   const branchId = typeof admissionShape.data.branchId === 'string' ? admissionShape.data.branchId.trim() : '';
   const gradeId = typeof admissionShape.data.gradeId === 'string' ? admissionShape.data.gradeId.trim() : '';
-  const classId = typeof admissionShape.data.classId === 'string' ? admissionShape.data.classId.trim() : '';
+  const legacyClassId = typeof admissionShape.data.classId === 'string' ? admissionShape.data.classId.trim() : '';
+  const classIds = Array.from(new Set(Array.isArray(admissionShape.data.classIds) ? admissionShape.data.classIds.filter((value): value is string => typeof value === 'string' && Boolean(value.trim())).map((value) => value.trim()) : legacyClassId ? [legacyClassId] : []));
   if (!tenantAdmin && !scopes.includes(branchId)) {
     return res.status(403).json({ error: 'Only the Tenant Admin or assigned Branch Admin may create admissions.' });
   }
@@ -237,22 +239,29 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
   const studentFields = validateNewUserBody(admissionShape.data.student);
   const parentFields = validateNewUserBody(admissionShape.data.parent);
   const admissionDetails = validateAdmissionDetails(admissionShape.data.admissionDetails);
-  if (!branchId || !gradeId || !classId || !studentFields || !parentFields || !admissionDetails.success) {
+  if (!branchId || !gradeId || !classIds.length || classIds.length > 20 || !studentFields || !parentFields || !admissionDetails.success) {
     return res.status(400).json({
       error: admissionDetails.success ? 'Branch, grade, regular class, and complete student and primary guardian identity details are required.' : admissionDetails.error,
     });
   }
 
-  const [branch, grade, regularClass, existing] = await Promise.all([
+  const [branch, grade, regularClasses, existing] = await Promise.all([
     prisma.branch.findFirst({ where: { id: branchId, tenantId: req.tenantId! } }),
     prisma.grade.findFirst({ where: { id: gradeId, tenantId: req.tenantId! } }),
-    prisma.class.findFirst({ where: { id: classId, branchId, course: { tenantId: req.tenantId!, gradeId, type: 'REGULAR' } }, include: { course: true } }),
+    prisma.class.findMany({ where: { id: { in: classIds }, branchId, course: { tenantId: req.tenantId!, gradeId, type: 'REGULAR', isExtraActivity: false } }, include: { course: true } }),
     prisma.user.findFirst({
       where: { email: { in: [studentFields.email, parentFields.email] } },
       select: { email: true },
     }),
   ]);
-  if (!branch || !grade || !regularClass) return res.status(404).json({ error: 'Branch, grade, or matching regular class was not found in your institution.' });
+  if (!branch || !grade || regularClasses.length !== classIds.length) return res.status(404).json({ error: 'Branch, grade, or a matching regular class was not found in your institution.' });
+  if (grade.billingMode === 'GRADE' && regularClasses.length !== 1) return res.status(400).json({ error: 'Package-billed grades require one regular class placement.' });
+  if (grade.billingMode === 'SUBJECT') {
+    if (new Set(regularClasses.map((item) => item.courseId)).size !== regularClasses.length) return res.status(400).json({ error: 'Choose only one class for each subject.' });
+    const missingPrice = regularClasses.find((item) => Number((item.course.feeStructure as { monthlyBase?: number })?.monthlyBase ?? 0) <= 0);
+    if (missingPrice) return res.status(409).json({ error: `${missingPrice.course.name} needs a monthly price before admission.` });
+  }
+  const regularClass = regularClasses[0];
   if (studentFields.email === parentFields.email) {
     return res.status(400).json({ error: 'Student and parent must use different email addresses.' });
   }
@@ -317,7 +326,7 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
           admissionStatus: branch.admissionFee > 0 ? 'PENDING_PAYMENT' : 'READY_FOR_LOGIN',
         },
       });
-      await tx.enrollment.create({ data: { studentId: student.id, courseId: regularClass.courseId, classId: regularClass.id, status: 'BLOCKED', admissionDate: admittedAt } });
+      await tx.enrollment.createMany({ data: regularClasses.map((item) => ({ studentId: student.id, courseId: item.courseId, classId: item.id, status: 'BLOCKED' as const, admissionDate: admittedAt })) });
 
       const parentUser = await tx.user.create({
         data: {
@@ -372,6 +381,7 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
         branchId,
         gradeId,
         classId: regularClass.id,
+        classIds: regularClasses.map((item) => item.id),
         admissionNumber,
         admittedAt: admittedAt.toISOString(),
         status: result.student.admissionStatus,
@@ -382,7 +392,7 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
           branchName: branch.name,
           branchAddress: branch.address,
           gradeName: grade.name,
-          className: regularClass.name,
+          className: regularClasses.map((item) => `${item.course.name} · ${item.name}`).join(', '),
           student: { ...studentFields, ...admissionDetails.data },
           primaryGuardian: savedAdmissionRecord.primaryGuardian,
           admittedBy: savedAdmissionRecord.admittedBy,
@@ -891,7 +901,20 @@ router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Respo
       where: { id: req.params.id, tenantId: req.tenantId! },
       include: {
         userRoles: { include: { role: true, branch: true } },
-        student: { include: { grade: { select: { name: true, monthlyFee: true } } } },
+        student: {
+          include: {
+            grade: { select: { name: true, monthlyFee: true, billingMode: true } },
+            studentParents: {
+              include: {
+                parent: {
+                  include: {
+                    user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true, status: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
         parent: true,
         staffRecord: true,
       },
@@ -926,21 +949,13 @@ router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Respo
       const enrollments = await prisma.enrollment.findMany({
         where: { studentId: user.student.id },
         include: {
-          course: { select: { name: true, feeStructure: true, isTaxExempt: true, taxPercentage: true } },
-          class: { select: { name: true } },
+          course: { select: { id: true, name: true, feeStructure: true, isTaxExempt: true, isExtraActivity: true, taxPercentage: true } },
+          class: { select: { id: true, name: true } },
         },
         orderBy: { createdAt: 'desc' },
       });
-      // Live recurring monthly fee = grade tuition (all subjects) + active extra
-      // activity enrolments.
-      const gradeTuition = user.student.grade?.monthlyFee ?? 0;
-      const extrasFee = enrollments
-        .filter((e) => e.status === 'ACTIVE')
-        .reduce((sum, e) => {
-          const base = Number((e.course.feeStructure as { monthlyBase?: number })?.monthlyBase || 0);
-          return sum + (e.course.isTaxExempt ? base : base * (1 + Number(e.course.taxPercentage || 13) / 100));
-        }, 0);
-      const monthlyFee = gradeTuition + extrasFee;
+      const billing = studentBillingSummary(user.student.grade, enrollments);
+      const gradeTuition = user.student.grade?.billingMode === 'GRADE' ? Number(user.student.grade.monthlyFee ?? 0) : 0;
       const attendance = await prisma.studentAttendance.groupBy({
         by: ['status'],
         where: { studentId: user.student.id },
@@ -954,12 +969,22 @@ router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Respo
         studentId: user.student.id,
         grade: user.student.grade?.name ?? null,
         gradeTuition,
-        monthlyFee: Math.round(monthlyFee * 100) / 100,
+        monthlyFee: billing.recurringTotal,
+        billing,
+        guardians: user.student.studentParents.map((link) => ({
+          userId: link.parent.user.id,
+          name: `${link.parent.user.firstName} ${link.parent.user.lastName}`,
+          email: link.parent.user.email,
+          phone: link.parent.user.phone,
+          status: link.parent.user.status,
+        })),
         enrollments: enrollments.map((e) => ({
           id: e.id,
           courseName: e.course.name,
           className: e.class.name,
           status: e.status,
+          category: e.course.isExtraActivity ? 'ACTIVITY' : 'ACADEMIC',
+          fee: billing.lines.find((line) => line.enrollmentId === e.id)?.amount ?? 0,
         })),
         fees: await studentFeeSummary(user.student.id),
         attendance: attendance.reduce<Record<string, number>>((acc, a) => {

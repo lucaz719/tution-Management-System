@@ -310,7 +310,7 @@ router.get(
         where: { course: { tenantId: req.tenantId! }, ...(isTenantAdmin(req.user!) ? {} : { branchId: { in: req.user!.roles.filter((role: { roleName: string; branchId: string | null }) => role.roleName === 'Branch Admin' && role.branchId).map((role: { roleName: string; branchId: string | null }) => role.branchId as string) } }) },
         orderBy: { createdAt: 'desc' },
         include: {
-          course: { select: { name: true, type: true, grade: { select: { id: true, name: true } } } },
+          course: { select: { name: true, type: true, feeStructure: true, isTaxExempt: true, taxPercentage: true, grade: { select: { id: true, name: true, billingMode: true } } } },
           branch: { select: { name: true } },
           assignedTeacher: { select: { id: true, firstName: true, lastName: true } },
           enrollments: { where: { status: { in: ['ACTIVE', 'BLOCKED'] } }, include: { student: { include: { user: { select: { firstName: true, lastName: true, email: true } } } } }, orderBy: { student: { user: { firstName: 'asc' } } } },
@@ -325,9 +325,13 @@ router.get(
           courseId: c.courseId,
           courseName: c.course.name,
           courseType: c.course.type,
+          feeStructure: c.course.feeStructure,
+          isTaxExempt: c.course.isTaxExempt,
+          taxPercentage: Number(c.course.taxPercentage),
           // Grade is derived from the course — the class inherits it automatically.
           gradeId: c.course.grade?.id ?? null,
           gradeName: c.course.grade?.name ?? null,
+          gradeBillingMode: c.course.grade?.billingMode ?? null,
           branchId: c.branchId,
           branchName: c.branch.name,
           teacherId: c.teacherId,

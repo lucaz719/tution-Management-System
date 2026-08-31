@@ -152,6 +152,7 @@ export interface ParentPortalDataset {
   bookingWindowHours: number;
   children: ParentChild[];
   selected: ParentChild | null;
+  billing: { billingMode: 'GRADE' | 'SUBJECT' | null; setupStatus: 'READY' | 'INCOMPLETE'; blockers: string[]; recurringTotal: number; lines: Array<{ type: 'GRADE' | 'SUBJECT' | 'ACTIVITY'; sourceId: string; label: string; className?: string; amount: number; status: string }> };
   sessions: ParentSession[];
   attendance: ParentAttendance[];
   remarks: ParentRemark[];

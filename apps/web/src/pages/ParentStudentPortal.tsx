@@ -180,6 +180,10 @@ function PaymentDialog({ invoice, child, onClose }: { invoice: ParentInvoice; ch
   };
   return <div className="parent-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section ref={dialogRef} tabIndex={-1} onKeyDown={keyDown} role="dialog" aria-modal="true" aria-labelledby="parent-qr-title" className="parent-modal"><button type="button" className="parent-modal__close" aria-label="Close Nepal Pay QR" onClick={onClose}>{icon('close')}</button><span className="parent-eyebrow">NEPAL PAY · {child.name}</span><h2 id="parent-qr-title">Scan to pay {money(invoiceTotal(invoice))}</h2><p>{invoice.cycle} · {invoice.reference}</p>{error ? <div className="parent-form__error" role="alert">{error}</div> : image ? <div className="parent-qr"><img src={image} width="360" height="360" alt={`Nepal Pay QR for ${child.name}, invoice ${invoice.id}`} /></div> : <div className="parent-qr" aria-busy="true" aria-label="Generating Nepal Pay QR" />}<small>Verify the child, merchant, invoice, and amount before confirming.</small><button type="button" className="parent-primary-button" onClick={onClose}>Done</button></section></div>;
 }
+function ParentBillingPlan() {
+  const { billing } = useParentData();
+  return <section className={`parent-card parent-billing-plan${billing.setupStatus === 'INCOMPLETE' ? ' is-incomplete' : ''}`}><SectionHeader title="Monthly billing plan" description={billing.billingMode === 'SUBJECT' ? 'Selected subjects and optional activities.' : 'Grade package and optional activities.'} /><div className="parent-billing-plan__total"><span>{billing.setupStatus === 'READY' ? 'Recurring total' : 'Setup incomplete'}</span><strong>{billing.setupStatus === 'READY' ? `${money(billing.recurringTotal)}/month` : 'Contact the institution'}</strong></div>{billing.blockers.map((blocker) => <p key={blocker} role="status">{blocker}</p>)}<div className="parent-invoice-lines">{billing.lines.map((line) => <div key={`${line.type}-${line.sourceId}`}><span>{line.label}<small>{line.type === 'GRADE' ? 'Regular subjects included' : line.className}</small></span><strong>{money(line.amount)}</strong></div>)}</div></section>;
+}
 function FeesView({ child }: { child: ParentChild }) {
   const { invoices } = useParentData();
   const current = invoices.find((invoice) => invoice.state !== 'Paid') ?? invoices[0];
@@ -241,7 +245,7 @@ export function ParentStudentPortal() {
           : view === 'messages' ? <MessagesView child={child} refresh={refresh} />
             : view === 'appointments' ? <AppointmentsView child={child} refresh={refresh} />
               : view === 'leave' ? <LeaveView child={child} refresh={refresh} />
-                : view === 'fees' ? <FeesView child={child} />
+                : view === 'fees' ? <><ParentBillingPlan /><FeesView child={child} /></>
                   : view === 'certificates' ? <CertificatesView child={child} />
                     : view === 'calendar' ? <CalendarView child={child} />
                       : view === 'security' ? <SecurityView />
