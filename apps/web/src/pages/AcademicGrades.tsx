@@ -8,6 +8,12 @@ type BillingMode = 'GRADE' | 'SUBJECT';
 interface Grade { id: string; name: string; sortOrder: number; monthlyFee: number; billingMode: BillingMode; studentCount: number; courseCount: number }
 interface GradeDetail { courses: Array<{ id: string; name: string; branchName: string; enrollmentCount: number }>; teachers: Array<{ id: string; name: string }> }
 const money = (value: number) => `NPR ${value.toLocaleString('en-NP')}`;
+const standardBillingMode = (name: string): BillingMode | null => {
+  if (/^UKG$/i.test(name.trim())) return 'GRADE';
+  const match = name.trim().match(/^(?:Class|Grade)\s*(\d{1,2})$/i);
+  const level = Number(match?.[1]);
+  return level >= 1 && level <= 10 ? 'GRADE' : level === 11 || level === 12 ? 'SUBJECT' : null;
+};
 
 export function AcademicGrades() {
   const { showToast } = useToast();
@@ -35,8 +41,8 @@ export function AcademicGrades() {
 
   const totals = useMemo(() => ({
     students: grades.reduce((sum, grade) => sum + grade.studentCount, 0),
-    packages: grades.filter((grade) => grade.billingMode === 'GRADE').length,
-    subjects: grades.filter((grade) => grade.billingMode === 'SUBJECT').length,
+    packages: grades.filter((grade) => (standardBillingMode(grade.name) ?? grade.billingMode) === 'GRADE').length,
+    subjects: grades.filter((grade) => (standardBillingMode(grade.name) ?? grade.billingMode) === 'SUBJECT').length,
   }), [grades]);
 
   const seedDefaults = async () => {
@@ -65,7 +71,7 @@ export function AcademicGrades() {
   };
 
   const beginEdit = (grade: Grade) => {
-    setEditingId(grade.id); setDeleteId(''); setEditName(grade.name); setEditFee(String(grade.monthlyFee)); setEditMode(grade.billingMode);
+    setEditingId(grade.id); setDeleteId(''); setEditName(grade.name); setEditFee(String(grade.monthlyFee)); setEditMode(standardBillingMode(grade.name) ?? grade.billingMode);
   };
 
   const save = async (grade: Grade) => {
@@ -74,7 +80,8 @@ export function AcademicGrades() {
     if (!Number.isFinite(fee) || fee < 0) return showToast('Enter a valid monthly fee.', 'error');
     setBusyId(grade.id);
     try {
-      await api.grades.update(grade.id, { name: editName.trim(), monthlyFee: editMode === 'GRADE' ? fee : 0, billingMode: editMode });
+      const resolvedMode = standardBillingMode(editName.trim()) ?? editMode;
+      await api.grades.update(grade.id, { name: editName.trim(), monthlyFee: resolvedMode === 'GRADE' ? fee : 0, billingMode: resolvedMode });
       setEditingId(''); showToast('Billing settings saved.', 'success'); await load();
     } catch (cause) { showToast(cause instanceof Error ? cause.message : 'Billing settings could not be saved.', 'error'); }
     finally { setBusyId(''); }
@@ -108,21 +115,21 @@ export function AcademicGrades() {
       {loading ? Array.from({ length: 5 }, (_, index) => <div className="grade-card-skeleton" key={index} />) : null}
       {!loading && !grades.length ? <div className="people-empty grade-empty"><span className="material-symbols-outlined" aria-hidden="true">stairs</span><strong>No grades configured</strong><p>Add the standard UKG–Class 12 ladder to begin.</p><Button onClick={() => void seedDefaults()}>Add standard grades</Button></div> : null}
       {!loading && grades.map((grade) => {
-        const expanded = expandedId === grade.id; const editing = editingId === grade.id; const subjectBilling = grade.billingMode === 'SUBJECT';
+        const expanded = expandedId === grade.id; const editing = editingId === grade.id; const fixedMode = standardBillingMode(grade.name); const subjectBilling = (fixedMode ?? grade.billingMode) === 'SUBJECT';
         return <article className={`grade-card${expanded ? ' is-expanded' : ''}`} key={grade.id}>
           <button className="grade-card-summary" type="button" onClick={() => void toggle(grade)} aria-expanded={expanded} aria-controls={`grade-panel-${grade.id}`}>
             <span className="grade-card-title"><span className="grade-icon material-symbols-outlined" aria-hidden="true">school</span><span><strong>{grade.name}</strong><small>{subjectBilling ? 'Students pay for selected subjects' : 'One monthly tuition package'}</small></span></span>
-            <span className="grade-card-metric"><small>Billing</small><strong>{subjectBilling ? 'Per subject' : money(grade.monthlyFee)}</strong></span><span className="grade-card-metric"><small>Students</small><strong>{grade.studentCount}</strong></span><span className="grade-card-metric"><small>Subjects</small><strong>{grade.courseCount}</strong></span><span className="grade-chevron material-symbols-outlined" aria-hidden="true">expand_more</span>
+            <span className="grade-card-metric"><small>Billing</small><strong className={!subjectBilling && grade.monthlyFee <= 0 ? 'is-warning' : ''}>{subjectBilling ? 'Per subject' : grade.monthlyFee > 0 ? money(grade.monthlyFee) : 'Fee required'}</strong></span><span className="grade-card-metric"><small>Students</small><strong>{grade.studentCount}</strong></span><span className="grade-card-metric"><small>Subjects</small><strong>{grade.courseCount}</strong></span><span className="grade-chevron material-symbols-outlined" aria-hidden="true">expand_more</span>
           </button>
           {expanded ? <div className="grade-card-panel" id={`grade-panel-${grade.id}`}>
             <div className="grade-panel-head"><div><h2>Billing and subjects</h2><p>Set how monthly charges are calculated for this grade.</p></div>{!editing ? <Button variant="outline" onClick={() => beginEdit(grade)}><span className="material-symbols-outlined" aria-hidden="true">edit</span>Edit billing</Button> : null}</div>
             {editing ? <form className="grade-edit-form" onSubmit={(event) => { event.preventDefault(); void save(grade); }} aria-busy={busyId === grade.id}>
               <label htmlFor={`grade-name-${grade.id}`}>Grade name<input id={`grade-name-${grade.id}`} value={editName} onChange={(event) => setEditName(event.target.value)} autoComplete="off" /></label>
-              <label htmlFor={`grade-mode-${grade.id}`}>Billing method<select id={`grade-mode-${grade.id}`} value={editMode} onChange={(event) => setEditMode(event.target.value as BillingMode)}><option value="GRADE">Monthly grade package</option><option value="SUBJECT">Per selected subject</option></select><small>{editMode === 'GRADE' ? 'All regular subjects are included in one fee.' : 'Monthly total comes from active subject enrolments.'}</small></label>
-              <label htmlFor={`grade-fee-${grade.id}`}>Monthly package fee (NPR)<input id={`grade-fee-${grade.id}`} value={editFee} onChange={(event) => setEditFee(event.target.value)} inputMode="numeric" pattern="[0-9]*" disabled={editMode === 'SUBJECT'} /><small>{editMode === 'SUBJECT' ? 'Set individual prices from Courses.' : 'Regular subjects will not add separate charges.'}</small></label>
+              {fixedMode ? <div className="grade-locked-policy"><span className="material-symbols-outlined" aria-hidden="true">lock</span><span><strong>{fixedMode === 'GRADE' ? 'Monthly grade package' : 'Per selected subject'}</strong><small>Fixed institutional billing policy</small></span></div> : <label htmlFor={`grade-mode-${grade.id}`}>Billing method<select id={`grade-mode-${grade.id}`} value={editMode} onChange={(event) => setEditMode(event.target.value as BillingMode)}><option value="GRADE">Monthly grade package</option><option value="SUBJECT">Per selected subject</option></select><small>{editMode === 'GRADE' ? 'All regular subjects are included in one fee.' : 'Monthly total comes from active subject enrolments.'}</small></label>}
+              <label htmlFor={`grade-fee-${grade.id}`}>Monthly package fee (NPR)<input id={`grade-fee-${grade.id}`} value={editFee} onChange={(event) => setEditFee(event.target.value)} inputMode="numeric" pattern="[0-9]*" disabled={(fixedMode ?? editMode) === 'SUBJECT'} /><small>{(fixedMode ?? editMode) === 'SUBJECT' ? 'Set individual prices from Courses.' : 'Regular subjects will not add separate charges.'}</small></label>
               <div className="grade-form-actions"><Button type="submit" disabled={busyId === grade.id}>{busyId === grade.id ? 'Saving…' : 'Save billing'}</Button><Button type="button" variant="outline" onClick={() => setEditingId('')}>Cancel</Button></div>
-            </form> : <div className="grade-billing-callout"><span className="material-symbols-outlined" aria-hidden="true">{subjectBilling ? 'receipt_long' : 'inventory_2'}</span><div><strong>{subjectBilling ? 'Subject billing is active' : `${money(grade.monthlyFee)} per month`}</strong><p>{subjectBilling ? 'Only selected subjects should appear on each student invoice.' : 'This package covers every regular subject. Activities remain separate.'}</p></div></div>}
-            <div className="grade-detail-grid"><section><h3>Subjects</h3>{detailLoading ? <p>Loading subjects…</p> : detail?.courses.length ? detail.courses.map((course) => <div className="grade-detail-row" key={course.id}><span><strong>{course.name}</strong><small>{course.branchName}</small></span><StatusBadge variant="info">{course.enrollmentCount} enrolled</StatusBadge></div>) : <p>No subjects are attached yet.</p>}</section><section><h3>Teaching team</h3>{detailLoading ? <p>Loading teachers…</p> : detail?.teachers.length ? detail.teachers.map((teacher) => <div className="grade-detail-row" key={teacher.id}><strong>{teacher.name}</strong></div>) : <p>No teachers are assigned yet.</p>}</section></div>
+            </form> : <div className={`grade-billing-callout${!subjectBilling && grade.monthlyFee <= 0 ? ' is-warning' : ''}`}><span className="material-symbols-outlined" aria-hidden="true">{subjectBilling ? 'receipt_long' : grade.monthlyFee > 0 ? 'inventory_2' : 'warning'}</span><div><strong>{subjectBilling ? 'Subject billing is active' : grade.monthlyFee > 0 ? `${money(grade.monthlyFee)} per month` : 'Monthly package fee is required'}</strong><p>{subjectBilling ? 'Only selected subjects should appear on each student invoice.' : grade.monthlyFee > 0 ? 'This package covers every regular subject. Activities remain separate.' : 'Set the grade fee before generating monthly invoices. Subject enrolment is not required for package grades.'}</p></div></div>}
+            <div className="grade-detail-grid"><section><h3>Subjects</h3>{detailLoading ? <p>Loading subjects…</p> : detail?.courses.length ? detail.courses.map((course) => <div className="grade-detail-row" key={course.id}><span><strong>{course.name}</strong><small>{course.branchName}</small></span><StatusBadge variant="info">{subjectBilling ? `${course.enrollmentCount} selected` : 'Included'}</StatusBadge></div>) : <p>No subjects are attached yet.</p>}</section><section><h3>Teaching team</h3>{detailLoading ? <p>Loading teachers…</p> : detail?.teachers.length ? detail.teachers.map((teacher) => <div className="grade-detail-row" key={teacher.id}><strong>{teacher.name}</strong></div>) : <p>No teachers are assigned yet.</p>}</section></div>
             <div className="grade-danger-zone"><div><strong>Delete grade</strong><p>Deletion is blocked while students are assigned.</p></div>{deleteId === grade.id ? <div className="grade-delete-confirm"><span>Delete {grade.name}?</span><Button variant="danger" onClick={() => void remove(grade)} disabled={busyId === grade.id}>{busyId === grade.id ? 'Deleting…' : 'Confirm delete'}</Button><Button variant="outline" onClick={() => setDeleteId('')}>Cancel</Button></div> : <Button variant="outline" onClick={() => setDeleteId(grade.id)}>Delete grade</Button>}</div>
           </div> : null}
         </article>;

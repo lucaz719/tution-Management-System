@@ -8,12 +8,28 @@ import { api } from '../services/api';
 type BillingMode = 'GRADE' | 'SUBJECT';
 type Workspace = 'ACADEMIC' | 'EXTRA';
 interface Course { id: string; name: string; description: string | null; type: string; branchId: string; branchName: string; gradeId: string | null; gradeName: string | null; gradeBillingMode: BillingMode | null; feeStructure: { monthlyBase?: number }; isTaxExempt: boolean; isExtraActivity: boolean; taxPercentage: number; classCount: number; enrollmentCount: number }
-interface Grade { id: string; name: string; sortOrder: number; monthlyFee: number; billingMode: BillingMode }
+interface Grade { id: string; name: string; sortOrder: number; monthlyFee: number; billingMode: BillingMode; studentCount: number }
 interface FormState { name: string; branchId: string; gradeId: string; type: string; monthlyBase: string; isTaxExempt: boolean; description: string }
 
 const EMPTY_FORM: FormState = { name: '', branchId: '', gradeId: '', type: 'REGULAR', monthlyBase: '', isTaxExempt: false, description: '' };
 const EXTRA_TYPES = [{ value: 'MUSIC', label: 'Music' }, { value: 'SHORT_TERM', label: 'Short-term programme' }, { value: 'LONG_TERM', label: 'Long-term programme' }, { value: 'PERSONALIZED', label: 'Personalized class' }];
 const money = (value: number) => `NPR ${value.toLocaleString('en-NP')}`;
+const standardBillingMode = (name: string): BillingMode | null => {
+  const normalized = name.trim().replace(/\s+/g, ' ');
+  if (/^UKG$/i.test(normalized)) return 'GRADE';
+  const match = normalized.match(/^(?:Class|Grade)\s*(\d{1,2})$/i);
+  if (!match) return null;
+  const level = Number(match[1]);
+  if (level >= 1 && level <= 10) return 'GRADE';
+  if (level === 11 || level === 12) return 'SUBJECT';
+  return null;
+};
+const billingModeFor = (grade: Grade) => standardBillingMode(grade.name) ?? grade.billingMode;
+const subjectName = (course: Course) => {
+  if (!course.gradeName) return course.name;
+  const suffix = ` — ${course.gradeName}`;
+  return course.name.endsWith(suffix) ? course.name.slice(0, -suffix.length) : course.name;
+};
 
 export function AcademicCourses() {
   const { showToast } = useToast();
@@ -54,7 +70,7 @@ export function AcademicCourses() {
   const filteredActivities = activities.filter((course) => !query || `${course.name} ${course.type} ${course.branchName}`.toLowerCase().includes(query));
   const selectedGrade = grades.find((grade) => grade.id === form.gradeId);
   const isAcademicForm = form.type === 'REGULAR';
-  const usesPackage = isAcademicForm && selectedGrade?.billingMode === 'GRADE';
+  const usesPackage = isAcademicForm && selectedGrade ? billingModeFor(selectedGrade) === 'GRADE' : false;
 
   const groups = useMemo(() => grades.map((grade) => ({ grade, courses: filteredRegular.filter((course) => course.gradeId === grade.id) })).filter((group) => group.courses.length || !query), [grades, filteredRegular, query]);
 
@@ -110,9 +126,16 @@ export function AcademicCourses() {
 
     {!loading && workspace === 'ACADEMIC' ? <section className="course-grade-list" aria-label="Academic subjects by grade">
       {!groups.length ? <div className="course-empty"><span className="material-symbols-outlined" aria-hidden="true">menu_book</span><strong>No matching subjects</strong><p>Clear the search or add subjects to the grade ladder.</p><Button onClick={() => openCreate('ACADEMIC')}>Add subject</Button></div> : groups.map(({ grade, courses: gradeCourses }) => {
-        const expanded = expandedGrade === grade.id; const enrolments = gradeCourses.reduce((sum, course) => sum + course.enrollmentCount, 0);
-        return <article className={`course-grade-card${expanded ? ' is-expanded' : ''}`} key={grade.id}><button className="course-grade-summary" type="button" onClick={() => setExpandedGrade(expanded ? '' : grade.id)} aria-expanded={expanded}><span className="course-grade-title"><span className="material-symbols-outlined" aria-hidden="true">school</span><span><strong>{grade.name}</strong><small>{grade.billingMode === 'GRADE' ? `${money(grade.monthlyFee)} package · all subjects included` : 'Students pay for selected subjects'}</small></span></span><span><small>Subjects</small><strong>{gradeCourses.length}</strong></span><span><small>Enrolments</small><strong>{enrolments}</strong></span><StatusBadge variant={grade.billingMode === 'GRADE' ? 'info' : 'gold'}>{grade.billingMode === 'GRADE' ? 'Package billing' : 'Per subject'}</StatusBadge><span className="material-symbols-outlined course-grade-chevron" aria-hidden="true">expand_more</span></button>
-          {expanded ? <div className="course-grade-panel">{gradeCourses.length ? gradeCourses.map((course) => <div className="course-subject-row" key={course.id}><div><strong>{course.name}</strong><small>{course.branchName}{course.description ? ` · ${course.description}` : ''}</small></div><div className="course-price"><small>Monthly charge</small><strong>{grade.billingMode === 'GRADE' ? 'Included' : money(course.feeStructure.monthlyBase ?? 0)}</strong></div><div><small>Classes</small><strong>{course.classCount}</strong></div><div><small>Enrolled</small><strong>{course.enrollmentCount}</strong></div><CourseActions course={course} /></div>) : <div className="course-inline-empty"><span>No subjects added yet.</span><Button onClick={() => { setForm({ ...EMPTY_FORM, branchId: branches[0]?.id ?? '', gradeId: grade.id }); setEditingId(''); setDrawerOpen(true); }}>Add first subject</Button></div>}</div> : null}
+        const expanded = expandedGrade === grade.id;
+        const billingMode = billingModeFor(grade);
+        const usesGradePackage = billingMode === 'GRADE';
+        const selections = gradeCourses.reduce((sum, course) => sum + course.enrollmentCount, 0);
+        const missingPrices = usesGradePackage ? 0 : gradeCourses.filter((course) => (course.feeStructure.monthlyBase ?? 0) <= 0).length;
+        return <article className={`course-grade-card${expanded ? ' is-expanded' : ''}`} key={grade.id}><button className="course-grade-summary" type="button" onClick={() => setExpandedGrade(expanded ? '' : grade.id)} aria-expanded={expanded}><span className="course-grade-title"><span className="material-symbols-outlined" aria-hidden="true">school</span><span><strong>{grade.name}</strong><small className={usesGradePackage && grade.monthlyFee <= 0 ? 'is-warning' : ''}>{usesGradePackage ? (grade.monthlyFee > 0 ? `${money(grade.monthlyFee)} monthly package` : 'Monthly grade fee not configured') : 'Students pay only for selected subjects'}</small></span></span><span><small>Subjects</small><strong>{gradeCourses.length}</strong></span><span><small>{usesGradePackage ? 'Students in grade' : 'Subject selections'}</small><strong>{usesGradePackage ? grade.studentCount : selections}</strong></span><StatusBadge variant={missingPrices || (usesGradePackage && grade.monthlyFee <= 0) ? 'gold' : usesGradePackage ? 'info' : 'success'}>{missingPrices ? `${missingPrices} prices required` : usesGradePackage && grade.monthlyFee <= 0 ? 'Fee required' : usesGradePackage ? 'Grade billing' : 'Per subject'}</StatusBadge><span className="material-symbols-outlined course-grade-chevron" aria-hidden="true">expand_more</span></button>
+          {expanded ? <div className="course-grade-panel">{gradeCourses.length ? gradeCourses.map((course) => {
+            const fee = course.feeStructure.monthlyBase ?? 0;
+            return <div className={`course-subject-row${usesGradePackage ? ' is-package' : ''}`} key={course.id}><div><strong>{subjectName(course)}</strong><small>{course.branchName}{course.description ? ` · ${course.description}` : ''}</small></div><div className={`course-price${!usesGradePackage && fee <= 0 ? ' is-missing' : ''}`}><small>{usesGradePackage ? 'Billing' : 'Monthly price'}</small><strong>{usesGradePackage ? 'Included in grade tuition' : fee > 0 ? money(fee) : 'Price required'}</strong></div><div><small>Classes</small><strong>{course.classCount}</strong></div>{usesGradePackage ? <div className="course-policy-state"><small>Student billing</small><strong>Uses grade assignment</strong></div> : <div><small>Selected</small><strong>{course.enrollmentCount}</strong></div>}<CourseActions course={course} /></div>;
+          }) : <div className="course-inline-empty"><span>No subjects added yet.</span><Button onClick={() => { setForm({ ...EMPTY_FORM, branchId: branches[0]?.id ?? '', gradeId: grade.id }); setEditingId(''); setDrawerOpen(true); }}>Add first subject</Button></div>}</div> : null}
         </article>;
       })}
     </section> : null}

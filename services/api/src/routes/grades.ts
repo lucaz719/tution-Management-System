@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
+import { standardGradeBillingMode } from '../utils/standard-grade-billing';
 
 const router = Router();
 
@@ -116,7 +117,7 @@ router.post('/seed-defaults', authMiddleware, hasPermission('manage_students'), 
           tenantId: req.tenantId!,
           name,
           sortOrder: i,
-          billingMode: name === 'Class 11' || name === 'Class 12' ? 'SUBJECT' : 'GRADE',
+          billingMode: standardGradeBillingMode(name) ?? 'GRADE',
         },
       });
       created += 1;
@@ -133,12 +134,13 @@ router.post('/', authMiddleware, hasPermission('manage_students'), async (req: T
   const sortOrder = Number.isFinite(Number(req.body?.sortOrder)) ? Number(req.body.sortOrder) : 99;
   const monthlyFee = Number.isFinite(Number(req.body?.monthlyFee)) && Number(req.body.monthlyFee) >= 0 ? Math.round(Number(req.body.monthlyFee)) : 0;
   const admissionFee = Number.isFinite(Number(req.body?.admissionFee)) && Number(req.body.admissionFee) >= 0 ? Math.round(Number(req.body.admissionFee)) : 0;
-  const billingMode = req.body?.billingMode === 'SUBJECT' ? 'SUBJECT' : 'GRADE';
+  const billingMode = standardGradeBillingMode(name) ?? (req.body?.billingMode === 'SUBJECT' ? 'SUBJECT' : 'GRADE');
+  const resolvedMonthlyFee = billingMode === 'SUBJECT' ? 0 : monthlyFee;
   if (!name) {
     return res.status(400).json({ error: 'Grade name is required.' });
   }
   try {
-    const grade = await prisma.grade.create({ data: { tenantId: req.tenantId!, name, sortOrder, monthlyFee, admissionFee, billingMode } });
+    const grade = await prisma.grade.create({ data: { tenantId: req.tenantId!, name, sortOrder, monthlyFee: resolvedMonthlyFee, admissionFee, billingMode } });
     return res.status(201).json({ message: 'Grade created.', grade });
   } catch (error: any) {
     if (error.code === 'P2002') {
@@ -162,6 +164,12 @@ router.put('/:id', authMiddleware, hasPermission('manage_students'), async (req:
     if (Number.isFinite(Number(req.body?.monthlyFee)) && Number(req.body.monthlyFee) >= 0) data.monthlyFee = Math.round(Number(req.body.monthlyFee));
     if (Number.isFinite(Number(req.body?.admissionFee)) && Number(req.body.admissionFee) >= 0) data.admissionFee = Math.round(Number(req.body.admissionFee));
     if (req.body?.billingMode === 'GRADE' || req.body?.billingMode === 'SUBJECT') data.billingMode = req.body.billingMode;
+    const nextName = typeof data.name === 'string' ? data.name : grade.name;
+    const lockedBillingMode = standardGradeBillingMode(nextName);
+    if (lockedBillingMode) {
+      data.billingMode = lockedBillingMode;
+      if (lockedBillingMode === 'SUBJECT') data.monthlyFee = 0;
+    }
     if (Object.keys(data).length === 0) {
       return res.status(400).json({ error: 'Nothing to update.' });
     }

@@ -6,6 +6,14 @@ import { api } from '../services/api';
 
 interface GradeOption { id: string; name: string; sortOrder: number; billingMode: 'GRADE' | 'SUBJECT' }
 
+const billingModeFor = (grade: GradeOption): 'GRADE' | 'SUBJECT' => {
+  if (/^UKG$/i.test(grade.name.trim())) return 'GRADE';
+  const level = Number(grade.name.trim().match(/^(?:Class|Grade)\s*(\d{1,2})$/i)?.[1]);
+  if (level >= 1 && level <= 10) return 'GRADE';
+  if (level === 11 || level === 12) return 'SUBJECT';
+  return grade.billingMode;
+};
+
 interface BulkCourseCreateProps {
   branches: Array<{ id: string; name: string }>;
   grades: GradeOption[];
@@ -71,7 +79,7 @@ export function BulkCourseCreate({ branches, grades, onClose, onCreated }: BulkC
   };
 
   const total = selectedGrades.size * subjects.length;
-  const selectedSubjectBillingGrades = sortedGrades.filter((grade) => selectedGrades.has(grade.id) && grade.billingMode === 'SUBJECT');
+  const selectedSubjectBillingGrades = sortedGrades.filter((grade) => selectedGrades.has(grade.id) && billingModeFor(grade) === 'SUBJECT');
 
   const submit = async () => {
     if (!branchId) return showToast('Select a branch.', 'error');
@@ -86,7 +94,7 @@ export function BulkCourseCreate({ branches, grades, onClose, onCreated }: BulkC
     for (const grade of sortedGrades) {
       if (!selectedGrades.has(grade.id)) continue;
       for (const subject of subjects) {
-        items.push({ name: `${subject} — ${grade.name}`, gradeId: grade.id, monthlyBase: grade.billingMode === 'SUBJECT' ? fee : 0, isTaxExempt, type: 'REGULAR' });
+        items.push({ name: `${subject} — ${grade.name}`, gradeId: grade.id, monthlyBase: billingModeFor(grade) === 'SUBJECT' ? fee : 0, isTaxExempt, type: 'REGULAR' });
         itemLabels.push(`${subject} — ${grade.name}`);
       }
     }
