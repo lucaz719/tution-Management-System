@@ -15,6 +15,7 @@ import { UserPayload } from '@tms/types';
 import { canReleaseAdmissionLogins } from '../utils/billing-rules';
 import { activateAdmissionAndSendLogins } from '../utils/admission-logins';
 import { studentBillingSummary } from '../utils/student-billing-summary';
+import { invoiceLineItems } from '../utils/invoice-document';
 import { parseStrictKeys, parseStrictObject, readTrimmedString } from '../utils/request-validation';
 
 const router = Router();
@@ -355,12 +356,14 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
           invoiceType: 'ADMISSION',
           panNumberSnapshot: tenant.panNumber,
           vatRateSnapshot: tenant.vatRate,
+          lineItemsSnapshot: [{ label: 'One-time admission fee', amount: Number(branch.admissionFee) }],
           amount: branch.admissionFee,
           netPayable: branch.admissionFee,
           billingCycleStart: now,
           billingCycleEnd: now,
           dueDate,
           status: branch.admissionFee > 0 ? 'UNPAID' : 'PAID',
+          paymentDate: branch.admissionFee > 0 ? null : now,
         },
       });
       return { student, parent, invoice, tenant };
@@ -515,6 +518,17 @@ async function studentFeeSummary(studentId: string) {
       status: i.status,
       dueDate: i.dueDate,
       paymentDate: i.paymentDate,
+      invoiceType: i.invoiceType,
+      amount: num(i.amount),
+      discount: num(i.discount),
+      fine: num(i.fine),
+      panNumberSnapshot: i.panNumberSnapshot,
+      vatRateSnapshot: num(i.vatRateSnapshot),
+      lineItems: invoiceLineItems(i.lineItemsSnapshot, i.invoiceType, i.amount),
+      transactionId: i.transactionId,
+      createdAt: i.createdAt,
+      billingCycleStart: i.billingCycleStart,
+      billingCycleEnd: i.billingCycleEnd,
     })),
   };
 }
@@ -534,7 +548,7 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
         },
         grade: true,
         enrollments: {
-          where: { status: { in: ['ACTIVE', 'BLOCKED'] } },
+          where: { status: { in: ['ACTIVE', 'BLOCKED'] }, OR: [{ validUntil: null }, { validUntil: { gt: new Date() } }] },
           include: {
             course: true,
             class: {
@@ -737,14 +751,38 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
 
     const invoices = student.invoices.map((invoice) => ({
       id: invoice.id,
+      invoiceType: invoice.invoiceType,
+      paymentDate: invoice.paymentDate ? formatDate(invoice.paymentDate) : null,
       cycle: invoice.billingCycleStart.toLocaleDateString('en', { month: 'long', year: 'numeric', timeZone: 'Asia/Kathmandu' }),
       dueDate: formatDate(invoice.dueDate),
       state: invoiceState(invoice.status, invoice.dueDate),
       qrAvailable: invoice.status !== 'PAID',
       paymentReference: invoice.transactionId ?? invoice.id,
       netPayable: Number(invoice.netPayable),
+      document: {
+        id: invoice.id,
+        invoiceType: invoice.invoiceType,
+        status: invoice.status,
+        institutionName: student.user.tenant.name,
+        panNumber: invoice.panNumberSnapshot,
+        vatRate: Number(invoice.vatRateSnapshot),
+        studentName: `${student.user.firstName} ${student.user.lastName}`,
+        admissionNumber: student.admissionNumber,
+        gradeName: student.grade?.name ?? null,
+        branchName: student.enrollments[0]?.class.branch.name ?? null,
+        issuedAt: invoice.createdAt,
+        dueDate: invoice.dueDate,
+        paymentDate: invoice.paymentDate,
+        billingCycleStart: invoice.billingCycleStart,
+        billingCycleEnd: invoice.billingCycleEnd,
+        transactionId: invoice.transactionId,
+        lines: invoiceLineItems(invoice.lineItemsSnapshot, invoice.invoiceType, invoice.amount),
+        discount: Number(invoice.discount),
+        fine: Number(invoice.fine),
+        netPayable: Number(invoice.netPayable),
+      },
       lines: [
-        { label: `${invoice.invoiceType.charAt(0)}${invoice.invoiceType.slice(1).toLowerCase()} dues`, amount: Number(invoice.amount) },
+        ...invoiceLineItems(invoice.lineItemsSnapshot, invoice.invoiceType, invoice.amount),
         ...(Number(invoice.discount) ? [{ label: 'Discount', amount: -Number(invoice.discount) }] : []),
         ...(Number(invoice.fine) ? [{ label: 'Fine', amount: Number(invoice.fine) }] : []),
       ],
@@ -901,6 +939,7 @@ router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Respo
       where: { id: req.params.id, tenantId: req.tenantId! },
       include: {
         userRoles: { include: { role: true, branch: true } },
+        tenant: { select: { name: true } },
         student: {
           include: {
             grade: { select: { name: true, monthlyFee: true, billingMode: true } },
@@ -939,6 +978,7 @@ router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Respo
       phone: user.phone,
       status: user.status,
       createdAt: user.createdAt,
+      institutionName: user.tenant.name,
       roles: user.userRoles.map((ur) => ({ role: ur.role.name, branchName: ur.branch?.name ?? null })),
     };
 
@@ -955,6 +995,15 @@ router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Respo
         orderBy: { createdAt: 'desc' },
       });
       const billing = studentBillingSummary(user.student.grade, enrollments);
+      const fees = await studentFeeSummary(user.student.id);
+      const academicEnrollments = enrollments.filter((enrollment) => !enrollment.course.isExtraActivity);
+      const validFrom = academicEnrollments.map((enrollment) => enrollment.validFrom).find(Boolean) ?? null;
+      const validUntil = academicEnrollments.map((enrollment) => enrollment.validUntil).find(Boolean) ?? null;
+      const enrollmentAccess = {
+        status: !validFrom || !validUntil ? 'PENDING' : validUntil.getTime() <= Date.now() ? 'EXPIRED' : 'ACTIVE',
+        validFrom,
+        validUntil,
+      };
       const gradeTuition = user.student.grade?.billingMode === 'GRADE' ? Number(user.student.grade.monthlyFee ?? 0) : 0;
       const attendance = await prisma.studentAttendance.groupBy({
         by: ['status'],
@@ -971,6 +1020,7 @@ router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Respo
         gradeTuition,
         monthlyFee: billing.recurringTotal,
         billing,
+        enrollmentAccess,
         guardians: user.student.studentParents.map((link) => ({
           userId: link.parent.user.id,
           name: `${link.parent.user.firstName} ${link.parent.user.lastName}`,
@@ -983,10 +1033,13 @@ router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Respo
           courseName: e.course.name,
           className: e.class.name,
           status: e.status,
+          accessStatus: e.validUntil && e.validUntil.getTime() <= Date.now() ? 'EXPIRED' : e.status,
+          validFrom: e.validFrom,
+          validUntil: e.validUntil,
           category: e.course.isExtraActivity ? 'ACTIVITY' : 'ACADEMIC',
           fee: billing.lines.find((line) => line.enrollmentId === e.id)?.amount ?? 0,
         })),
-        fees: await studentFeeSummary(user.student.id),
+        fees,
         attendance: attendance.reduce<Record<string, number>>((acc, a) => {
           acc[a.status] = a._count._all;
           return acc;

@@ -13,6 +13,7 @@ import {
 import { loadNepalPayPayload, loadStudentPortal, studentFileUrl } from '../features/student/studentPortalService';
 import { errorMessage } from '../services/api/client';
 import { ChangePasswordForm } from '../components/ChangePasswordForm';
+import { InvoiceDocumentDialog } from '../components/InvoiceDocument';
 import '../features/student/studentPortal.css';
 
 type StudentView =
@@ -301,6 +302,7 @@ function FeesView() {
   const [qrError, setQrError] = useState('');
   const [qrLoading, setQrLoading] = useState(false);
   const [paymentReference, setPaymentReference] = useState('');
+  const [bill, setBill] = useState<(typeof invoices)[number] | null>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const current = invoices.find((invoice) => invoice.state !== 'Paid') ?? invoices[0];
@@ -363,16 +365,17 @@ function FeesView() {
   if (!current) return <div className="student-view"><section className="student-card"><EmptyState title="No invoices issued" message="Your billing cycles will appear here when the institution issues them." iconName="payments" /></section></div>;
   return (
     <div className="student-view">
-      <section className="student-fee-hero"><div><StatusPill label={studentProfile.blocked ? 'Blocked' : current.state} iconName={studentProfile.blocked ? 'lock' : 'payments'} tone={studentProfile.blocked ? 'gold' : feeTone(current.state)} /><span>Current outstanding</span><strong>{money(total)}</strong><p>{current.cycle} · Due {current.dueDate}</p></div><button ref={triggerRef} type="button" disabled={!current.qrAvailable || qrLoading} aria-busy={qrLoading} onClick={() => void openQr()}>{icon('qr_code_2')}{qrLoading ? 'Generating QR…' : current.qrAvailable ? 'Show Nepal Pay QR' : 'Already paid'}</button></section>
+      <section className="student-fee-hero"><div><StatusPill label={studentProfile.blocked ? 'Blocked' : current.state} iconName={studentProfile.blocked ? 'lock' : 'payments'} tone={studentProfile.blocked ? 'gold' : feeTone(current.state)} /><span>{current.state === 'Paid' ? 'Latest payment' : 'Current outstanding'}</span><strong>{money(total)}</strong><p>{current.invoiceType === 'ADMISSION' ? 'One-time admission fee' : current.cycle}{current.state === 'Paid' && current.paymentDate ? ` · Paid ${current.paymentDate}` : ` · Due ${current.dueDate}`}</p></div><button ref={triggerRef} type="button" disabled={qrLoading} aria-busy={qrLoading} onClick={() => current.qrAvailable ? void openQr() : setBill(current)}>{icon(current.qrAvailable ? 'qr_code_2' : 'receipt_long')}{qrLoading ? 'Generating QR…' : current.qrAvailable ? 'Show Nepal Pay QR' : 'View paid bill'}</button></section>
       <section className="student-card">
         <SectionHeader title="Payment calendar" description="Status uses text and icons as well as colour." />
-        <div className="student-payment-calendar">{invoices.map((invoice) => <article key={invoice.id} className={`is-${feeTone(invoice.state)}`}><div><strong>{invoice.cycle}</strong><span>Due {invoice.dueDate}</span></div><StatusPill label={invoice.state} iconName={invoice.state === 'Paid' ? 'check_circle' : invoice.state === 'Overdue' ? 'error' : 'schedule'} tone={feeTone(invoice.state)} /><b>{money(invoiceTotal(invoice))}</b></article>)}</div>
+        <div className="student-payment-calendar">{invoices.map((invoice) => <article key={invoice.id} className={`is-${feeTone(invoice.state)}`}><div><strong>{invoice.invoiceType === 'ADMISSION' ? 'Admission fee' : invoice.cycle}</strong><span>{invoice.state === 'Paid' && invoice.paymentDate ? `Paid ${invoice.paymentDate}` : `Due ${invoice.dueDate}`}</span></div><StatusPill label={invoice.state} iconName={invoice.state === 'Paid' ? 'check_circle' : invoice.state === 'Overdue' ? 'error' : 'schedule'} tone={feeTone(invoice.state)} /><b>{money(invoiceTotal(invoice))}</b><button type="button" className="student-text-button" onClick={() => setBill(invoice)}>{icon('receipt_long')}View bill</button></article>)}</div>
       </section>
       <div className="student-fees-layout">
         <section className="student-card"><SectionHeader title={`${current.cycle} invoice`} description="Current billing-cycle breakdown." /><div className="student-invoice-lines">{current.lines.map((line) => <div key={line.label}><span>{line.label}</span><strong className={line.amount < 0 ? 'is-discount' : ''}>{line.amount < 0 ? '−' : ''}{money(line.amount)}</strong></div>)}<div className="student-invoice-total"><span>Net payable</span><strong>{money(total)}</strong></div></div></section>
         <aside className="student-card student-payment-help">{icon('verified_user')}<h3>Before you pay</h3><p>Confirm the merchant name, invoice reference, and exact amount in your payment app.</p><dl><div><dt>Invoice reference</dt><dd>{current.paymentReference ?? current.id}</dd></div><div><dt>Amount</dt><dd>{money(total)}</dd></div></dl></aside>
       </div>
       {showQr ? <div className="student-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowQr(false); }}><section ref={dialogRef} tabIndex={-1} onKeyDown={handleDialogKeyDown} role="dialog" aria-modal="true" aria-labelledby="qr-title" aria-describedby="qr-description" className="student-modal"><button type="button" className="student-modal__close" aria-label="Close Nepal Pay QR" onClick={() => setShowQr(false)}>{icon('close')}</button><span className="student-eyebrow">NEPAL PAY</span><h2 id="qr-title">Scan to pay {money(total)}</h2><p>{current.cycle} · {paymentReference || current.id}</p>{qrLoading ? <div className="student-qr student-qr--loading" aria-label="Generating Nepal Pay QR" aria-busy="true" /> : qrError ? <div className="student-qr-error" role="alert">{icon('error')}<span>{qrError}</span><button type="button" onClick={() => void openQr()}>Try again</button></div> : qrImage ? <div className="student-qr"><img src={qrImage} width="360" height="360" alt={`Nepal Pay QR for invoice ${current.id}, amount ${money(total)}`} /></div> : null}<small id="qr-description">This QR is generated from the invoice’s live Nepal Pay payload. Verify the amount before confirming.</small><button type="button" className="student-primary-button" onClick={() => setShowQr(false)}>Done</button></section></div> : null}
+      {bill ? <InvoiceDocumentDialog data={bill.document} onClose={() => setBill(null)} /> : null}
     </div>
   );
 }

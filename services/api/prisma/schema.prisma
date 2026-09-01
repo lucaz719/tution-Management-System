@@ -578,8 +578,12 @@ model Enrollment {
   class         Class    @relation(fields: [classId], references: [id])
   status        String // ACTIVE, COMPLETED, DROPPED, BLOCKED
   admissionDate DateTime
+  validFrom     DateTime?
+  validUntil    DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+
+  @@index([studentId, validUntil])
 }
 
 // 13. Teacher GPS Stamps
@@ -649,6 +653,7 @@ model Invoice {
   invoiceType       InvoiceType      @default(TUITION)
   panNumberSnapshot String           @default("")
   vatRateSnapshot   Decimal          @default(0.00) @db.Decimal(5, 2)
+  lineItemsSnapshot Json?
   nepalPayQrCode    String? // Storage for Nepal Pay QR string/image reference
   transactionId     String?          @unique // External payment transaction reference
   paymentDate       DateTime?

@@ -12,6 +12,7 @@ import { createConnectIpsForm, validateAndConfirmConnectIps } from '../utils/con
 import { parsePlainRecord, parseStrictKeys, parseStrictObject, readBoolean, readFiniteNumber, readTrimmedString } from '../utils/request-validation';
 import { activateAdmissionAndSendLogins } from '../utils/admission-logins';
 import { buildFinancialIntelligence } from '../utils/financial-intelligence';
+import { invoiceTypeLabel } from '../utils/invoice-document';
 
 const router = Router();
 
@@ -407,6 +408,7 @@ router.post('/billing-ledger/invoices', authMiddleware, async (req: TenantReques
     tenantId: req.tenantId!, studentId: student.id, invoiceType: invoiceType.data as 'TUITION' | 'SUBJECT' | 'ACTIVITY',
     amount: amount.data, discount: discount.data, fine: fine.data, netPayable, billingCycleStart: cycleStart,
     billingCycleEnd: cycleEnd, dueDate, status: 'UNPAID', panNumberSnapshot: tenant?.panNumber ?? '', vatRateSnapshot: tenant?.vatRate ?? 0,
+    lineItemsSnapshot: [{ label: invoiceTypeLabel(invoiceType.data), amount: amount.data }],
   } });
   return res.status(201).json({ message: 'Invoice created in the shared ledger.', invoice });
 });
@@ -806,11 +808,16 @@ router.post(
 
       // Monthly bill per student = their grade's base tuition (all subjects) +
       // net fees of their active extra-activity enrolments.
-      const fees = new Map<string, { studentId: string; invoiceType: 'TUITION' | 'SUBJECT' | 'ACTIVITY'; amount: number }>();
-      const addFee = (studentId: string, invoiceType: 'TUITION' | 'SUBJECT' | 'ACTIVITY', amount: number) => {
+      const fees = new Map<string, { studentId: string; invoiceType: 'TUITION' | 'SUBJECT' | 'ACTIVITY'; amount: number; lines: Array<{ label: string; amount: number }> }>();
+      const addFee = (studentId: string, invoiceType: 'TUITION' | 'SUBJECT' | 'ACTIVITY', amount: number, label: string) => {
         const key = `${studentId}:${invoiceType}`;
         const current = fees.get(key);
-        fees.set(key, { studentId, invoiceType, amount: (current?.amount ?? 0) + amount });
+        fees.set(key, {
+          studentId,
+          invoiceType,
+          amount: (current?.amount ?? 0) + amount,
+          lines: [...(current?.lines ?? []), { label, amount: Math.round(amount * 100) / 100 }],
+        });
       };
 
       // 1. Grade base tuition for every student who has a graded level.
@@ -819,12 +826,13 @@ router.post(
           user: { tenantId: req.tenantId!, status: 'ACTIVE' },
           admissionStatus: 'ACTIVE',
           gradeId: { not: null },
+          enrollments: { some: { status: 'ACTIVE', OR: [{ validUntil: null }, { validUntil: { gt: new Date() } }] } },
         },
-        include: { grade: { select: { monthlyFee: true, billingMode: true } } },
+        include: { grade: { select: { name: true, monthlyFee: true, billingMode: true } } },
       });
       for (const s of students) {
         if (s.grade?.billingMode === 'GRADE' && s.grade.monthlyFee > 0) {
-          addFee(s.id, 'TUITION', s.grade.monthlyFee);
+          addFee(s.id, 'TUITION', s.grade.monthlyFee, `${s.grade.name} tuition package`);
         }
       }
 
@@ -832,6 +840,7 @@ router.post(
       const enrollments = await prisma.enrollment.findMany({
         where: {
           status: 'ACTIVE',
+          OR: [{ validUntil: null }, { validUntil: { gt: new Date() } }],
           student: { admissionStatus: 'ACTIVE', user: { status: 'ACTIVE' } },
           course: { tenantId: req.tenantId! },
         },
@@ -846,7 +855,7 @@ router.post(
         const fee = (e.course.feeStructure ?? {}) as { monthlyBase?: number };
         const base = Number(fee.monthlyBase || 0);
         const net = e.course.isTaxExempt ? base : base * (1 + Number(e.course.taxPercentage || 13) / 100);
-        addFee(e.studentId, invoiceType, net);
+        addFee(e.studentId, invoiceType, net, e.course.name);
       }
 
       // Students already invoiced for this cycle.
@@ -871,6 +880,7 @@ router.post(
             invoiceType: charge.invoiceType,
             panNumberSnapshot: tenantConfig.panNumber,
             vatRateSnapshot: tenantConfig.vatRate,
+            lineItemsSnapshot: charge.lines,
             amount: Math.round(net * 100) / 100,
             discount: 0,
             fine: 0,

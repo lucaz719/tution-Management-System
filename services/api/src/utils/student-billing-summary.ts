@@ -2,7 +2,7 @@ type BillingMode = 'GRADE' | 'SUBJECT';
 
 export interface BillingGrade { name: string; billingMode: BillingMode; monthlyFee: number | { toString(): string } }
 export interface BillingEnrollment {
-  id: string; status: string;
+  id: string; status: string; validUntil?: Date | string | null;
   course: { id: string; name: string; isExtraActivity: boolean; isTaxExempt: boolean; taxPercentage: number | { toString(): string }; feeStructure: unknown };
   class: { id: string; name: string };
 }
@@ -10,7 +10,10 @@ export interface BillingEnrollment {
 export function studentBillingSummary(grade: BillingGrade | null, enrollments: BillingEnrollment[]) {
   const lines: Array<{ type: 'GRADE' | 'SUBJECT' | 'ACTIVITY'; sourceId: string; enrollmentId?: string; label: string; className?: string; amount: number; status: string }> = [];
   const blockers: string[] = [];
-  const eligible = enrollments.filter((item) => item.status === 'ACTIVE' || item.status === 'BLOCKED');
+  const eligible = enrollments.filter((item) =>
+    (item.status === 'ACTIVE' || item.status === 'BLOCKED') &&
+    (!item.validUntil || new Date(item.validUntil).getTime() > Date.now()),
+  );
   if (!grade) blockers.push('Assign a grade before configuring monthly billing.');
   if (grade?.billingMode === 'GRADE') {
     const amount = Number(grade.monthlyFee ?? 0);

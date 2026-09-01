@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import prisma from './db';
 import smsSender from './sms';
-import { canReleaseAdmissionLogins } from './billing-rules';
+import { canReleaseAdmissionLogins, oneYearEnrollmentWindow } from './billing-rules';
 
 function temporaryPassword(): string {
   return `Tms@${Math.random().toString(36).slice(2, 8)}${Math.floor(Math.random() * 90 + 10)}`;
@@ -32,6 +32,9 @@ export async function activateAdmissionAndSendLogins(tenantId: string, studentId
   }
   const parentUser = student.studentParents[0]?.parent.user;
   if (!parentUser) throw new Error('A linked parent account is required before issuing logins.');
+  const paidAt = student.invoices[0]?.paymentDate;
+  if (!paidAt) throw new Error('The admission payment date is missing. Record the payment again before issuing logins.');
+  const enrollmentWindow = oneYearEnrollmentWindow(paidAt);
 
   const storedDeliveries = await prisma.$queryRaw<StoredDelivery[]>`
     SELECT "recipient", "status", "providerMessageId", "failureReason", "sentAt"
@@ -70,7 +73,10 @@ export async function activateAdmissionAndSendLogins(tenantId: string, studentId
     if (parentHash) {
       await tx.account.updateMany({ where: { userId: parentUser.id, providerId: 'credential' }, data: { password: parentHash } });
     }
-    await tx.enrollment.updateMany({ where: { studentId: student.id, status: 'BLOCKED' }, data: { status: 'ACTIVE' } });
+    await tx.enrollment.updateMany({
+      where: { studentId: student.id, status: { in: ['BLOCKED', 'ACTIVE'] }, validUntil: null },
+      data: { status: 'ACTIVE', ...enrollmentWindow },
+    });
     return true;
   });
   if (!activated) throw new Error('Admission logins were already issued.');
