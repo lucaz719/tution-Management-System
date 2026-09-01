@@ -3,6 +3,7 @@ import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware } from '../middleware/auth';
 import { hasBranchPermission, isTenantAdmin, managedBranchIds } from '../utils/access-control';
+import { normalizeSchedule } from '../utils/schedule';
 
 const router = Router();
 router.use(authMiddleware);
@@ -124,7 +125,7 @@ router.get('/teacher-workflows', async (req: TenantRequest, res: Response) => {
       orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
     }),
   ]);
-  return res.json({ branches, selectedBranch: branches.find((branch) => branch.id === branchId), date: start.toISOString(), attendance: attendance.map((row) => ({ id: row.id, studentName: `${row.student.user.firstName} ${row.student.user.lastName}`.trim(), className: row.class.name, subject: row.class.course.name, teacherName: row.class.assignedTeacher ? `${row.class.assignedTeacher.firstName} ${row.class.assignedTeacher.lastName}`.trim() : 'Unassigned', status: row.status })), syllabi, homework, resultDefinitions: resultDefinitions.map(({ scores, ...definition }) => ({ ...definition, scoreCount: scores.length, draftCount: scores.filter((score) => !score.publishedAt).length, publishedCount: scores.filter((score) => score.publishedAt).length })), leaves, classes, teachers });
+  return res.json({ branches, selectedBranch: branches.find((branch) => branch.id === branchId), date: start.toISOString(), attendance: attendance.map((row) => ({ id: row.id, studentName: `${row.student.user.firstName} ${row.student.user.lastName}`.trim(), className: row.class.name, subject: row.class.course.name, teacherName: row.class.assignedTeacher ? `${row.class.assignedTeacher.firstName} ${row.class.assignedTeacher.lastName}`.trim() : 'Unassigned', status: row.status })), syllabi, homework, resultDefinitions: resultDefinitions.map(({ scores, ...definition }) => ({ ...definition, scoreCount: scores.length, draftCount: scores.filter((score) => !score.publishedAt).length, publishedCount: scores.filter((score) => score.publishedAt).length })), leaves, classes, teachers: teachers.map((teacher) => ({ ...teacher, assignedClasses: teacher.assignedClasses.map((klass) => ({ ...klass, schedule: normalizeSchedule(klass.schedule) })) })) });
 });
 
 router.post('/result-definitions', async (req: TenantRequest, res: Response) => {

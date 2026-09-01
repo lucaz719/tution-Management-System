@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import prisma from '../utils/db';
+import { normalizeSchedule } from '../utils/schedule';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware } from '../middleware/auth';
 import { UserPayload } from '@tms/types';
@@ -84,14 +85,14 @@ router.get('/workspace', authMiddleware, async (req: TenantRequest, res: Respons
       stamps: stamps.map((stamp) => ({ ...stamp, branchName: stamp.branch.name })),
       todayClasses: sessions.map((session) => ({
         sessionId: session.id, classId: session.classId, className: session.class.name, courseName: session.class.course.name,
-        branch: session.class.branch, schedule: session.class.schedule, status: session.status,
+        branch: session.class.branch, schedule: normalizeSchedule(session.class.schedule), status: session.status,
         dailyUpdateSubmitted: session.dailyUpdateSubmitted, checkInTime: session.checkInTime, checkOutTime: session.checkOutTime,
       })),
       pendingUpdates: classes.flatMap((item) => item.sessions.filter((session) => !session.dailyUpdateSubmitted).map((session) => ({
         sessionId: session.id, classId: item.id, className: item.name, courseName: item.course.name, date: session.date,
       }))),
       classes: classes.map((item) => ({
-        id: item.id, name: item.name, subject: item.course.name, type: item.course.type, schedule: item.schedule,
+        id: item.id, name: item.name, subject: item.course.name, type: item.course.type, schedule: normalizeSchedule(item.schedule),
         branch: { id: item.branch.id, name: item.branch.name, address: item.branch.address, radiusMeters: item.branch.radiusMeters },
         students: item.enrollments.map((enrollment) => ({ id: enrollment.student.id, name: `${enrollment.student.user.firstName} ${enrollment.student.user.lastName}`, status: enrollment.status })),
         attendance: item.sessions.flatMap((session) => session.studentAttendance),

@@ -26,13 +26,23 @@ export interface InvoiceDocumentData {
 }
 
 const invoiceTitle = (type: InvoiceDocumentData['invoiceType']) => type === 'ADMISSION'
-  ? 'Admission Fee Invoice'
-  : type === 'SUBJECT' ? 'Monthly Subject Tuition Invoice'
-    : type === 'ACTIVITY' ? 'Optional Activity Invoice' : 'Monthly Grade Tuition Invoice';
+  ? 'One-time admission fee'
+  : type === 'SUBJECT' ? 'Monthly subject tuition'
+    : type === 'ACTIVITY' ? 'Optional activity fee' : 'Monthly grade tuition';
 const money = (value: number) => `NPR ${value.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const date = (value?: string | null) => value ? new Date(value).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kathmandu' }) : '—';
 const shortId = (id: string) => id.slice(0, 8).toUpperCase();
 const documentHeading = (status: string) => status === 'PAID' ? 'Receipt' : 'Invoice';
+const invoiceFacts = (data: InvoiceDocumentData) => [
+  ['Issued', date(data.issuedAt)],
+  ['Due', date(data.dueDate)],
+  data.invoiceType === 'ADMISSION'
+    ? ['Charge', 'One-time admission']
+    : ['Billing period', `${date(data.billingCycleStart)} – ${date(data.billingCycleEnd)}`],
+  ['VAT rate', `${data.vatRate}%`],
+  ['Paid on', date(data.paymentDate)],
+  ['Payment reference', data.transactionId || '—'],
+];
 
 function drawInvoicePng(data: InvoiceDocumentData) {
   const canvas = document.createElement('canvas');
@@ -57,11 +67,7 @@ function drawInvoicePng(data: InvoiceDocumentData) {
   text(data.studentName, 60, 382, '700 25px Arial');
   text([data.admissionNumber, data.gradeName, data.branchName].filter(Boolean).join(' · '), 60, 418, '19px Arial', '#56647a');
   rule(452);
-  const facts = [
-    ['Issued', date(data.issuedAt)], ['Due', date(data.dueDate)],
-    ['Billing period', `${date(data.billingCycleStart)} – ${date(data.billingCycleEnd)}`], ['VAT rate', `${data.vatRate}%`],
-    ['Paid on', date(data.paymentDate)], ['Payment reference', data.transactionId || '—'],
-  ];
+  const facts = invoiceFacts(data);
   let factY = 500;
   facts.forEach(([label, value]) => { text(label.toUpperCase(), 60, factY, '700 15px Arial', '#56647a'); text(value, 740, factY, '19px Arial', '#172033', 'right'); factY += 40; });
   rule(factY + 2);
@@ -86,6 +92,7 @@ function drawInvoicePng(data: InvoiceDocumentData) {
 export function InvoiceDocumentDialog({ data, onClose }: { data: InvoiceDocumentData; onClose: () => void }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const [exportError, setExportError] = useState('');
+  const facts = invoiceFacts(data);
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousOverflow = document.body.style.overflow;
@@ -104,5 +111,5 @@ export function InvoiceDocumentDialog({ data, onClose }: { data: InvoiceDocument
     return () => { document.removeEventListener('keydown', keyboard); document.body.style.overflow = previousOverflow; previousFocus?.focus(); };
   }, [onClose]);
   const download = () => { try { setExportError(''); drawInvoicePng(data); } catch (error) { setExportError(error instanceof Error ? error.message : 'Could not create the invoice image.'); } };
-  return createPortal(<div className="invoice-document-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div ref={dialogRef} className="invoice-document-dialog" role="dialog" aria-modal="true" aria-labelledby="invoice-document-title" tabIndex={-1}><header className="invoice-document-toolbar"><div><strong>{documentHeading(data.status)} preview</strong><small>Print, save as PDF, or download a PNG image.</small></div><div><Button variant="outline" onClick={() => window.print()}><span className="material-symbols-outlined" aria-hidden="true">print</span>Print / PDF</Button><Button onClick={download}><span className="material-symbols-outlined" aria-hidden="true">image</span>Save PNG</Button><button type="button" onClick={onClose} aria-label={`Close ${documentHeading(data.status).toLowerCase()} preview`}><span className="material-symbols-outlined" aria-hidden="true">close</span></button></div></header>{exportError ? <p className="invoice-document-error" role="alert">{exportError}</p> : null}<div className="invoice-document-stage"><div className="invoice-printer" aria-hidden="true"><span /></div><article className="invoice-document-print"><header><div><h1>{data.institutionName}</h1><p>PAN {data.panNumber || 'Not recorded'}</p></div><h2 id="invoice-document-title">{documentHeading(data.status)}</h2><p>{invoiceTitle(data.invoiceType)}</p><p>#{shortId(data.id)} · <strong className={data.status === 'PAID' ? 'is-paid' : ''}>{data.status}</strong></p></header><section className="invoice-document-parties"><div><small>Student</small><strong>{data.studentName}</strong><span>{[data.admissionNumber, data.gradeName, data.branchName].filter(Boolean).join(' · ')}</span></div></section><dl className="invoice-document-facts"><div><dt>Issued</dt><dd>{date(data.issuedAt)}</dd></div><div><dt>Due</dt><dd>{date(data.dueDate)}</dd></div><div><dt>Period</dt><dd>{date(data.billingCycleStart)} – {date(data.billingCycleEnd)}</dd></div><div><dt>VAT rate</dt><dd>{data.vatRate}%</dd></div><div><dt>Paid on</dt><dd>{date(data.paymentDate)}</dd></div><div><dt>Reference</dt><dd>{data.transactionId || '—'}</dd></div></dl><table><thead><tr><th>Description</th><th>Amount</th></tr></thead><tbody>{data.lines.map((line, index) => <tr key={`${line.label}-${index}`}><td>{line.label}</td><td>{money(line.amount)}</td></tr>)}{data.discount > 0 ? <tr><td>Discount</td><td className="is-discount">−{money(data.discount)}</td></tr> : null}{data.fine > 0 ? <tr><td>Fine</td><td>{money(data.fine)}</td></tr> : null}</tbody><tfoot><tr><th>Total</th><th>{money(data.netPayable)}</th></tr></tfoot></table><div className="invoice-reference-bars" aria-hidden="true" /><code>#{data.id.toUpperCase()}</code><footer><p>Computer-generated {documentHeading(data.status).toLowerCase()} · No signature required</p><p>{data.institutionName} · PAN {data.panNumber || 'not recorded'}</p></footer></article></div></div></div>, document.body);
+  return createPortal(<div className="invoice-document-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div ref={dialogRef} className="invoice-document-dialog" role="dialog" aria-modal="true" aria-labelledby="invoice-document-title" tabIndex={-1}><header className="invoice-document-toolbar"><div><strong>{documentHeading(data.status)} preview</strong><small>Print, save as PDF, or download a PNG image.</small></div><div><Button variant="outline" onClick={() => window.print()}><span className="material-symbols-outlined" aria-hidden="true">print</span>Print / PDF</Button><Button onClick={download}><span className="material-symbols-outlined" aria-hidden="true">image</span>Save PNG</Button><button type="button" onClick={onClose} aria-label={`Close ${documentHeading(data.status).toLowerCase()} preview`}><span className="material-symbols-outlined" aria-hidden="true">close</span></button></div></header>{exportError ? <p className="invoice-document-error" role="alert">{exportError}</p> : null}<div className="invoice-document-stage"><div className="invoice-printer" aria-hidden="true"><span /></div><article className="invoice-document-print"><header><div><h1>{data.institutionName}</h1><p>PAN {data.panNumber || 'Not recorded'}</p></div><h2 id="invoice-document-title">{documentHeading(data.status)}</h2><p>{invoiceTitle(data.invoiceType)}</p><p>#{shortId(data.id)} · <strong className={data.status === 'PAID' ? 'is-paid' : ''}>{data.status}</strong></p></header><section className="invoice-document-parties"><div><small>Student</small><strong>{data.studentName}</strong><span>{[data.admissionNumber, data.gradeName, data.branchName].filter(Boolean).join(' · ')}</span></div></section><dl className="invoice-document-facts">{facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl><table><thead><tr><th>Description</th><th>Amount</th></tr></thead><tbody>{data.lines.map((line, index) => <tr key={`${line.label}-${index}`}><td>{line.label}</td><td>{money(line.amount)}</td></tr>)}{data.discount > 0 ? <tr><td>Discount</td><td className="is-discount">−{money(data.discount)}</td></tr> : null}{data.fine > 0 ? <tr><td>Fine</td><td>{money(data.fine)}</td></tr> : null}</tbody><tfoot><tr><th>Total</th><th>{money(data.netPayable)}</th></tr></tfoot></table><div className="invoice-reference-bars" aria-hidden="true" /><code>#{data.id.toUpperCase()}</code><footer><p>Computer-generated {documentHeading(data.status).toLowerCase()} · No signature required</p><p>{data.institutionName} · PAN {data.panNumber || 'not recorded'}</p></footer></article></div></div></div>, document.body);
 }

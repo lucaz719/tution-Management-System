@@ -4,6 +4,7 @@ import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware } from '../middleware/auth';
 import { studentBillingSummary } from '../utils/student-billing-summary';
 import { invoiceLineItems } from '../utils/invoice-document';
+import { normalizeSchedule } from '../utils/schedule';
 
 const router = Router();
 
@@ -140,18 +141,18 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
 
     const weekday = new Intl.DateTimeFormat('en', { weekday: 'long', timeZone: 'Asia/Kathmandu' }).format(new Date()).toLowerCase();
     const sessions = currentEnrollments.flatMap((enrollment) => {
-      const schedule = Array.isArray(enrollment.class.schedule) ? enrollment.class.schedule as Array<Record<string, unknown>> : [];
+      const schedule = normalizeSchedule(enrollment.class.schedule);
       return schedule.filter((slot) => {
         const day = typeof slot.day === 'string' ? slot.day.toLowerCase() : '';
         return day === weekday || day === weekday.slice(0, 3);
       }).map((slot, index) => ({
         id: `${enrollment.classId}-${index}`,
         childId: student.id,
-        time: typeof slot.start === 'string' ? slot.start : '—',
-        endTime: typeof slot.end === 'string' ? slot.end : '—',
+        time: slot.startTime,
+        endTime: slot.endTime,
         subject: enrollment.course.name,
         teacher: enrollment.class.assignedTeacher ? `${enrollment.class.assignedTeacher.firstName} ${enrollment.class.assignedTeacher.lastName}` : 'Teacher not assigned',
-        room: enrollment.class.name,
+        room: slot.room || enrollment.class.name,
         type: enrollment.course.type.split('_').map((part) => part[0] + part.slice(1).toLowerCase()).join('-'),
       }));
     }).sort((a, b) => a.time.localeCompare(b.time));

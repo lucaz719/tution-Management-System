@@ -4,6 +4,7 @@ import prisma from '../utils/db';
 import { authMiddleware } from '../middleware/auth';
 import { TenantRequest } from '../middleware/tenant';
 import { hasRole } from '../utils/access-control';
+import { normalizeSchedule } from '../utils/schedule';
 
 const router = Router();
 
@@ -81,7 +82,7 @@ router.get('/today', authMiddleware, async (req: TenantRequest, res: Response) =
         checkedInAt: checkedByStudent.get(item.student.id) ?? null,
       };
       if (!current.classNames.includes(item.class.name)) current.classNames.push(item.class.name);
-      current.schedules.push(item.class.schedule);
+      current.schedules.push(normalizeSchedule(item.class.schedule));
       rosterByStudent.set(item.student.id, current);
     }
     const roster = Array.from(rosterByStudent.values()).map((item) => ({

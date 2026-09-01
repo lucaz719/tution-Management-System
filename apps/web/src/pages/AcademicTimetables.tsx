@@ -3,12 +3,7 @@ import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { useToast } from '../components/ui/Toast';
 import { api } from '../services/api';
-
-interface ScheduleSlot {
-  day: string;
-  startTime: string;
-  endTime: string;
-}
+import { normalizeSchedule, SCHEDULE_DAYS, sortSchedule, type ScheduleSlot } from '../utils/schedule';
 
 interface ClassItem {
   id: string;
@@ -41,18 +36,15 @@ interface TeacherOption {
   branchIds: string[];
 }
 
-const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
 interface FormState {
   courseId: string;
   name: string;
-  days: string[];
-  startTime: string;
-  endTime: string;
+  schedule: ScheduleSlot[];
   teacherId: string;
 }
 
-const EMPTY_FORM: FormState = { courseId: '', name: '', days: [], startTime: '07:00', endTime: '08:30', teacherId: '' };
+const EMPTY_FORM: FormState = { courseId: '', name: '', schedule: [], teacherId: '' };
+const EMPTY_SLOT: ScheduleSlot = { day: 'Sun', startTime: '07:00', endTime: '08:30', room: '' };
 
 function formatSchedule(schedule: ScheduleSlot[]): string {
   if (!Array.isArray(schedule) || schedule.length === 0) return 'No schedule set';
@@ -79,6 +71,7 @@ export function AcademicTimetables() {
   const [editingId, setEditingId] = useState('');
   const [editBranchId, setEditBranchId] = useState('');
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [slotDraft, setSlotDraft] = useState<ScheduleSlot>(EMPTY_SLOT);
   const [isSaving, setIsSaving] = useState(false);
   const [busyId, setBusyId] = useState('');
 
@@ -130,29 +123,34 @@ export function AcademicTimetables() {
     return teachers.filter((t) => t.branchIds.length === 0 || t.branchIds.includes(editBranchId));
   }, [teachers, editBranchId]);
 
-  const setField = (field: keyof FormState, value: string | string[]) => setForm((c) => ({ ...c, [field]: value }));
-  const toggleDay = (day: string) =>
-    setForm((c) => ({ ...c, days: c.days.includes(day) ? c.days.filter((d) => d !== day) : [...c.days, day] }));
+  const setField = (field: 'courseId' | 'name' | 'teacherId', value: string) => setForm((current) => ({ ...current, [field]: value }));
+  const addSlot = () => {
+    if (slotDraft.startTime >= slotDraft.endTime) return showToast('End time must be after start time.', 'error');
+    const duplicate = form.schedule.some((slot) => slot.day === slotDraft.day && slot.startTime === slotDraft.startTime && slot.endTime === slotDraft.endTime);
+    if (duplicate) return showToast('That weekly session is already listed.', 'error');
+    setForm((current) => ({ ...current, schedule: sortSchedule([...current.schedule, { ...slotDraft, room: slotDraft.room.trim() }]) }));
+    setSlotDraft((current) => ({ ...EMPTY_SLOT, day: current.day }));
+  };
+  const removeSlot = (index: number) => setForm((current) => ({ ...current, schedule: current.schedule.filter((_, slotIndex) => slotIndex !== index) }));
 
   const openCreate = () => {
     setEditingId('');
     setEditBranchId(courses.length === 1 ? courses[0].branchId : '');
     setForm({ ...EMPTY_FORM, courseId: courses.length === 1 ? courses[0].id : '' });
+    setSlotDraft(EMPTY_SLOT);
     setDrawerOpen(true);
   };
 
   const openEdit = (cls: ClassItem) => {
     setEditingId(cls.id);
     setEditBranchId(cls.branchId);
-    const first = Array.isArray(cls.schedule) && cls.schedule[0];
     setForm({
       courseId: cls.courseId,
       name: cls.name,
-      days: Array.isArray(cls.schedule) ? Array.from(new Set(cls.schedule.map((s) => s.day))) : [],
-      startTime: first ? first.startTime : '07:00',
-      endTime: first ? first.endTime : '08:30',
+      schedule: sortSchedule(normalizeSchedule(cls.schedule)),
       teacherId: cls.teacherId ?? '',
     });
+    setSlotDraft(EMPTY_SLOT);
     setDrawerOpen(true);
   };
 
@@ -160,22 +158,19 @@ export function AcademicTimetables() {
     event.preventDefault();
     if (!editingId && !form.courseId) return showToast('Select a course.', 'error');
     if (!form.name.trim()) return showToast('Class name is required.', 'error');
-    if (form.days.length === 0) return showToast('Pick at least one day.', 'error');
-    if (form.startTime >= form.endTime) return showToast('End time must be after start time.', 'error');
-
-    const schedule: ScheduleSlot[] = form.days.map((day) => ({ day, startTime: form.startTime, endTime: form.endTime }));
+    if (form.schedule.length === 0) return showToast('Add at least one weekly session.', 'error');
 
     setIsSaving(true);
     try {
       if (editingId) {
         await api.academics.updateClass(editingId, {
           name: form.name.trim(),
-          schedule,
+          schedule: form.schedule,
           teacherId: form.teacherId || null,
         });
         showToast('Class updated.', 'success');
       } else {
-        await api.academics.createClass({ courseId: form.courseId, name: form.name.trim(), schedule });
+        await api.academics.createClass({ courseId: form.courseId, name: form.name.trim(), schedule: form.schedule });
         showToast('Class added to the timetable.', 'success');
       }
       setDrawerOpen(false);
@@ -312,23 +307,23 @@ export function AcademicTimetables() {
 
       {drawerOpen ? (
         <>
-          <div className="people-drawer-overlay" onClick={() => setDrawerOpen(false)} />
-          <aside className="people-drawer" role="dialog" aria-modal="true">
+          <button type="button" className="people-drawer-overlay" onClick={() => setDrawerOpen(false)} aria-label="Close timetable form" />
+          <aside className="people-drawer" role="dialog" aria-modal="true" aria-labelledby="timetable-drawer-title">
             <div className="people-drawer-head">
               <div>
-                <h2>{editingId ? 'Manage Class' : 'Add Class'}</h2>
+                <h2 id="timetable-drawer-title">{editingId ? 'Manage Class' : 'Add Class'}</h2>
                 <p>{editingId ? 'Update the schedule or assign a teacher (generates their session for today if scheduled).' : 'A class is a scheduled instance of a course.'}</p>
               </div>
               <button type="button" className="people-drawer-close" onClick={() => setDrawerOpen(false)} aria-label="Close">
-                <span className="material-symbols-outlined">close</span>
+                <span className="material-symbols-outlined" aria-hidden="true">close</span>
               </button>
             </div>
             <form onSubmit={handleSubmit} style={{ display: 'contents' }}>
               <div className="people-drawer-body">
                 {!editingId ? (
                   <div className="people-field">
-                    <label>Course</label>
-                    <select value={form.courseId} onChange={(e) => { setField('courseId', e.target.value); setEditBranchId(courses.find((c) => c.id === e.target.value)?.branchId ?? ''); }} required>
+                    <label htmlFor="timetable-course">Course</label>
+                    <select id="timetable-course" value={form.courseId} onChange={(e) => { setField('courseId', e.target.value); setEditBranchId(courses.find((c) => c.id === e.target.value)?.branchId ?? ''); }} required>
                       <option value="">Select a course…</option>
                       {courses.map((c) => (
                         <option key={c.id} value={c.id}>{c.name}{c.gradeName ? ` · ${c.gradeName}` : ''} — {c.branchName}</option>
@@ -351,33 +346,35 @@ export function AcademicTimetables() {
                   </div>
                 ) : null}
                 <div className="people-field">
-                  <label>Class name</label>
-                  <input value={form.name} onChange={(e) => setField('name', e.target.value)} placeholder="Grade 10 Physics — Morning" required />
+                  <label htmlFor="timetable-class-name">Class name</label>
+                  <input id="timetable-class-name" autoComplete="off" value={form.name} onChange={(e) => setField('name', e.target.value)} placeholder="Grade 10 Physics — Morning" required />
                 </div>
-                <div className="people-field">
-                  <label>Days</label>
-                  <div className="people-role-picker">
-                    {DAYS.map((day) => (
-                      <button key={day} type="button" className={`people-role-chip${form.days.includes(day) ? ' people-role-chip--active' : ''}`} onClick={() => toggleDay(day)}>
-                        {day}
-                      </button>
-                    ))}
+                <fieldset className="people-field" style={{ border: 0, padding: 0, margin: 0 }}>
+                  <legend style={{ marginBottom: '8px', fontWeight: 700 }}>Weekly sessions</legend>
+                  {form.schedule.length ? (
+                    <div style={{ display: 'grid', gap: '8px', marginBottom: '12px' }}>
+                      {form.schedule.map((slot, index) => (
+                        <div key={`${slot.day}-${slot.startTime}-${slot.endTime}-${index}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', gap: '10px', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: '10px', background: 'var(--bg-subtle)' }}>
+                          <span><strong>{slot.day} · {slot.startTime}–{slot.endTime}</strong><small style={{ display: 'block', marginTop: '2px', color: 'var(--text-muted)' }}>{slot.room || 'Room not set'}</small></span>
+                          <button type="button" onClick={() => removeSlot(index)} aria-label={`Remove ${slot.day} ${slot.startTime} session`} style={{ width: '40px', height: '40px', border: '1px solid var(--border)', borderRadius: '10px', color: 'var(--color-error)', background: 'var(--bg-card)', cursor: 'pointer' }}><span className="material-symbols-outlined" aria-hidden="true">delete</span></button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : <p style={{ margin: '0 0 12px', color: 'var(--text-muted)', fontSize: '13px' }}>No weekly sessions added yet.</p>}
+                  <div className="people-field-row">
+                    <div className="people-field"><label htmlFor="timetable-day">Day</label><select id="timetable-day" value={slotDraft.day} onChange={(event) => setSlotDraft((current) => ({ ...current, day: event.target.value }))}>{SCHEDULE_DAYS.map((day) => <option key={day} value={day}>{day}</option>)}</select></div>
+                    <div className="people-field"><label htmlFor="timetable-room">Room</label><input id="timetable-room" maxLength={120} value={slotDraft.room} onChange={(event) => setSlotDraft((current) => ({ ...current, room: event.target.value }))} placeholder="Room 302" /></div>
                   </div>
-                </div>
-                <div className="people-field-row">
-                  <div className="people-field">
-                    <label>Start time</label>
-                    <input type="time" value={form.startTime} onChange={(e) => setField('startTime', e.target.value)} required />
+                  <div className="people-field-row">
+                    <div className="people-field"><label htmlFor="timetable-start">Start time</label><input id="timetable-start" type="time" value={slotDraft.startTime} onChange={(event) => setSlotDraft((current) => ({ ...current, startTime: event.target.value }))} /></div>
+                    <div className="people-field"><label htmlFor="timetable-end">End time</label><input id="timetable-end" type="time" value={slotDraft.endTime} onChange={(event) => setSlotDraft((current) => ({ ...current, endTime: event.target.value }))} /></div>
                   </div>
-                  <div className="people-field">
-                    <label>End time</label>
-                    <input type="time" value={form.endTime} onChange={(e) => setField('endTime', e.target.value)} required />
-                  </div>
-                </div>
+                  <Button type="button" variant="outline" onClick={addSlot}><span className="material-symbols-outlined" aria-hidden="true">add</span>Add weekly session</Button>
+                </fieldset>
                 {editingId ? (
                   <div className="people-field">
-                    <label>Assigned teacher</label>
-                    <select value={form.teacherId} onChange={(e) => setField('teacherId', e.target.value)}>
+                    <label htmlFor="timetable-teacher">Assigned teacher</label>
+                    <select id="timetable-teacher" value={form.teacherId} onChange={(e) => setField('teacherId', e.target.value)}>
                       <option value="">Unassigned</option>
                       {eligibleTeachers.map((t) => (
                         <option key={t.id} value={t.id}>{t.name}</option>

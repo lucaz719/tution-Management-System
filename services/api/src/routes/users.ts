@@ -16,6 +16,7 @@ import { canReleaseAdmissionLogins } from '../utils/billing-rules';
 import { activateAdmissionAndSendLogins } from '../utils/admission-logins';
 import { studentBillingSummary } from '../utils/student-billing-summary';
 import { invoiceLineItems } from '../utils/invoice-document';
+import { normalizeSchedule } from '../utils/schedule';
 import { parseStrictKeys, parseStrictObject, readTrimmedString } from '../utils/request-validation';
 
 const router = Router();
@@ -632,7 +633,7 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
     const weekday = new Intl.DateTimeFormat('en', { weekday: 'long', timeZone: 'Asia/Kathmandu' }).format(new Date());
     const normalizedWeekday = weekday.toLowerCase();
     const todaySessions = student.enrollments.flatMap((enrollment) => {
-      const schedule = Array.isArray(enrollment.class.schedule) ? enrollment.class.schedule as Array<Record<string, unknown>> : [];
+      const schedule = normalizeSchedule(enrollment.class.schedule);
       return schedule
         .filter((slot) => {
           const day = typeof slot.day === 'string' ? slot.day.toLowerCase() : '';
@@ -640,25 +641,25 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
         })
         .map((slot, index) => ({
           id: `${enrollment.classId}-${index}`,
-          time: typeof slot.start === 'string' ? slot.start : '—',
-          endTime: typeof slot.end === 'string' ? slot.end : '—',
+          time: slot.startTime,
+          endTime: slot.endTime,
           subject: enrollment.course.name,
           teacher: enrollment.class.assignedTeacher
             ? `${enrollment.class.assignedTeacher.firstName} ${enrollment.class.assignedTeacher.lastName}`
             : 'Teacher not assigned',
-          room: enrollment.class.name,
+          room: slot.room || enrollment.class.name,
           type: courseTypeLabel(enrollment.course.type),
         }));
     }).sort((a, b) => a.time.localeCompare(b.time));
     const weeklySessions = student.enrollments.flatMap((enrollment) => {
-      const schedule = Array.isArray(enrollment.class.schedule) ? enrollment.class.schedule as Array<Record<string, unknown>> : [];
+      const schedule = normalizeSchedule(enrollment.class.schedule);
       return schedule.map((slot, index) => ({
         id: `${enrollment.classId}-${index}`, day: String(slot.day || ''),
-        time: typeof slot.start === 'string' ? slot.start : typeof slot.startTime === 'string' ? slot.startTime : '—',
-        endTime: typeof slot.end === 'string' ? slot.end : typeof slot.endTime === 'string' ? slot.endTime : '—',
+        time: slot.startTime,
+        endTime: slot.endTime,
         subject: enrollment.course.name,
         teacher: enrollment.class.assignedTeacher ? `${enrollment.class.assignedTeacher.firstName} ${enrollment.class.assignedTeacher.lastName}` : 'Teacher not assigned',
-        room: typeof slot.room === 'string' && slot.room ? slot.room : enrollment.class.name,
+        room: slot.room || enrollment.class.name,
         className: enrollment.class.name, type: courseTypeLabel(enrollment.course.type),
       }));
     });

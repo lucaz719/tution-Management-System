@@ -6,11 +6,10 @@ import { authMiddleware, hasPermission } from '../middleware/auth';
 import { canAccessBranch, hasBranchPermission, isTenantAdmin } from '../utils/access-control';
 import { parsePlainRecord, parseStrictKeys, readFiniteNumber, readTrimmedString, type ValidationResult } from '../utils/request-validation';
 import { recurringInvoiceType } from '../utils/billing-rules';
+import { normalizeSchedule, parseSchedule, SCHEDULE_DAYS } from '../utils/schedule';
 
 const router = Router();
 const COURSE_TYPES = new Set<string>(['REGULAR', 'MUSIC', 'SHORT_TERM', 'LONG_TERM', 'PERSONALIZED']);
-const SCHEDULE_DAYS = new Set(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
-const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 interface BulkCourseInput {
   name: string;
@@ -46,29 +45,6 @@ function parseFeeStructure(value: unknown): ValidationResult<{ monthlyBase: numb
   return monthlyBase.success ? { success: true, data: { monthlyBase: monthlyBase.data } } : monthlyBase;
 }
 
-function parseSchedule(value: unknown): ValidationResult<Array<Record<string, string>>> {
-  if (!Array.isArray(value) || value.length > 14) return { success: false, error: 'schedule must be an array of at most 14 timetable slots.' };
-  const slots: Array<Record<string, string>> = [];
-  for (const [index, slot] of value.entries()) {
-    const shape = parseStrictKeys(slot, ['day', 'start', 'end', 'startTime', 'endTime', 'room']);
-    if (!shape.success) return { success: false, error: `Schedule slot ${index + 1}: ${shape.error}` };
-    const day = shape.data.day;
-    const hasLegacyTimes = shape.data.start !== undefined || shape.data.end !== undefined;
-    const hasModernTimes = shape.data.startTime !== undefined || shape.data.endTime !== undefined;
-    if (hasLegacyTimes === hasModernTimes) {
-      return { success: false, error: `Schedule slot ${index + 1} must use either start/end or startTime/endTime.` };
-    }
-    const start = hasModernTimes ? shape.data.startTime : shape.data.start;
-    const end = hasModernTimes ? shape.data.endTime : shape.data.end;
-    if (typeof day !== 'string' || !SCHEDULE_DAYS.has(day) || typeof start !== 'string' || !TIME_PATTERN.test(start) || typeof end !== 'string' || !TIME_PATTERN.test(end) || start >= end) {
-      return { success: false, error: `Schedule slot ${index + 1} must have a valid weekday and an increasing HH:mm time range.` };
-    }
-    const room = typeof shape.data.room === 'string' ? shape.data.room.trim() : '';
-    if (room.length > 120) return { success: false, error: `Schedule slot ${index + 1} room must be 120 characters or fewer.` };
-    slots.push(hasModernTimes ? { day, startTime: start, endTime: end, ...(room ? { room } : {}) } : { day, start, end, ...(room ? { room } : {}) });
-  }
-  return { success: true, data: slots };
-}
 
 function parseBulkCourses(body: unknown): ValidationResult<{ branchId: string; items: BulkCourseInput[] }> {
   const request = parseStrictKeys(body, ['branchId', 'items']);
@@ -321,7 +297,7 @@ router.get(
         classes: classes.map((c) => ({
           id: c.id,
           name: c.name,
-          schedule: c.schedule,
+          schedule: normalizeSchedule(c.schedule),
           courseId: c.courseId,
           courseName: c.course.name,
           courseType: c.course.type,
@@ -462,7 +438,7 @@ router.post(
           courseId: courseId.data,
           branchId: course.branchId,
           name: name.data,
-          schedule: schedule.data as Prisma.InputJsonValue,
+          schedule: schedule.data as unknown as Prisma.InputJsonValue,
         },
       });
       return res.status(201).json({ message: 'Class timetable created successfully.', class: cls });
@@ -473,7 +449,7 @@ router.post(
 );
 
 // 4b. Weekday abbreviations used in class schedules.
-const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const DAY_ABBR = SCHEDULE_DAYS;
 
 // Ensure a TeacherSession exists for the assigned teacher on today's date when
 // the class is scheduled today. This is the per-day session generation that a
@@ -483,7 +459,7 @@ async function ensureTodaySession(teacherId: string, classId: string, schedule: 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const todayAbbr = DAY_ABBR[today.getDay()];
-  const scheduledToday = Array.isArray(schedule) && schedule.some((slot: any) => slot?.day === todayAbbr);
+  const scheduledToday = normalizeSchedule(schedule).some((slot) => slot.day === todayAbbr);
   if (!scheduledToday) {
     return;
   }
@@ -513,7 +489,7 @@ router.put(
     if (shape.data.schedule !== undefined) {
       const schedule = parseSchedule(shape.data.schedule);
       if (!schedule.success) return res.status(400).json({ error: schedule.error });
-      data.schedule = schedule.data as Prisma.InputJsonValue;
+      data.schedule = schedule.data as unknown as Prisma.InputJsonValue;
     }
     const teacherIdValue = shape.data.teacherId;
     if (teacherIdValue !== undefined) {
@@ -547,13 +523,12 @@ router.put(
         if (!teacher) {
           return res.status(400).json({ error: 'Selected teacher is not a teacher in your institution.' });
         }
-        const nextSchedule = (data.schedule ?? cls.schedule) as Array<Record<string, string>>;
+        const nextSchedule = normalizeSchedule(data.schedule ?? cls.schedule);
         const otherClasses = await prisma.class.findMany({ where: { id: { not: id }, teacherId: data.teacherId, branchId: cls.branchId }, select: { name: true, schedule: true } });
         for (const other of otherClasses) {
-          const otherSlots = Array.isArray(other.schedule) ? other.schedule as Array<Record<string, string>> : [];
+          const otherSlots = normalizeSchedule(other.schedule);
           for (const slot of nextSchedule) {
-            const start = slot.start ?? slot.startTime; const end = slot.end ?? slot.endTime;
-            const collision = otherSlots.find((candidate) => candidate.day === slot.day && (candidate.start ?? candidate.startTime) < end && (candidate.end ?? candidate.endTime) > start);
+            const collision = otherSlots.find((candidate) => candidate.day === slot.day && candidate.startTime < slot.endTime && candidate.endTime > slot.startTime);
             if (collision) return res.status(409).json({ error: `This teacher is already scheduled for ${other.name} on ${slot.day} during that time.` });
           }
         }
@@ -623,7 +598,7 @@ router.get(
       if (!isTenantAdmin(req.user!) && !hasBranchMembership) {
         return res.status(403).json({ error: 'You cannot view classes for this branch.' });
       }
-      return res.json({ class: cls });
+      return res.json({ class: { ...cls, schedule: normalizeSchedule(cls.schedule) } });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to load class.' });
     }
@@ -661,7 +636,7 @@ router.get(
         classId: e.classId,
         className: e.class.name,
         courseId: e.courseId,
-        schedule: e.class.schedule,
+        schedule: normalizeSchedule(e.class.schedule),
       }));
       return res.json({ timetable });
     } catch (error: any) {
@@ -703,7 +678,7 @@ router.get(
         classId: c.id,
         className: c.name,
         courseId: c.courseId,
-        schedule: c.schedule,
+        schedule: normalizeSchedule(c.schedule),
       }));
       return res.json({ timetable });
     } catch (error: any) {
