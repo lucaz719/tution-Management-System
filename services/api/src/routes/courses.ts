@@ -517,19 +517,27 @@ router.put(
           where: {
             id: data.teacherId,
             tenantId: req.tenantId!,
-            userRoles: { some: { role: { name: 'Teacher' } } },
+            userRoles: { some: { branchId: cls.branchId, role: { name: 'Teacher' } } },
           },
         });
         if (!teacher) {
           return res.status(400).json({ error: 'Selected teacher is not a teacher in your institution.' });
         }
         const nextSchedule = normalizeSchedule(data.schedule ?? cls.schedule);
-        const otherClasses = await prisma.class.findMany({ where: { id: { not: id }, teacherId: data.teacherId, branchId: cls.branchId }, select: { name: true, schedule: true } });
+        const otherClasses = await prisma.class.findMany({ where: { id: { not: id }, teacherId: data.teacherId }, select: { name: true, schedule: true } });
         for (const other of otherClasses) {
           const otherSlots = normalizeSchedule(other.schedule);
           for (const slot of nextSchedule) {
             const collision = otherSlots.find((candidate) => candidate.day === slot.day && candidate.startTime < slot.endTime && candidate.endTime > slot.startTime);
             if (collision) return res.status(409).json({ error: `This teacher is already scheduled for ${other.name} on ${slot.day} during that time.` });
+          }
+        }
+        const occupiedRooms = await prisma.class.findMany({ where: { id: { not: id }, branchId: cls.branchId }, select: { name: true, schedule: true } });
+        for (const other of occupiedRooms) {
+          for (const slot of nextSchedule) {
+            if (!slot.room) return res.status(400).json({ error: 'Every timetable session requires a room number.' });
+            const collision = normalizeSchedule(other.schedule).find((candidate) => candidate.room && candidate.room.toLowerCase() === slot.room.toLowerCase() && candidate.day === slot.day && candidate.startTime < slot.endTime && candidate.endTime > slot.startTime);
+            if (collision) return res.status(409).json({ error: `${slot.room} is already used by ${other.name} on ${slot.day} during that time.` });
           }
         }
       }

@@ -275,11 +275,12 @@ router.post('/results', authMiddleware, async (req: TenantRequest, res: Response
     if (!definition) return res.status(404).json({ error: 'This Branch Admin-created result is unavailable for the selected class.' });
     if (definition.title !== assessment.trim() || definition.subject !== subject.trim()) return res.status(422).json({ error: 'Result title and subject must match the selected result.' });
     const allowed = new Set(klass.enrollments.map((item) => item.studentId));
-    const numeric = marks.map((item: any) => ({ studentId: String(item.studentId), score: Number(item.score) }));
+    const numeric = marks.map((item: any) => ({ studentId: String(item.studentId), score: Number(item.score), resultSheetUrl: typeof item.resultSheetUrl === 'string' ? item.resultSheetUrl : '' }));
+    if (numeric.some((item: any) => !item.resultSheetUrl)) return res.status(422).json({ error: 'Upload an individual result sheet for every student before saving.' });
     if (numeric.some((item: any) => !allowed.has(item.studentId) || item.score < 0 || item.score > max || !Number.isFinite(item.score))) return res.status(422).json({ error: 'Each mark must belong to an enrolled student and be within the full marks.' });
     const sorted = numeric.map((item: any) => item.score).sort((a: number, b: number) => a - b);
     const saved = await prisma.$transaction(numeric.map((item: any) => {
-      const scoreData = { recordedBy: req.user!.id, subject: subject.trim(), assessment: assessment.trim(), score: item.score, maximum: max, passMarks: pass, percentile: Math.round((sorted.filter((value: number) => value <= item.score).length / sorted.length) * 10000) / 100, resultSheetUrl: typeof item.resultSheetUrl === 'string' && item.resultSheetUrl ? item.resultSheetUrl : null, testDate: testDate ? new Date(testDate) : definition.testDate, publishedAt: null };
+      const scoreData = { recordedBy: req.user!.id, subject: subject.trim(), assessment: assessment.trim(), score: item.score, maximum: max, passMarks: pass, percentile: Math.round((sorted.filter((value: number) => value <= item.score).length / sorted.length) * 10000) / 100, resultSheetUrl: item.resultSheetUrl, testDate: testDate ? new Date(testDate) : definition.testDate, publishedAt: null };
       return prisma.studentScore.upsert({ where: { resultDefinitionId_studentId: { resultDefinitionId: definition.id, studentId: item.studentId } }, create: { tenantId: req.tenantId!, studentId: item.studentId, resultDefinitionId: definition.id, ...scoreData }, update: scoreData });
     }));
     return res.status(201).json({ message: 'Result drafts saved or updated. Share them when ready.', resultIds: saved.map((item) => item.id) });
