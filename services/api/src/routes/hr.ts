@@ -4,6 +4,11 @@ import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { hasBranchPermission, isTenantAdmin, managedBranchIds } from '../utils/access-control';
 import { parseStrictKeys, readFiniteNumber, readTrimmedString, type ValidationResult } from '../utils/request-validation';
+import {
+  createPayrollRecords,
+  PayrollConfigurationError,
+  PayrollPeriodConflictError,
+} from '../services/payroll-service';
 
 const router = Router();
 const STAFF_DOCUMENT_TYPES = new Set(['NID', 'CONTRACT', 'ACADEMIC', 'CERTIFICATION']);
@@ -159,8 +164,8 @@ router.post(
       if (!canManageStaffAssignments(req, staff.user.userRoles)) {
         return res.status(403).json({ error: 'You cannot initiate exits for staff outside your assigned branches.' });
       }
-      const structure = (staff.salaryStructure ?? {}) as { basicSalary?: number };
-      const salary = Number(structure.basicSalary ?? 0);
+      const structure = (staff.salaryStructure ?? {}) as { baseMonthlySalary?: number };
+      const salary = Number(structure.baseMonthlySalary ?? 0);
       const resignationDay = Number((shape.data.resignationDate as string).slice(8, 10));
       const proRatedSalary = Math.round((salary / 30) * Math.min(resignationDay, 30) * 100) / 100;
 
@@ -291,67 +296,18 @@ router.post(
     const tenantId = req.tenantId!;
 
     try {
-      const staffRecords = await prisma.staffRecord.findMany({
-          where: { user: { tenantId } },
-          include: { user: true },
-        });
-
-      const payrolls = [];
-
-      for (const record of staffRecords) {
-        let baseSalary = 0;
-        let deductions = 0;
-        let bonuses = 0;
-
-        if (record.contractType === 'FIXED') {
-          const struct = record.salaryStructure as any || {};
-          baseSalary = Number(struct.basicSalary) || 30000;
-          deductions = 0;
-          bonuses = 2000;
-        } else if (record.contractType === 'HOUR_RATE') {
-          const struct = record.salaryStructure as any || {};
-          const hourlyRate = Number(struct.hourlyRate) || 400;
-          
-          const sessionsCount = await prisma.teacherSession.count({
-              where: {
-                teacherId: record.userId,
-                status: 'PRESENT_CONFIRMED',
-                date: {
-                  gte: new Date(year.data, month.data - 1, 1),
-                  lt: new Date(year.data, month.data, 1),
-                },
-              },
-            });
-
-          const hoursWorked = sessionsCount * 1.5;
-          baseSalary = hoursWorked * hourlyRate;
-          deductions = 0;
-          bonuses = 0;
-        }
-
-        const netPayable = baseSalary + bonuses - deductions;
-
-        const payRecord = await prisma.payroll.create({
-            data: {
-              tenantId,
-              staffRecordId: record.id,
-              month: month.data,
-              year: year.data,
-              baseSalary,
-              attendanceDeductions: deductions,
-              bonuses,
-              netPayable,
-              status: 'PENDING',
-            },
-          });
-        payrolls.push(payRecord);
-      }
-
+      const payrolls = await createPayrollRecords({ tenantId, month: month.data, year: year.data });
       return res.status(201).json({
         message: 'Payroll calculated successfully.',
         payrolls,
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof PayrollConfigurationError) {
+        return res.status(422).json({ error: error.message, incompleteStaff: error.staff });
+      }
+      if (error instanceof PayrollPeriodConflictError) {
+        return res.status(409).json({ error: error.message, existingStaff: error.staff });
+      }
       return res.status(500).json({ error: 'Payroll calculation failed.' });
     }
   }

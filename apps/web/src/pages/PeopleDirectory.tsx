@@ -46,9 +46,15 @@ interface FormState {
   role: string;
   branchId: string;
   studentId: string;
+  contractType: 'FIXED' | 'HOUR_RATE';
+  baseMonthlySalary: string;
+  hourlyRate: string;
 }
 
-const EMPTY_FORM: FormState = { firstName: '', lastName: '', email: '', phone: '', role: '', branchId: '', studentId: '' };
+const EMPTY_FORM: FormState = {
+  firstName: '', lastName: '', email: '', phone: '', role: '', branchId: '', studentId: '',
+  contractType: 'FIXED', baseMonthlySalary: '', hourlyRate: '',
+};
 
 // Categorize a role for the stat strip.
 const STAFF_ROLES = ['Teacher', 'Accountant', 'Receptionist', 'Janitor'];
@@ -188,7 +194,7 @@ export function PeopleDirectory() {
     setDrawerOpen(true);
   };
 
-  const setField = (field: keyof FormState, value: string) => setForm((c) => ({ ...c, [field]: value }));
+  const setField = <K extends keyof FormState>(field: K, value: FormState[K]) => setForm((c) => ({ ...c, [field]: value }));
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -208,6 +214,12 @@ export function PeopleDirectory() {
       showToast('Select the student linked to this parent.', 'error');
       return;
     }
+    const isStaff = STAFF_ROLES.includes(form.role);
+    const compensationAmount = Number(form.contractType === 'FIXED' ? form.baseMonthlySalary : form.hourlyRate);
+    if (isStaff && (!Number.isFinite(compensationAmount) || compensationAmount <= 0)) {
+      showToast(form.contractType === 'FIXED' ? 'Enter a base monthly salary greater than zero.' : 'Enter an hourly rate greater than zero.', 'error');
+      return;
+    }
 
     setIsSaving(true);
     try {
@@ -224,7 +236,16 @@ export function PeopleDirectory() {
 
       const result = form.role === 'Branch Admin'
         ? await api.people.createBranchAdmin(payload)
-        : await api.people.create({ ...payload, role: form.role, studentId: form.role === 'Parent' ? form.studentId : undefined });
+        : await api.people.create({
+          ...payload,
+          role: form.role,
+          studentId: form.role === 'Parent' ? form.studentId : undefined,
+          ...(isStaff ? {
+            contractType: form.contractType,
+            baseMonthlySalary: form.contractType === 'FIXED' ? compensationAmount : undefined,
+            hourlyRate: form.contractType === 'HOUR_RATE' ? compensationAmount : undefined,
+          } : {}),
+        });
 
       creds.push({
         name: `${payload.firstName} ${payload.lastName}`,
@@ -406,14 +427,15 @@ export function PeopleDirectory() {
             <form onSubmit={handleSubmit} style={{ display: 'contents' }}>
               <div className="people-drawer-body">
                 <div className="people-field">
-                  <label>Role</label>
+                  <label id="people-role-label">Role</label>
                   <div className="people-role-picker">
                     {(caps?.creatableRoles ?? []).filter((role) => DIRECTORY_ROLES.includes(role)).map((role) => (
                       <button
                         key={role}
                         type="button"
                         className={`people-role-chip${form.role === role ? ' people-role-chip--active' : ''}`}
-                        onClick={() => setForm((current) => ({ ...current, role, studentId: '' }))}
+                        onClick={() => setForm((current) => ({ ...current, role, studentId: '', contractType: 'FIXED', baseMonthlySalary: '', hourlyRate: '' }))}
+                        aria-pressed={form.role === role}
                       >
                         {role}
                       </button>
@@ -423,31 +445,31 @@ export function PeopleDirectory() {
 
                 <div className="people-field-row">
                   <div className="people-field">
-                    <label>First name</label>
-                    <input value={form.firstName} onChange={(e) => setField('firstName', e.target.value)} placeholder="Bishnu" required />
+                    <label htmlFor="people-first-name">First name</label>
+                    <input id="people-first-name" autoComplete="given-name" value={form.firstName} onChange={(e) => setField('firstName', e.target.value)} placeholder="Bishnu" required />
                   </div>
                   <div className="people-field">
-                    <label>Last name</label>
-                    <input value={form.lastName} onChange={(e) => setField('lastName', e.target.value)} placeholder="Thapa" required />
+                    <label htmlFor="people-last-name">Last name</label>
+                    <input id="people-last-name" autoComplete="family-name" value={form.lastName} onChange={(e) => setField('lastName', e.target.value)} placeholder="Thapa" required />
                   </div>
                 </div>
 
                 <div className="people-field">
-                  <label>Email</label>
-                  <input type="email" value={form.email} onChange={(e) => setField('email', e.target.value)} placeholder="name@sanskardip.edu.np" required />
+                  <label htmlFor="people-email">Email</label>
+                  <input id="people-email" type="email" autoComplete="email" spellCheck={false} value={form.email} onChange={(e) => setField('email', e.target.value)} placeholder="name@sanskardip.edu.np" required />
                 </div>
 
                 <div className="people-field">
-                  <label>Phone <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>(optional)</span></label>
-                  <input value={form.phone} onChange={(e) => setField('phone', e.target.value)} placeholder="98XXXXXXXX" inputMode="tel" />
+                  <label htmlFor="people-phone">Phone <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>(optional)</span></label>
+                  <input id="people-phone" type="tel" autoComplete="tel" value={form.phone} onChange={(e) => setField('phone', e.target.value)} placeholder="98XXXXXXXX" inputMode="tel" />
                 </div>
 
                 <div className="people-field">
-                  <label>Branch</label>
+                  <label htmlFor="people-branch">Branch</label>
                   {singleBranch && caps?.manageableBranches[0] ? (
-                    <input value={caps.manageableBranches[0].name} disabled />
+                    <input id="people-branch" value={caps.manageableBranches[0].name} readOnly />
                   ) : (
-                    <select value={form.branchId} onChange={(e) => setField('branchId', e.target.value)} required>
+                    <select id="people-branch" value={form.branchId} onChange={(e) => setField('branchId', e.target.value)} required>
                       <option value="">Select a branch…</option>
                       {(caps?.manageableBranches ?? []).map((b) => (
                         <option key={b.id} value={b.id}>{b.name}</option>
@@ -455,6 +477,36 @@ export function PeopleDirectory() {
                     </select>
                   )}
                 </div>
+
+                {STAFF_ROLES.includes(form.role) ? (
+                  <fieldset className="people-field" style={{ border: 0, padding: 0, margin: 0 }}>
+                    <legend style={{ fontWeight: 700, marginBottom: 8 }}>Compensation</legend>
+                    <small style={{ display: 'block', marginBottom: 12 }}>Payroll uses this contract and never substitutes a default salary.</small>
+                    <div className="people-field-row">
+                      <div className="people-field">
+                        <label htmlFor="people-contract-type">Contract type</label>
+                        <select id="people-contract-type" value={form.contractType} onChange={(e) => setField('contractType', e.target.value as FormState['contractType'])} required>
+                          <option value="FIXED">Fixed monthly salary</option>
+                          <option value="HOUR_RATE">Hourly, from recorded session minutes</option>
+                        </select>
+                      </div>
+                      <div className="people-field">
+                        {form.contractType === 'FIXED' ? (
+                          <>
+                            <label htmlFor="people-base-salary">Base monthly salary (NPR)</label>
+                            <input id="people-base-salary" type="text" inputMode="decimal" pattern="[0-9]+(?:\.[0-9]{1,2})?" value={form.baseMonthlySalary} onChange={(e) => setField('baseMonthlySalary', e.target.value)} placeholder="32000" aria-describedby="people-compensation-help" required />
+                          </>
+                        ) : (
+                          <>
+                            <label htmlFor="people-hourly-rate">Hourly rate (NPR)</label>
+                            <input id="people-hourly-rate" type="text" inputMode="decimal" pattern="[0-9]+(?:\.[0-9]{1,2})?" value={form.hourlyRate} onChange={(e) => setField('hourlyRate', e.target.value)} placeholder="500" aria-describedby="people-compensation-help" required />
+                          </>
+                        )}
+                        <small id="people-compensation-help">Required. Enter the agreed gross rate before adjustments.</small>
+                      </div>
+                    </div>
+                  </fieldset>
+                ) : null}
 
                 {form.role === 'Parent' ? (
                   <div className="people-field">

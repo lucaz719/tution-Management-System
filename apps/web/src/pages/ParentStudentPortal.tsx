@@ -22,6 +22,8 @@ import type {
   ParentView as OriginalParentView,
 } from '../features/parent/parentPortalTypes';
 import { errorMessage } from '../services/api/client';
+import { api } from '../services/api';
+import { submitConnectIpsForm } from '../utils/connectips';
 import { ChangePasswordForm } from '../components/ChangePasswordForm';
 import { InvoiceDocumentDialog } from '../components/InvoiceDocument';
 import '../features/parent/parentPortal.css';
@@ -163,11 +165,17 @@ function PaymentDialog({ invoice, child, onClose }: { invoice: ParentInvoice; ch
   const dialogRef = useRef<HTMLElement>(null);
   const [image, setImage] = useState('');
   const [error, setError] = useState('');
+  const [method, setMethod] = useState<'CONNECTIPS' | 'QR'>('CONNECTIPS');
+  const [paying, setPaying] = useState(false);
+  const [settings, setSettings] = useState<{ connectIpsEnabled: boolean; staticQrEnabled: boolean; staticQrImageUrl: string; accountName: string; accountNumber: string; bankName: string; instructions: string } | null>(null);
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     dialogRef.current?.querySelector<HTMLElement>('button')?.focus();
-    void loadParentNepalPayQr(invoice.id).then((payload) => QRCode.toDataURL(payload.qrString, { width: 360, margin: 2, color: { dark: '#002D72', light: '#FFFFFF' } })).then(setImage).catch((reason) => setError(errorMessage(reason)));
+    void Promise.all([
+      loadParentNepalPayQr(invoice.id).then((payload) => QRCode.toDataURL(payload.qrString, { width: 360, margin: 2, color: { dark: '#002D72', light: '#FFFFFF' } })),
+      api.finances.getPaymentSettings(),
+    ]).then(([qr, config]) => { setImage(qr); setSettings(config); setMethod(config.connectIpsEnabled ? 'CONNECTIPS' : 'QR'); }).catch((reason) => setError(errorMessage(reason)));
     return () => { document.body.style.overflow = previousOverflow; };
   }, [invoice.id]);
   const keyDown = (event: React.KeyboardEvent<HTMLElement>) => {
@@ -179,7 +187,9 @@ function PaymentDialog({ invoice, child, onClose }: { invoice: ParentInvoice; ch
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
     if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   };
-  return <div className="parent-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section ref={dialogRef} tabIndex={-1} onKeyDown={keyDown} role="dialog" aria-modal="true" aria-labelledby="parent-qr-title" className="parent-modal"><button type="button" className="parent-modal__close" aria-label="Close Nepal Pay QR" onClick={onClose}>{icon('close')}</button><span className="parent-eyebrow">NEPAL PAY · {child.name}</span><h2 id="parent-qr-title">Scan to pay {money(invoiceTotal(invoice))}</h2><p>{invoice.cycle} · {invoice.reference}</p>{error ? <div className="parent-form__error" role="alert">{error}</div> : image ? <div className="parent-qr"><img src={image} width="360" height="360" alt={`Nepal Pay QR for ${child.name}, invoice ${invoice.id}`} /></div> : <div className="parent-qr" aria-busy="true" aria-label="Generating Nepal Pay QR" />}<small>Verify the child, merchant, invoice, and amount before confirming.</small><button type="button" className="parent-primary-button" onClick={onClose}>Done</button></section></div>;
+  const payOnline = async () => { setPaying(true); setError(''); try { const result = await api.finances.initiateConnectIps(invoice.id); submitConnectIpsForm(result.gatewayUrl, result.fields); } catch (cause) { setError(errorMessage(cause)); setPaying(false); } };
+  const qrSource = settings?.staticQrEnabled && settings.staticQrImageUrl ? settings.staticQrImageUrl : image;
+  return <div className="parent-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section ref={dialogRef} tabIndex={-1} onKeyDown={keyDown} role="dialog" aria-modal="true" aria-labelledby="parent-qr-title" className="parent-modal parent-payment-dialog"><button type="button" className="parent-modal__close" aria-label="Close payment" onClick={onClose}>{icon('close')}</button><span className="parent-eyebrow">SECURE PAYMENT · {child.name}</span><h2 id="parent-qr-title">Complete your payment</h2><p>{invoice.cycle} · {money(invoiceTotal(invoice))}</p>{settings ? <div className="parent-payment-methods" role="radiogroup" aria-label="Payment method">{settings.connectIpsEnabled ? <button type="button" role="radio" aria-checked={method === 'CONNECTIPS'} className={method === 'CONNECTIPS' ? 'is-active' : ''} onClick={() => setMethod('CONNECTIPS')}>{icon('bolt')}<span><strong>Pay online instantly</strong><small>Secure connectIPS login</small></span></button> : null}<button type="button" role="radio" aria-checked={method === 'QR'} className={method === 'QR' ? 'is-active' : ''} onClick={() => setMethod('QR')}>{icon('qr_code_2')}<span><strong>Pay via QR</strong><small>Scan with your payment app</small></span></button></div> : null}{error ? <div className="parent-form__error" role="alert">{error}</div> : method === 'CONNECTIPS' ? <div className="parent-payment-online">{icon('lock')}<p>You’ll be redirected to connectIPS to log in and confirm. The invoice updates only after server verification.</p></div> : qrSource ? <><div className="parent-qr"><img src={qrSource} width="360" height="360" alt={`Payment QR for ${child.name}, invoice ${invoice.id}`} /></div>{settings?.staticQrEnabled ? <dl className="parent-payment-bank"><div><dt>Account name</dt><dd>{settings.accountName || '—'}</dd></div><div><dt>Account number</dt><dd>{settings.accountNumber || '—'}</dd></div><div><dt>Bank</dt><dd>{settings.bankName || '—'}</dd></div></dl> : null}</> : <div className="parent-qr" aria-busy="true" aria-label="Generating payment QR" />}<small>Verify the child, merchant, invoice, and exact amount before confirming.</small>{method === 'CONNECTIPS' ? <button type="button" className="parent-primary-button" disabled={paying} onClick={() => void payOnline()}>{paying ? 'Redirecting…' : 'Pay with connectIPS'}</button> : <button type="button" className="parent-primary-button" onClick={onClose}>Done</button>}</section></div>;
 }
 function ParentBillingPlan() {
   const { billing, enrollmentAccess, invoices } = useParentData();
