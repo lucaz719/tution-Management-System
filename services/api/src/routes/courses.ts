@@ -6,10 +6,66 @@ import { authMiddleware, hasPermission } from '../middleware/auth';
 import { canAccessBranch, hasBranchPermission, isTenantAdmin } from '../utils/access-control';
 import { parsePlainRecord, parseStrictKeys, readFiniteNumber, readTrimmedString, type ValidationResult } from '../utils/request-validation';
 import { recurringInvoiceType } from '../utils/billing-rules';
-import { normalizeSchedule, parseSchedule, SCHEDULE_DAYS } from '../utils/schedule';
+import { normalizeSchedule, parseSchedule, SCHEDULE_DAYS, slotsOverlap, type ScheduleSlot } from '../utils/schedule';
 
 const router = Router();
 const COURSE_TYPES = new Set<string>(['REGULAR', 'MUSIC', 'SHORT_TERM', 'LONG_TERM', 'PERSONALIZED']);
+const ACTIVE_ENROLLMENT_STATUSES = ['ACTIVE', 'BLOCKED'];
+
+async function eligibleTeacher(tenantId: string, branchId: string, teacherId: string) {
+  const teacher = await prisma.user.findFirst({
+    where: { id: teacherId, tenantId },
+    include: { userRoles: { include: { role: { select: { name: true } } } } },
+  });
+  if (!teacher) return null;
+  return teacher.userRoles.some((assignment) => assignment.role.name === 'Teacher' && (!assignment.branchId || assignment.branchId === branchId)) ? teacher : null;
+}
+
+async function classConflict(params: {
+  tenantId: string;
+  branchId: string;
+  teacherId: string | null;
+  schedule: ScheduleSlot[];
+  excludeClassId?: string;
+  studentIds?: string[];
+}): Promise<string[]> {
+  const studentIds = params.studentIds ?? [];
+  const conflicts = new Set<string>();
+  const otherClasses = await prisma.class.findMany({
+    where: {
+      ...(params.excludeClassId ? { id: { not: params.excludeClassId } } : {}),
+      course: { tenantId: params.tenantId },
+      OR: [
+        { branchId: params.branchId },
+        ...(params.teacherId ? [{ teacherId: params.teacherId }] : []),
+        ...(studentIds.length ? [{ enrollments: { some: { studentId: { in: studentIds }, status: { in: ACTIVE_ENROLLMENT_STATUSES } } } }] : []),
+      ],
+    },
+    select: {
+      id: true,
+      name: true,
+      branchId: true,
+      teacherId: true,
+      schedule: true,
+      enrollments: { where: { studentId: { in: studentIds }, status: { in: ACTIVE_ENROLLMENT_STATUSES } }, select: { studentId: true } },
+    },
+  });
+  for (const other of otherClasses) {
+    const otherSchedule = normalizeSchedule(other.schedule);
+    for (const slot of params.schedule) {
+      for (const candidate of otherSchedule) {
+        if (!slotsOverlap(slot, candidate)) continue;
+        const time = `${slot.day} ${slot.startTime}–${slot.endTime}`;
+        if (params.teacherId && other.teacherId === params.teacherId) conflicts.add(`Teacher conflict: already assigned during ${time}.`);
+        if (other.branchId === params.branchId && slot.room && candidate.room && slot.room.localeCompare(candidate.room, undefined, { sensitivity: 'accent' }) === 0) {
+          conflicts.add(`Room conflict: ${slot.room} is already used by ${other.name} during ${time}.`);
+        }
+        if (other.enrollments.length) conflicts.add(`Student conflict: ${other.enrollments.length} enrolled student${other.enrollments.length === 1 ? '' : 's'} also attend ${other.name} during ${time}.`);
+      }
+    }
+  }
+  return Array.from(conflicts);
+}
 
 interface BulkCourseInput {
   name: string;
@@ -242,7 +298,7 @@ router.get(
   async (req: TenantRequest, res: Response) => {
     try {
       const courses = await prisma.course.findMany({
-        where: { tenantId: req.tenantId! },
+        where: { tenantId: req.tenantId!, ...(isTenantAdmin(req.user!) ? {} : { branchId: { in: req.user!.roles.filter((role: { roleName: string; branchId: string | null }) => role.roleName === 'Branch Admin' && role.branchId).map((role: { roleName: string; branchId: string | null }) => role.branchId as string) } }) },
         orderBy: { createdAt: 'desc' },
         include: {
           branch: { select: { name: true } },
@@ -411,13 +467,54 @@ router.post(
   }
 );
 
+// Live conflict check used by the shared Tenant/Branch Admin timetable editor.
+router.post(
+  '/classes/conflicts',
+  authMiddleware,
+  hasPermission('manage_courses'),
+  async (req: TenantRequest, res: Response) => {
+    const shape = parseStrictKeys(req.body, ['courseId', 'classId', 'teacherId', 'schedule']);
+    if (!shape.success) return res.status(400).json({ error: shape.error });
+    const courseId = readTrimmedString(shape.data, 'courseId', { required: true, maxLength: 128, message: 'A valid courseId is required.' });
+    const classId = readTrimmedString(shape.data, 'classId', { required: false, maxLength: 128, message: 'classId must be valid.' });
+    const schedule = parseSchedule(shape.data.schedule);
+    if (!courseId.success) return res.status(400).json({ error: courseId.error });
+    if (!classId.success) return res.status(400).json({ error: classId.error });
+    if (!schedule.success) return res.status(400).json({ error: schedule.error });
+    const teacherIdValue = shape.data.teacherId;
+    if (teacherIdValue !== undefined && teacherIdValue !== null && (typeof teacherIdValue !== 'string' || !teacherIdValue.trim() || teacherIdValue.length > 128)) {
+      return res.status(400).json({ error: 'teacherId must be a valid ID or null.' });
+    }
+    const teacherId = typeof teacherIdValue === 'string' ? teacherIdValue.trim() : null;
+    try {
+      const course = await prisma.course.findFirst({ where: { id: courseId.data, tenantId: req.tenantId! } });
+      if (!course) return res.status(404).json({ error: 'Course not found in your institution.' });
+      if (!hasBranchPermission(req.user!, 'manage_courses', course.branchId)) return res.status(403).json({ error: 'You cannot schedule classes for this branch.' });
+      if (teacherId && !await eligibleTeacher(req.tenantId!, course.branchId, teacherId)) return res.status(400).json({ error: 'Selected teacher is not assigned to this branch.' });
+      let studentIds: string[] = [];
+      if (classId.data) {
+        const klass = await prisma.class.findFirst({
+          where: { id: classId.data, courseId: course.id, branchId: course.branchId },
+          select: { enrollments: { where: { status: { in: ACTIVE_ENROLLMENT_STATUSES } }, select: { studentId: true } } },
+        });
+        if (!klass) return res.status(404).json({ error: 'Class not found for the selected course.' });
+        studentIds = klass.enrollments.map((enrollment) => enrollment.studentId);
+      }
+      const conflicts = await classConflict({ tenantId: req.tenantId!, branchId: course.branchId, teacherId, schedule: schedule.data, excludeClassId: classId.data || undefined, studentIds });
+      return res.json({ conflicts });
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Failed to check timetable conflicts.', details: error.message });
+    }
+  },
+);
+
 // 4. Create a Class (Timetable Instance)
 router.post(
   '/classes',
   authMiddleware,
   hasPermission('manage_courses'),
   async (req: TenantRequest, res: Response) => {
-    const shape = parseStrictKeys(req.body, ['courseId', 'name', 'schedule']);
+    const shape = parseStrictKeys(req.body, ['courseId', 'name', 'schedule', 'teacherId']);
     if (!shape.success) return res.status(400).json({ error: shape.error });
     const courseId = readTrimmedString(shape.data, 'courseId', { required: true, maxLength: 128, message: 'A valid courseId is required.' });
     const name = readTrimmedString(shape.data, 'name', { required: true, maxLength: 160, message: 'A class name is required and must be 160 characters or fewer.' });
@@ -425,6 +522,11 @@ router.post(
     if (!courseId.success) return res.status(400).json({ error: courseId.error });
     if (!name.success) return res.status(400).json({ error: name.error });
     if (!schedule.success) return res.status(400).json({ error: schedule.error });
+    const teacherIdValue = shape.data.teacherId;
+    if (teacherIdValue !== undefined && teacherIdValue !== null && (typeof teacherIdValue !== 'string' || !teacherIdValue.trim() || teacherIdValue.length > 128)) {
+      return res.status(400).json({ error: 'teacherId must be a valid ID or null.' });
+    }
+    const teacherId = typeof teacherIdValue === 'string' ? teacherIdValue.trim() : null;
 
     try {
       // The class inherits the course's branch; verify both belong to the tenant.
@@ -432,6 +534,14 @@ router.post(
       if (!course || course.tenantId !== req.tenantId) {
         return res.status(404).json({ error: 'Course not found in your institution.' });
       }
+      if (!hasBranchPermission(req.user!, 'manage_courses', course.branchId)) {
+        return res.status(403).json({ error: 'You cannot create classes for this branch.' });
+      }
+      if (teacherId && !await eligibleTeacher(req.tenantId!, course.branchId, teacherId)) {
+        return res.status(400).json({ error: 'Selected teacher is not assigned to this branch.' });
+      }
+      const conflicts = await classConflict({ tenantId: req.tenantId!, branchId: course.branchId, teacherId, schedule: schedule.data });
+      if (conflicts.length) return res.status(409).json({ error: conflicts[0], conflicts });
 
       const cls = await prisma.class.create({
         data: {
@@ -439,8 +549,10 @@ router.post(
           branchId: course.branchId,
           name: name.data,
           schedule: schedule.data as unknown as Prisma.InputJsonValue,
+          teacherId,
         },
       });
+      if (teacherId) await ensureTodaySession(teacherId, cls.id, cls.schedule);
       return res.status(201).json({ message: 'Class timetable created successfully.', class: cls });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to create class.', details: error.message });
@@ -503,7 +615,10 @@ router.put(
     }
 
     try {
-      const cls = await prisma.class.findUnique({ where: { id }, include: { course: true } });
+      const cls = await prisma.class.findUnique({
+        where: { id },
+        include: { course: true, enrollments: { where: { status: { in: ACTIVE_ENROLLMENT_STATUSES } }, select: { studentId: true } } },
+      });
       if (!cls || cls.course.tenantId !== req.tenantId) {
         return res.status(404).json({ error: 'Class not found in your institution.' });
       }
@@ -511,27 +626,21 @@ router.put(
         return res.status(403).json({ error: 'You cannot update classes for this branch.' });
       }
 
-      // teacherId: string assigns, null unassigns.
-      if (typeof data.teacherId === 'string') {
-        const teacher = await prisma.user.findFirst({
-          where: {
-            id: data.teacherId,
-            tenantId: req.tenantId!,
-            userRoles: { some: { role: { name: 'Teacher' } } },
-          },
+      const nextTeacherId = data.teacherId === undefined ? cls.teacherId : typeof data.teacherId === 'string' ? data.teacherId : null;
+      const nextSchedule = normalizeSchedule(data.schedule ?? cls.schedule);
+      if (nextTeacherId && !await eligibleTeacher(req.tenantId!, cls.branchId, nextTeacherId)) {
+        return res.status(400).json({ error: 'Selected teacher is not assigned to this branch.' });
+      }
+      if (shape.data.schedule !== undefined || teacherIdValue !== undefined) {
+        const conflicts = await classConflict({
+          tenantId: req.tenantId!,
+          branchId: cls.branchId,
+          teacherId: nextTeacherId,
+          schedule: nextSchedule,
+          excludeClassId: cls.id,
+          studentIds: cls.enrollments.map((enrollment) => enrollment.studentId),
         });
-        if (!teacher) {
-          return res.status(400).json({ error: 'Selected teacher is not a teacher in your institution.' });
-        }
-        const nextSchedule = normalizeSchedule(data.schedule ?? cls.schedule);
-        const otherClasses = await prisma.class.findMany({ where: { id: { not: id }, teacherId: data.teacherId, branchId: cls.branchId }, select: { name: true, schedule: true } });
-        for (const other of otherClasses) {
-          const otherSlots = normalizeSchedule(other.schedule);
-          for (const slot of nextSchedule) {
-            const collision = otherSlots.find((candidate) => candidate.day === slot.day && candidate.startTime < slot.endTime && candidate.endTime > slot.startTime);
-            if (collision) return res.status(409).json({ error: `This teacher is already scheduled for ${other.name} on ${slot.day} during that time.` });
-          }
-        }
+        if (conflicts.length) return res.status(409).json({ error: conflicts[0], conflicts });
       }
 
       const updated = await prisma.class.update({ where: { id }, data });

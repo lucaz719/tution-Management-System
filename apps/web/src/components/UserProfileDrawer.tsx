@@ -6,6 +6,7 @@ import { StudentAnalytics } from './StudentAnalytics';
 import { api } from '../services/api';
 import { toBsLabel } from '../utils/nepaliDate';
 import { InvoiceDocumentDialog, type InvoiceDocumentData } from './InvoiceDocument';
+import { StudentProfileDrawerContent } from './StudentProfileDrawerContent';
 
 interface UserProfileDrawerProps {
   userId: string;
@@ -13,7 +14,7 @@ interface UserProfileDrawerProps {
   onChanged?: () => void;
 }
 
-interface Profile {
+export interface Profile {
   id: string;
   name: string;
   email: string;
@@ -57,6 +58,10 @@ interface Profile {
 
 function initials(name: string): string {
   return name.split(' ').filter(Boolean).map((p) => p[0]?.toUpperCase()).join('').slice(0, 2) || '??';
+}
+
+function hasStudentDetail(profile: Profile): boolean {
+  return Boolean(profile.detail.student);
 }
 
 function money(n: number): string {
@@ -127,6 +132,7 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
 
   const reload = () => {
     setIsLoading(true);
+    setErrorMsg('');
     api.people.getProfile(userId)
       .then((data) => setProfile(data as Profile))
       .catch((error: unknown) => setErrorMsg(error instanceof Error ? error.message : 'Failed to load profile.'))
@@ -137,12 +143,19 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
     let active = true;
     setIsLoading(true);
     setErrorMsg('');
+    setProfile(null);
     api.people.getProfile(userId)
       .then((data) => { if (active) setProfile(data as Profile); })
       .catch((error: unknown) => { if (active) setErrorMsg(error instanceof Error ? error.message : 'Failed to load profile.'); })
       .finally(() => { if (active) setIsLoading(false); });
     return () => { active = false; };
   }, [userId]);
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) onClose(); };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [busy, onClose]);
 
   const startEdit = () => {
     if (!profile) return;
@@ -176,10 +189,10 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
     } finally { setBusy(false); }
   };
 
-  const toggleActive = async () => {
+  const toggleActive = async (confirmationHandled = false) => {
     if (!profile) return;
     const reactivate = profile.status !== 'ACTIVE';
-    if (!reactivate && !window.confirm(`Deactivate ${profile.name}? They lose access and active enrolments are dropped.`)) return;
+    if (!reactivate && !confirmationHandled && !window.confirm(`Deactivate ${profile.name}? They lose access and active enrolments are dropped.`)) return;
     setBusy(true);
     try {
       if (reactivate) await api.people.update(userId, { status: 'ACTIVE' });
@@ -192,9 +205,9 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
     } finally { setBusy(false); }
   };
 
-  const handleResetPassword = async () => {
+  const handleResetPassword = async (confirmationHandled = false) => {
     if (!profile) return;
-    if (!window.confirm(`Are you sure you want to reset the password for ${profile.name}?`)) return;
+    if (!confirmationHandled && !window.confirm(`Are you sure you want to reset the password for ${profile.name}?`)) return;
     setBusy(true);
     try {
       const response = await api.people.resetPassword(userId);
@@ -220,15 +233,15 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
 
   return (
     <>
-      <div className="people-drawer-overlay" onClick={onClose} />
-      <aside className="people-drawer" role="dialog" aria-modal="true" style={{ width: '460px' }}>
+      <button type="button" className="people-drawer-overlay" onClick={onClose} aria-label="Close student profile" />
+      <aside className="people-drawer" role="dialog" aria-modal="true" aria-labelledby="profile-drawer-title" style={{ width: '520px' }}>
         <div className="people-drawer-head">
           <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
             <div className="people-avatar" style={{ width: '46px', height: '46px', fontSize: '15px' }}>
               {profile ? initials(profile.name) : '…'}
             </div>
             <div>
-              <h2 style={{ fontSize: '18px' }}>{profile?.name ?? 'Loading…'}</h2>
+              <h2 id="profile-drawer-title" style={{ fontSize: '18px' }}>{profile?.name ?? 'Loading…'}</h2>
               <p style={{ marginTop: '2px' }}>{profile?.email}</p>
             </div>
           </div>
@@ -238,10 +251,32 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
         </div>
 
         <div className="people-drawer-body">
-          {errorMsg ? <StatusBadge variant="error">{errorMsg}</StatusBadge> : null}
           {isLoading ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '14px', textAlign: 'center', padding: '30px 0' }}>Loading profile…</p>
+            <div className="student-profile-skeleton" aria-label="Loading student profile" aria-busy="true"><i /><i /><i /><i /></div>
+          ) : errorMsg ? (
+            <div className="student-profile-load-error" role="alert"><span className="material-symbols-outlined" aria-hidden="true">cloud_off</span><strong>Couldn’t load this profile</strong><p>{errorMsg}</p><Button variant="outline" onClick={reload}>Try again</Button></div>
           ) : profile ? (
+            hasStudentDetail(profile) ? (
+              <StudentProfileDrawerContent
+                profile={profile}
+                student={profile.detail.student!}
+                busy={busy}
+                editing={editing}
+                grades={grades}
+                form={form}
+                setForm={setForm}
+                onStartEdit={startEdit}
+                onCancelEdit={() => setEditing(false)}
+                onSaveEdit={saveEdit}
+                onAnalytics={() => setShowAnalytics(true)}
+                onResetPassword={() => handleResetPassword(true)}
+                onToggleActive={() => toggleActive(true)}
+                onViewInvoice={setSelectedInvoice}
+                onRefresh={reload}
+                onChanged={onChanged}
+                showToast={showToast}
+              />
+            ) : (
             <>
               {/* Identity */}
               <div>
@@ -594,6 +629,7 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                 </div>
               ) : null}
             </>
+            )
           ) : null}
         </div>
       </aside>

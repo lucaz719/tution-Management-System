@@ -28,3 +28,7 @@ export function normalizeSchedule(value: unknown): ScheduleSlot[] {
 export function sortSchedule(slots: ScheduleSlot[]): ScheduleSlot[] {
   return [...slots].sort((a, b) => SCHEDULE_DAYS.indexOf(a.day as typeof SCHEDULE_DAYS[number]) - SCHEDULE_DAYS.indexOf(b.day as typeof SCHEDULE_DAYS[number]) || a.startTime.localeCompare(b.startTime));
 }
+
+export function slotsOverlap(left: ScheduleSlot, right: ScheduleSlot): boolean {
+  return left.day === right.day && left.startTime < right.endTime && left.endTime > right.startTime;
+}

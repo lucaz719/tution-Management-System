@@ -511,8 +511,14 @@ export const api = {
       const data = await request<{ classes: any[] }>('/courses/classes');
       return data.classes ?? [];
     },
-    createClass: async (payload: { courseId: string; name: string; schedule: unknown }) => {
+    createClass: async (payload: { courseId: string; name: string; schedule: unknown; teacherId?: string | null }) => {
       return request<{ message: string; class: any }>('/courses/classes', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    },
+    checkClassConflicts: async (payload: { courseId: string; classId?: string; teacherId?: string | null; schedule: unknown }) => {
+      return request<{ conflicts: string[] }>('/courses/classes/conflicts', {
         method: 'POST',
         body: JSON.stringify(payload),
       });

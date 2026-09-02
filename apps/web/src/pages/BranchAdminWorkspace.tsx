@@ -8,6 +8,7 @@ import { api, type BranchAppointment } from '../services/api';
 import { resourcesApi, type MaintenanceTask } from '../services/api/resources';
 import { API_BASE_URL, request } from '../services/api/client';
 import { normalizeSchedule, type ScheduleSlot } from '../utils/schedule';
+import { TimetableWorkspace } from '../components/timetable/TimetableWorkspace';
 import './staffFinance.css';
 
 function CalendarGrid({ onDateClick, events }: { onDateClick: (date: Date) => void; events: Record<string, string> }) {
@@ -1827,7 +1828,7 @@ void LegacyTimetableView;
 const WEEK_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DAY_NAMES: Record<string, string> = { Sun: 'Sunday', Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday', Thu: 'Thursday', Fri: 'Friday', Sat: 'Saturday' };
 
-function TimetableView() {
+function LegacyManagedTimetableView() {
   const [classes, setClasses] = useState<any[]>([]); const [teachers, setTeachers] = useState<any[]>([]); const [selectedId, setSelectedId] = useState(''); const [teacherId, setTeacherId] = useState(''); const [slots, setSlots] = useState<WeeklySlot[]>([]); const [editingIndex, setEditingIndex] = useState<number | null>(null); const [slotForm, setSlotForm] = useState<WeeklySlot>({ day: 'Sun', startTime: '08:00', endTime: '09:00', room: '' }); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const action = useAction();
   const selected = classes.find((item) => item.id === selectedId);
   const availableTeachers = teachers.filter((teacher) => teacher.roles.some((role: any) => role.role === 'Teacher' && role.branchId === selected?.branchId));
@@ -1850,6 +1851,9 @@ function TimetableView() {
     </>}
   </Page>;
 }
+
+void LegacyManagedTimetableView;
+function TimetableView() { return <TimetableWorkspace />; }
 
 function LiveBranchTeachersView() {
   const [data, setData] = useState<any>(null);
