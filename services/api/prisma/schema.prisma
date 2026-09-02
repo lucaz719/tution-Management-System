@@ -485,6 +485,8 @@ model StudentScore {
   student        Student   @relation(fields: [studentId], references: [id])
   recordedBy     String
   recorder       User      @relation("StudentScoreRecorder", fields: [recordedBy], references: [id])
+  resultDefinitionId String?
+  resultDefinition   ResultDefinition? @relation(fields: [resultDefinitionId], references: [id], onDelete: SetNull)
   subject        String
   assessment     String
   score          Decimal   @db.Decimal(8, 2)
@@ -497,6 +499,7 @@ model StudentScore {
   createdAt      DateTime  @default(now())
 
   @@index([tenantId, studentId, subject, testDate])
+  @@unique([resultDefinitionId, studentId])
 }
 
 // 8. Parent / Guardian Records
@@ -561,6 +564,7 @@ model Class {
   // Phase 2 relations
   homework          Homework[]
   syllabi           Syllabus[]
+  resultDefinitions ResultDefinition[]
 }
 
 // 12. Student Enrollment
@@ -574,8 +578,12 @@ model Enrollment {
   class         Class    @relation(fields: [classId], references: [id])
   status        String // ACTIVE, COMPLETED, DROPPED, BLOCKED
   admissionDate DateTime
+  validFrom     DateTime?
+  validUntil    DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+
+  @@index([studentId, validUntil])
 }
 
 // 13. Teacher GPS Stamps
@@ -645,6 +653,7 @@ model Invoice {
   invoiceType       InvoiceType      @default(TUITION)
   panNumberSnapshot String           @default("")
   vatRateSnapshot   Decimal          @default(0.00) @db.Decimal(5, 2)
+  lineItemsSnapshot Json?
   nepalPayQrCode    String? // Storage for Nepal Pay QR string/image reference
   transactionId     String?          @unique // External payment transaction reference
   paymentDate       DateTime?
@@ -861,6 +870,7 @@ model ResultDefinition {
   tenantId  String
   branchId  String
   classId   String
+  class     Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
   createdBy String
   title     String
   subject   String
@@ -868,6 +878,7 @@ model ResultDefinition {
   isOpen    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  scores    StudentScore[]
 
   @@index([tenantId, branchId, classId, isOpen])
 }

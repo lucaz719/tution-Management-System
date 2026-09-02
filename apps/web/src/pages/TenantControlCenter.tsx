@@ -7,11 +7,27 @@ import { api } from '../services/api';
 
 type Tab = 'policies' | 'approvals' | 'finance' | 'calendar' | 'hr';
 type Weights = Record<'attendance' | 'updateCompliance' | 'feedback' | 'leaveCompliance' | 'taskCompletion', number>;
+type Forecast = { billingCycle?: string; metrics?: { baseForecastNpr?: number; estimatedAttritionNpr?: number; attritionPercentage?: string; netForecastNpr?: number; actualCollectedNpr?: number; varianceNpr?: number; activeEnrollments?: number } };
+type FinancialAlert = { type?: string; severity?: string; message?: string; category?: string; currentAmountNpr?: number; baselineAmountNpr?: number };
+type FinancialSuggestions = { alerts?: FinancialAlert[]; budgetAnalysis?: { activeEnrollments?: number; projectedIncomeNpr?: number; projectedCostsNpr?: number; projectedSurplusNpr?: number; basis?: string } };
 
 const input: React.CSSProperties = { width: '100%', padding: '10px 12px', border: '1px solid #DCE4EE', borderRadius: '9px', background: '#fff', color: 'var(--color-text)' };
 const label: React.CSSProperties = { display: 'grid', gap: '6px', fontSize: '12px', fontWeight: 700, color: 'var(--color-text)' };
 const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '14px' };
 const defaultWeights: Weights = { attendance: 20, updateCompliance: 20, feedback: 20, leaveCompliance: 20, taskCompletion: 20 };
+const metricGrid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: '10px', marginTop: '16px' };
+const metricCard: React.CSSProperties = { minWidth: 0, padding: '14px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', background: 'var(--color-surface)' };
+
+function money(value: unknown) {
+  return `NPR ${Number(value ?? 0).toLocaleString('en-NP', { maximumFractionDigits: 2 })}`;
+}
+
+function Metric({ label: text, value, emphasis = false }: { label: string; value: string; emphasis?: boolean }) {
+  return <div style={metricCard}>
+    <p style={{ color: 'var(--text-muted)', fontSize: 12, fontWeight: 700 }}>{text}</p>
+    <strong style={{ display: 'block', marginTop: 6, color: emphasis ? 'var(--color-primary)' : 'var(--color-text)', fontSize: 20, lineHeight: 1.2, overflowWrap: 'anywhere' }}>{value}</strong>
+  </div>;
+}
 
 function downloadCsv(entries: any[]) {
   const columns = ['date', 'accountDebit', 'accountCredit', 'amount', 'description'];
@@ -34,8 +50,8 @@ export function TenantControlCenter() {
   const [weights, setWeights] = useState<Weights>(defaultWeights);
   const [pettyCash, setPettyCash] = useState<any[]>([]);
   const [remarks, setRemarks] = useState<Record<string, string>>({});
-  const [forecast, setForecast] = useState<any>(null);
-  const [suggestions, setSuggestions] = useState<any>(null);
+  const [forecast, setForecast] = useState<Forecast | null>(null);
+  const [suggestions, setSuggestions] = useState<FinancialSuggestions | null>(null);
   const [events, setEvents] = useState<any[]>([]);
   const [alerts, setAlerts] = useState<any[]>([]);
   const [eventForm, setEventForm] = useState({ title: '', description: '', eventType: 'HOLIDAY', startDate: '', endDate: '' });
@@ -190,10 +206,56 @@ export function TenantControlCenter() {
           </div>)}
       </Card> : null}
 
-      {tab === 'finance' ? <div style={grid}>
-        <Card hoverable={false}><h3>Fee income forecast</h3><pre style={{ marginTop: 12, whiteSpace: 'pre-wrap', fontFamily: 'var(--font-ui)', fontSize: 13 }}>{JSON.stringify(forecast, null, 2)}</pre></Card>
-        <Card hoverable={false}><h3>Expense anomaly signals</h3><pre style={{ marginTop: 12, whiteSpace: 'pre-wrap', fontFamily: 'var(--font-ui)', fontSize: 13 }}>{JSON.stringify(suggestions, null, 2)}</pre></Card>
-        <Card hoverable={false}><h3>Accountant reconciliation</h3><p style={{ color: 'var(--text-muted)', margin: '8px 0 16px' }}>Download the tenant-scoped double-entry ledger.</p><Button onClick={() => void api.finances.exportLedger().then((data) => downloadCsv(data.entries)).catch((error) => showToast(error.message, 'error'))}>Download CSV ledger</Button></Card>
+      {tab === 'finance' ? <div style={{ display: 'grid', gap: 16 }}>
+        <Card hoverable={false}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div><h3>Fee income forecast</h3><p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 4 }}>{forecast?.billingCycle ?? 'Current billing cycle'} · based on active course fees</p></div>
+            <StatusBadge variant="info">{forecast?.metrics?.activeEnrollments ?? 0} active enrollments</StatusBadge>
+          </div>
+          <div style={metricGrid}>
+            <Metric label="Expected fees" value={money(forecast?.metrics?.baseForecastNpr)} />
+            <Metric label="Attrition estimate" value={money(forecast?.metrics?.estimatedAttritionNpr)} />
+            <Metric label="Net forecast" value={money(forecast?.metrics?.netForecastNpr)} emphasis />
+            <Metric label="Collected" value={money(forecast?.metrics?.actualCollectedNpr)} />
+            <Metric label="Variance" value={money(forecast?.metrics?.varianceNpr)} />
+            <Metric label="Estimated attrition" value={forecast?.metrics?.attritionPercentage ?? '0.0%'} />
+          </div>
+        </Card>
+
+        <div style={grid}>
+          <Card hoverable={false}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+              <div><h3>Expense anomaly signals</h3><p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 4 }}>Compared with the previous three months.</p></div>
+              <StatusBadge variant={suggestions?.alerts?.length ? 'warning' : 'success'}>{suggestions?.alerts?.length ?? 0} alerts</StatusBadge>
+            </div>
+            {!suggestions?.alerts?.length ? <div role="status" style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '20px 0 4px' }}>
+              <span className="material-symbols-outlined" aria-hidden="true" style={{ color: 'var(--color-success)', fontSize: 24 }}>check_circle</span>
+              <div><strong>All clear</strong><p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 3 }}>No recurring expense or payroll anomalies were detected.</p></div>
+            </div> : <div style={{ display: 'grid', gap: 10, marginTop: 16 }}>{suggestions.alerts.map((alert, index) => <div key={`${alert.category}-${index}`} style={{ padding: 14, border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}><strong>{alert.category ?? 'Expense alert'}</strong><StatusBadge variant={alert.severity === 'HIGH' ? 'error' : 'warning'}>{alert.severity ?? 'Warning'}</StatusBadge></div>
+              <p style={{ color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.5, marginTop: 6 }}>{alert.message}</p>
+              <p style={{ fontSize: 12, marginTop: 8 }}>Current: <strong>{money(alert.currentAmountNpr)}</strong> · Baseline: <strong>{money(alert.baselineAmountNpr)}</strong></p>
+            </div>)}</div>}
+          </Card>
+
+          <Card hoverable={false}>
+            <h3>Operating outlook</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 4 }}>Income projection against costs recorded this month.</p>
+            <div style={metricGrid}>
+              <Metric label="Projected income" value={money(suggestions?.budgetAnalysis?.projectedIncomeNpr)} />
+              <Metric label="Recorded costs" value={money(suggestions?.budgetAnalysis?.projectedCostsNpr)} />
+              <Metric label="Projected surplus" value={money(suggestions?.budgetAnalysis?.projectedSurplusNpr)} emphasis />
+            </div>
+            <p style={{ color: 'var(--text-muted)', fontSize: 12, lineHeight: 1.5, marginTop: 12 }}>{suggestions?.budgetAnalysis?.basis ?? 'Calculated from current tenant finance records.'}</p>
+          </Card>
+        </div>
+
+        <Card hoverable={false}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+            <div><h3>Accountant reconciliation</h3><p style={{ color: 'var(--text-muted)', marginTop: 4, fontSize: 13 }}>Export the tenant-scoped double-entry ledger for reconciliation.</p></div>
+            <Button onClick={() => void api.finances.exportLedger().then((data) => downloadCsv(data.entries)).catch((error) => showToast(error.message, 'error'))}><span className="material-symbols-outlined" aria-hidden="true" style={{ fontSize: 18 }}>download</span>Download CSV ledger</Button>
+          </div>
+        </Card>
       </div> : null}
 
       {tab === 'calendar' ? <div style={grid}>

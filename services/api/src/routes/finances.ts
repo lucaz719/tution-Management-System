@@ -11,6 +11,8 @@ import { isInvoiceOverdue, recurringInvoiceType } from '../utils/billing-rules';
 import { createConnectIpsForm, validateAndConfirmConnectIps } from '../utils/connectips';
 import { parsePlainRecord, parseStrictKeys, parseStrictObject, readBoolean, readFiniteNumber, readTrimmedString } from '../utils/request-validation';
 import { activateAdmissionAndSendLogins } from '../utils/admission-logins';
+import { buildFinancialIntelligence } from '../utils/financial-intelligence';
+import { invoiceTypeLabel } from '../utils/invoice-document';
 
 const router = Router();
 
@@ -406,6 +408,7 @@ router.post('/billing-ledger/invoices', authMiddleware, async (req: TenantReques
     tenantId: req.tenantId!, studentId: student.id, invoiceType: invoiceType.data as 'TUITION' | 'SUBJECT' | 'ACTIVITY',
     amount: amount.data, discount: discount.data, fine: fine.data, netPayable, billingCycleStart: cycleStart,
     billingCycleEnd: cycleEnd, dueDate, status: 'UNPAID', panNumberSnapshot: tenant?.panNumber ?? '', vatRateSnapshot: tenant?.vatRate ?? 0,
+    lineItemsSnapshot: [{ label: invoiceTypeLabel(invoiceType.data), amount: amount.data }],
   } });
   return res.status(201).json({ message: 'Invoice created in the shared ledger.', invoice });
 });
@@ -805,11 +808,16 @@ router.post(
 
       // Monthly bill per student = their grade's base tuition (all subjects) +
       // net fees of their active extra-activity enrolments.
-      const fees = new Map<string, { studentId: string; invoiceType: 'TUITION' | 'SUBJECT' | 'ACTIVITY'; amount: number }>();
-      const addFee = (studentId: string, invoiceType: 'TUITION' | 'SUBJECT' | 'ACTIVITY', amount: number) => {
+      const fees = new Map<string, { studentId: string; invoiceType: 'TUITION' | 'SUBJECT' | 'ACTIVITY'; amount: number; lines: Array<{ label: string; amount: number }> }>();
+      const addFee = (studentId: string, invoiceType: 'TUITION' | 'SUBJECT' | 'ACTIVITY', amount: number, label: string) => {
         const key = `${studentId}:${invoiceType}`;
         const current = fees.get(key);
-        fees.set(key, { studentId, invoiceType, amount: (current?.amount ?? 0) + amount });
+        fees.set(key, {
+          studentId,
+          invoiceType,
+          amount: (current?.amount ?? 0) + amount,
+          lines: [...(current?.lines ?? []), { label, amount: Math.round(amount * 100) / 100 }],
+        });
       };
 
       // 1. Grade base tuition for every student who has a graded level.
@@ -818,12 +826,13 @@ router.post(
           user: { tenantId: req.tenantId!, status: 'ACTIVE' },
           admissionStatus: 'ACTIVE',
           gradeId: { not: null },
+          enrollments: { some: { status: 'ACTIVE', OR: [{ validUntil: null }, { validUntil: { gt: new Date() } }] } },
         },
-        include: { grade: { select: { monthlyFee: true, billingMode: true } } },
+        include: { grade: { select: { name: true, monthlyFee: true, billingMode: true } } },
       });
       for (const s of students) {
         if (s.grade?.billingMode === 'GRADE' && s.grade.monthlyFee > 0) {
-          addFee(s.id, 'TUITION', s.grade.monthlyFee);
+          addFee(s.id, 'TUITION', s.grade.monthlyFee, `${s.grade.name} tuition package`);
         }
       }
 
@@ -831,6 +840,7 @@ router.post(
       const enrollments = await prisma.enrollment.findMany({
         where: {
           status: 'ACTIVE',
+          OR: [{ validUntil: null }, { validUntil: { gt: new Date() } }],
           student: { admissionStatus: 'ACTIVE', user: { status: 'ACTIVE' } },
           course: { tenantId: req.tenantId! },
         },
@@ -845,7 +855,7 @@ router.post(
         const fee = (e.course.feeStructure ?? {}) as { monthlyBase?: number };
         const base = Number(fee.monthlyBase || 0);
         const net = e.course.isTaxExempt ? base : base * (1 + Number(e.course.taxPercentage || 13) / 100);
-        addFee(e.studentId, invoiceType, net);
+        addFee(e.studentId, invoiceType, net, e.course.name);
       }
 
       // Students already invoiced for this cycle.
@@ -870,6 +880,7 @@ router.post(
             invoiceType: charge.invoiceType,
             panNumberSnapshot: tenantConfig.panNumber,
             vatRateSnapshot: tenantConfig.vatRate,
+            lineItemsSnapshot: charge.lines,
             amount: Math.round(net * 100) / 100,
             discount: 0,
             fine: 0,
@@ -1004,39 +1015,42 @@ router.get(
   hasPermission('view_reports'),
   async (req: TenantRequest, res: Response) => {
     try {
-      // Analyze expense history and generate anomalous expense logs
-      // Rule-based and pattern-based suggestions:
-      // - "Last month rent was recorded. No rent entry yet for this month."
-      // - "Utility expense typically logged by 5th. None recorded yet."
-      // - "This month salary is 30% higher than last 3-month average."
-      // - Budget checks.
-      const alerts = [
-        {
-          type: 'MISSING_EXPENSE_ALERT',
-          severity: 'HIGH',
-          message: 'Last month rent (NPR 45,000) was recorded on the 1st. No rent entry has been registered yet for this billing cycle.',
-        },
-        {
-          type: 'PATTERN_REMINDER',
-          severity: 'MEDIUM',
-          message: 'Internet & electricity utility expenses are typically logged by the 5th of the month. None recorded yet.',
-        },
-        {
-          type: 'ANOMALY_DETECTION',
-          severity: 'WARNING',
-          message: 'This month simulated payroll total (NPR 185,000) is 30% higher than the last 3-month average. Please verify hours log.',
-        },
-      ];
-
-      const budgetPlanningPrompt = 'Based on current enrollment of 150 students, projected monthly gross income is NPR 762,500. Estimated fixed costs (rent, utilities, standard staff basic) are NPR 250,000. Projected operational surplus before variables: NPR 512,500.';
-
-      return res.status(200).json({
-        alerts,
-        budgetAnalysis: {
-          projectedSurplusNpr: 512500,
-          promptText: budgetPlanningPrompt,
-        },
+      const now = new Date();
+      const historyStart = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+      const historyEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const payrollPeriods = Array.from({ length: 4 }, (_, index) => {
+        const period = new Date(now.getFullYear(), now.getMonth() - index, 1);
+        return { year: period.getFullYear(), month: period.getMonth() + 1 };
       });
+      const [expenses, payrolls, enrollments] = await Promise.all([
+        prisma.expense.findMany({
+          where: { tenantId: req.tenantId!, date: { gte: historyStart, lt: historyEnd } },
+          select: { category: true, amount: true, date: true },
+        }),
+        prisma.payroll.findMany({
+          where: {
+            tenantId: req.tenantId!,
+            OR: payrollPeriods,
+          },
+          select: { netPayable: true, month: true, year: true },
+        }),
+        prisma.enrollment.findMany({
+          where: { status: 'ACTIVE', course: { tenantId: req.tenantId! } },
+          include: { course: { select: { feeStructure: true } } },
+        }),
+      ]);
+      const projectedIncomeNpr = enrollments.reduce((sum, enrollment) => {
+        const fee = enrollment.course.feeStructure as { monthlyBase?: number };
+        return sum + Number(fee?.monthlyBase || 0);
+      }, 0);
+
+      return res.status(200).json(buildFinancialIntelligence({
+        now,
+        expenses,
+        payrolls,
+        projectedIncomeNpr,
+        activeEnrollments: enrollments.length,
+      }));
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to generate financial intelligence suggestions.' });
     }

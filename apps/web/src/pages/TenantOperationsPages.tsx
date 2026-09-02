@@ -232,7 +232,8 @@ export function TenantHrPage() {
   </div>;
 }
 
-interface GradeOption { id: string; name: string; admissionFee?: number | string; }
+interface GradeOption { id: string; name: string; monthlyFee: number; billingMode: 'GRADE' | 'SUBJECT'; }
+interface AdmissionClassOption { id: string; name: string; courseId: string; courseName: string; courseType: string; gradeId: string | null; branchId: string; feeStructure?: { monthlyBase?: number }; isTaxExempt?: boolean; taxPercentage?: number }
 interface AdmissionResult {
   admission: {
     studentId: string; admissionNumber: string; admittedAt: string; status: 'PENDING_PAYMENT' | 'READY_FOR_LOGIN' | 'ACTIVE'; admissionFee: number | string;
@@ -264,17 +265,22 @@ function AdmissionPrintRecord({ result }: { result: AdmissionResult }) {
 }
 export function TenantAdmissionsPage() {
   const { showToast } = useToast();
-  const [branches, setBranches] = useState<Branch[]>([]); const [grades, setGrades] = useState<GradeOption[]>([]); const [classes, setClasses] = useState<any[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]); const [grades, setGrades] = useState<GradeOption[]>([]); const [classes, setClasses] = useState<AdmissionClassOption[]>([]);
+  const [subjectClasses, setSubjectClasses] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false); const [result, setResult] = useState<AdmissionResult | null>(null); const [printAfterSave, setPrintAfterSave] = useState(false);
   const localDateTime = () => { const value = new Date(); value.setMinutes(value.getMinutes() - value.getTimezoneOffset()); return value.toISOString().slice(0, 16); };
   const [form, setForm] = useState({ branchId: '', gradeId: '', classId: '', admittedAt: localDateTime(), studentFirst: '', studentLast: '', studentEmail: '', studentPhone: '', dateOfBirth: '', gender: '', bloodGroup: '', nationality: 'Nepali', permanentAddress: '', temporaryAddress: '', school: '', medicalNotes: '', fatherName: '', fatherPhone: '', fatherEmail: '', fatherOccupation: '', motherName: '', motherPhone: '', motherEmail: '', motherOccupation: '', optionalParentName: '', optionalParentPhone: '', optionalParentEmail: '', optionalParentOccupation: '', optionalParentRelationship: '', primaryParent: '', emergencyContactName: '', emergencyContactPhone: '', emergencyContactRelationship: '' });
   useEffect(() => { void Promise.all([request<{ branches: Branch[] }>('/branches'), request<{ grades: GradeOption[] }>('/grades'), request<{ classes: any[] }>('/courses/classes')]).then(([b, g, c]) => { setBranches(b.branches); setGrades(g.grades); setClasses(c.classes); const branchId = b.branches[0]?.id ?? ''; const gradeId = g.grades[0]?.id ?? ''; const classId = c.classes.find((item) => item.branchId === branchId && item.gradeId === gradeId && item.courseType === 'REGULAR')?.id ?? ''; setForm((old) => ({ ...old, branchId, gradeId, classId })); }).catch((next) => showToast(errorMessage(next), 'error')); }, []);
   useEffect(() => { if (result && printAfterSave) { setPrintAfterSave(false); window.setTimeout(() => window.print(), 0); } }, [result, printAfterSave]);
   const availableClasses = classes.filter((item) => item.branchId === form.branchId && item.gradeId === form.gradeId && item.courseType === 'REGULAR');
-  const requiredAdmissionFields = ['branchId','gradeId','classId','admittedAt','studentFirst','studentLast','studentEmail','studentPhone','dateOfBirth','gender','nationality','permanentAddress','fatherName','fatherPhone','motherName','motherPhone','primaryParent','emergencyContactName','emergencyContactPhone','emergencyContactRelationship'] as const;
+  const selectedGrade = grades.find((grade) => grade.id === form.gradeId);
+  const subjectBilling = selectedGrade?.billingMode === 'SUBJECT';
+  const selectedSubjectClassIds = Object.values(subjectClasses).filter(Boolean);
+  const requiredAdmissionFields = ['branchId','gradeId','admittedAt','studentFirst','studentLast','studentEmail','studentPhone','dateOfBirth','gender','nationality','permanentAddress','fatherName','fatherPhone','motherName','motherPhone','primaryParent','emergencyContactName','emergencyContactPhone','emergencyContactRelationship'] as const;
   const selectedPrimaryEmail = form.primaryParent === 'Father' ? form.fatherEmail : form.primaryParent === 'Mother' ? form.motherEmail : form.primaryParent === 'Optional parent' ? form.optionalParentEmail : '';
   const optionalParentComplete = form.primaryParent !== 'Optional parent' || Boolean(form.optionalParentName.trim() && form.optionalParentPhone.trim() && form.optionalParentEmail.trim());
-  const canPrint = requiredAdmissionFields.every((key) => form[key].trim()) && Boolean(selectedPrimaryEmail.trim()) && optionalParentComplete && !busy;
+  const academicPlacementReady = subjectBilling ? selectedSubjectClassIds.length > 0 : Boolean(form.classId);
+  const canPrint = requiredAdmissionFields.every((key) => form[key].trim()) && academicPlacementReady && Boolean(selectedPrimaryEmail.trim()) && optionalParentComplete && !busy;
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
@@ -285,23 +291,27 @@ export function TenantAdmissionsPage() {
       const selectedParent = form.primaryParent === 'Father' ? { name: form.fatherName, email: form.fatherEmail, phone: form.fatherPhone } : form.primaryParent === 'Mother' ? { name: form.motherName, email: form.motherEmail, phone: form.motherPhone } : { name: form.optionalParentName, email: form.optionalParentEmail, phone: form.optionalParentPhone };
       if (form.studentEmail.trim().toLowerCase() === selectedParent.email.trim().toLowerCase()) throw new Error('Student and primary parent emails must be different.');
       const nameParts = selectedParent.name.trim().split(/\s+/); const firstName = nameParts.shift() ?? ''; const lastName = nameParts.join(' ') || firstName;
-      const admission = await request<AdmissionResult>('/users/admissions', { method: 'POST', body: JSON.stringify({ branchId: form.branchId, gradeId: form.gradeId, classId: form.classId, student: { firstName: form.studentFirst, lastName: form.studentLast, email: form.studentEmail, phone: form.studentPhone }, parent: { firstName, lastName, email: selectedParent.email, phone: selectedParent.phone }, admissionDetails }) });
+      const classIds = subjectBilling ? selectedSubjectClassIds : [form.classId];
+      const admission = await request<AdmissionResult>('/users/admissions', { method: 'POST', body: JSON.stringify({ branchId: form.branchId, gradeId: form.gradeId, classIds, student: { firstName: form.studentFirst, lastName: form.studentLast, email: form.studentEmail, phone: form.studentPhone }, parent: { firstName, lastName, email: selectedParent.email, phone: selectedParent.phone }, admissionDetails }) });
       setResult(admission); showToast(admission.message, admission.loginDelivery && !admission.loginDelivery.delivered ? 'error' : 'success');
     } catch (next) { setPrintAfterSave(false); showToast(errorMessage(next), 'error'); } finally { setBusy(false); }
   };
   const acknowledge = () => { setResult(null); setForm((old) => ({ ...old, admittedAt: localDateTime(), studentFirst: '', studentLast: '', studentEmail: '', studentPhone: '', dateOfBirth: '', gender: '', bloodGroup: '', permanentAddress: '', temporaryAddress: '', school: '', medicalNotes: '', fatherName: '', fatherPhone: '', fatherEmail: '', fatherOccupation: '', motherName: '', motherPhone: '', motherEmail: '', motherOccupation: '', optionalParentName: '', optionalParentPhone: '', optionalParentEmail: '', optionalParentOccupation: '', optionalParentRelationship: '', primaryParent: '', emergencyContactName: '', emergencyContactPhone: '', emergencyContactRelationship: '' })); };
   const selectedBranch = branches.find((branch) => branch.id === form.branchId);
+  const subjectGroups = Array.from(new Map(availableClasses.map((item) => [item.courseId, { courseId: item.courseId, courseName: item.courseName, classes: availableClasses.filter((option) => option.courseId === item.courseId), fee: Number(item.feeStructure?.monthlyBase ?? 0) }])).values());
+  const recurringEstimate = subjectBilling ? subjectGroups.filter((group) => subjectClasses[group.courseId]).reduce((sum, group) => { const option = group.classes[0]; return sum + group.fee * (option?.isTaxExempt ? 1 : 1 + Number(option?.taxPercentage ?? 0) / 100); }, 0) : Number(selectedGrade?.monthlyFee ?? 0);
   return <div style={{ display: 'grid', gap: 18 }}><Header title="Admissions" description="Complete admission first. Login IDs activate and are sent to the recorded phone numbers only after the branch fee is paid."/>
     {!result ? <Card hoverable={false}><form onSubmit={(e) => void submit(e)} style={{ display: 'grid', gap: 16 }} aria-busy={busy}>
       <div style={grid}>
-        <label>Branch<select required style={input} value={form.branchId} onChange={(e) => { const branchId = e.target.value; const classId = classes.find((item) => item.branchId === branchId && item.gradeId === form.gradeId && item.courseType === 'REGULAR')?.id ?? ''; setForm((old) => ({ ...old, branchId, classId })); }}>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
-        <label>Grade<select required style={input} value={form.gradeId} onChange={(e) => { const gradeId = e.target.value; const classId = classes.find((item) => item.branchId === form.branchId && item.gradeId === gradeId && item.courseType === 'REGULAR')?.id ?? ''; setForm((old) => ({ ...old, gradeId, classId })); }}>{grades.map((grade) => <option key={grade.id} value={grade.id}>{grade.name}</option>)}</select></label>
-        <label>Regular class<select required style={input} value={form.classId} onChange={(e) => setForm((old) => ({ ...old, classId: e.target.value }))}><option value="">Select class</option>{availableClasses.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.courseName}</option>)}</select>{!availableClasses.length ? <small style={{ color: 'var(--color-error)' }}>Create a regular class for this branch and grade before admission.</small> : null}</label>
+        <label>Branch<select required style={input} value={form.branchId} onChange={(e) => { const branchId = e.target.value; const classId = classes.find((item) => item.branchId === branchId && item.gradeId === form.gradeId && item.courseType === 'REGULAR')?.id ?? ''; setSubjectClasses({}); setForm((old) => ({ ...old, branchId, classId })); }}>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
+        <label>Grade<select required style={input} value={form.gradeId} onChange={(e) => { const gradeId = e.target.value; const nextGrade = grades.find((grade) => grade.id === gradeId); const classId = nextGrade?.billingMode === 'GRADE' ? classes.find((item) => item.branchId === form.branchId && item.gradeId === gradeId && item.courseType === 'REGULAR')?.id ?? '' : ''; setSubjectClasses({}); setForm((old) => ({ ...old, gradeId, classId })); }}>{grades.map((grade) => <option key={grade.id} value={grade.id}>{grade.name}</option>)}</select></label>
+        {!subjectBilling ? <label>Regular class<select required style={input} value={form.classId} onChange={(e) => setForm((old) => ({ ...old, classId: e.target.value }))}><option value="">Select class</option>{availableClasses.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.courseName}</option>)}</select>{!availableClasses.length ? <small style={{ color: 'var(--color-error)' }}>Create a regular class for this branch and grade before admission.</small> : null}</label> : <div><strong style={{ fontSize: 13 }}>Subject selection *</strong><small style={{ display: 'block', marginTop: 6, color: 'var(--text-muted)' }}>{selectedSubjectClassIds.length} subject{selectedSubjectClassIds.length === 1 ? '' : 's'} selected</small></div>}
         <label>Admission date and time *<input required type="datetime-local" style={input} value={form.admittedAt} onChange={(e) => setForm((old) => ({ ...old, admittedAt: e.target.value }))}/></label>
       </div>
+      {subjectBilling ? <fieldset className="admission-fieldset"><legend>Class 11–12 subjects and classes</legend><p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Select the subjects this student will study. Each selected subject contributes to monthly billing.</p><div className="admission-subject-grid">{subjectGroups.map((group) => { const selectable = group.fee > 0 && group.classes.length > 0; return <label key={group.courseId} className={`admission-subject-card${subjectClasses[group.courseId] ? ' is-selected' : ''}${!selectable ? ' is-disabled' : ''}`}><span><input type="checkbox" disabled={!selectable} checked={Boolean(subjectClasses[group.courseId])} onChange={(event) => setSubjectClasses((current) => ({ ...current, [group.courseId]: event.target.checked ? group.classes[0]?.id ?? '' : '' }))} /><strong>{group.courseName}</strong></span><small>{group.fee <= 0 ? 'Set the subject price in Courses first' : !group.classes.length ? 'Create a class for this subject first' : `NPR ${group.fee.toLocaleString('en-NP')}/month before tax`}</small>{subjectClasses[group.courseId] ? <select aria-label={`${group.courseName} class`} value={subjectClasses[group.courseId]} onChange={(event) => setSubjectClasses((current) => ({ ...current, [group.courseId]: event.target.value }))}>{group.classes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select> : null}</label>; })}</div>{!subjectGroups.length ? <p role="alert" style={{ color: 'var(--color-error)' }}>Create priced subjects and classes for this grade before admission.</p> : null}</fieldset> : null}
       <div role="note" style={{ padding: 14, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--color-surface)' }}>
         <strong>Admission fee for this branch: NPR {Number(selectedBranch?.admissionFee ?? 0).toLocaleString()}</strong>
-        <p style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 13 }}>Tenant Admin can edit this amount independently in Branches.</p>
+        <p style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 13 }}>One-time amount due now. Estimated recurring tuition after activation: <strong>NPR {Math.round(recurringEstimate).toLocaleString('en-NP')}/month</strong>.</p>
       </div>
       <fieldset className="admission-fieldset"><legend>Student details</legend><div style={grid}>{[['studentFirst','First name'],['studentLast','Last name'],['studentEmail','Email'],['studentPhone','Phone']].map(([key, text]) => <label key={key}>{text} *<input required style={input} type={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : 'text'} autoComplete={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : key.includes('First') ? 'given-name' : 'family-name'} value={form[key as keyof typeof form]} onChange={(e) => setForm((old) => ({ ...old, [key]: e.target.value }))}/></label>)}<label>Date of birth *<input required type="date" max={new Date().toISOString().slice(0, 10)} style={input} value={form.dateOfBirth} onChange={(e) => setForm((old) => ({ ...old, dateOfBirth: e.target.value }))}/></label><label>Gender *<select required style={input} value={form.gender} onChange={(e) => setForm((old) => ({ ...old, gender: e.target.value }))}><option value="">Select gender</option><option>Male</option><option>Female</option><option>Other</option><option>Prefer not to say</option></select></label><label>Blood group<input style={input} value={form.bloodGroup} onChange={(e) => setForm((old) => ({ ...old, bloodGroup: e.target.value }))} placeholder="O+" /></label><label>Nationality *<input required style={input} value={form.nationality} onChange={(e) => setForm((old) => ({ ...old, nationality: e.target.value }))}/></label><label>School<input style={input} value={form.school} onChange={(e) => setForm((old) => ({ ...old, school: e.target.value }))}/></label></div><label>Permanent address *<textarea required style={{ ...input, minHeight: 72 }} value={form.permanentAddress} onChange={(e) => setForm((old) => ({ ...old, permanentAddress: e.target.value }))}/></label><label>Temporary address<textarea style={{ ...input, minHeight: 72 }} value={form.temporaryAddress} onChange={(e) => setForm((old) => ({ ...old, temporaryAddress: e.target.value }))}/></label><label>Medical conditions, allergies, or accessibility notes<textarea style={{ ...input, minHeight: 72 }} value={form.medicalNotes} onChange={(e) => setForm((old) => ({ ...old, medicalNotes: e.target.value }))}/></label></fieldset>
       <fieldset className="admission-fieldset"><legend>Father's details</legend><div style={grid}>{[['fatherName','Full name *'],['fatherPhone','Phone *'],['fatherEmail','Email'],['fatherOccupation','Occupation']].map(([key, text]) => <label key={key}>{text}<input required={key === 'fatherName' || key === 'fatherPhone'} style={input} type={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : 'text'} value={form[key as keyof typeof form]} onChange={(e) => setForm((old) => ({ ...old, [key]: e.target.value }))}/></label>)}</div></fieldset>
@@ -310,7 +320,7 @@ export function TenantAdmissionsPage() {
       <fieldset className="admission-fieldset"><legend>Primary parent account</legend><p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Select one parent already entered above. Their email and phone will be used automatically for account credentials.</p><label htmlFor="admission-primary-parent">Parent receiving credentials *<select id="admission-primary-parent" required style={input} value={form.primaryParent} onChange={(e) => setForm((old) => ({ ...old, primaryParent: e.target.value }))}><option value="">Select recorded parent</option><option value="Father" disabled={!form.fatherName || !form.fatherPhone || !form.fatherEmail}>Father{!form.fatherEmail ? ' — add email first' : ''}</option><option value="Mother" disabled={!form.motherName || !form.motherPhone || !form.motherEmail}>Mother{!form.motherEmail ? ' — add email first' : ''}</option><option value="Optional parent" disabled={!form.optionalParentName || !form.optionalParentPhone || !form.optionalParentEmail}>Optional parent{!form.optionalParentEmail ? ' — complete optional parent first' : ''}</option></select></label></fieldset>
       <fieldset className="admission-fieldset"><legend>Emergency contact</legend><div style={grid}>{[['emergencyContactName','Full name *'],['emergencyContactPhone','Phone *'],['emergencyContactRelationship','Relationship *']].map(([key, text]) => <label key={key}>{text}<input required style={input} type={key.includes('Phone') ? 'tel' : 'text'} value={form[key as keyof typeof form]} onChange={(e) => setForm((old) => ({ ...old, [key]: e.target.value }))}/></label>)}</div></fieldset>
       <div className="admission-result-actions">
-        <Button disabled={busy || !form.branchId || !form.gradeId || !form.classId || !form.admittedAt} type="submit">{busy ? 'Saving admission…' : 'Complete admission'}</Button>
+        <Button disabled={busy || !form.branchId || !form.gradeId || !academicPlacementReady || !form.admittedAt} type="submit">{busy ? 'Saving admission…' : 'Complete admission'}</Button>
         <Button variant="outline" type="submit" name="admission-action" value="save-and-print" disabled={!canPrint} title={canPrint ? 'Save the admission and open the printable record' : 'Complete every required field to enable printing'}><span className="material-symbols-outlined" aria-hidden="true">print</span>Save and print admission</Button>
       </div>
       {!canPrint && !busy ? <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 13 }}>Complete all required fields to enable printing.</p> : null}
@@ -401,6 +411,7 @@ export function TenantLeaveRequestsPage() {
   const [requests, setRequests] = useState<Awaited<ReturnType<typeof api.branchAdmin.getLeaves>>['leaves']>([]);
   const [busy, setBusy] = useState('');
   const [decisionRemarks, setDecisionRemarks] = useState<Record<string, string>>({});
+  const [decisionErrors, setDecisionErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 
@@ -410,16 +421,25 @@ export function TenantLeaveRequestsPage() {
     catch (next) { setLoadError(errorMessage(next)); }
     finally { setLoading(false); }
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    const interval = window.setInterval(() => { void load(); }, 15_000);
+    return () => window.clearInterval(interval);
+  }, [load]);
 
   const mutate = async (id: string, action: 'APPROVE' | 'REJECT') => {
-    setBusy(id);
+    const remarks = decisionRemarks[id]?.trim();
+    if (action === 'REJECT' && !remarks) {
+      setDecisionErrors((current) => ({ ...current, [id]: 'Add a reason so the teacher understands why this request was rejected.' }));
+      document.getElementById(`leave-remarks-${id}`)?.focus();
+      return;
+    }
+    setBusy(id); setDecisionErrors((current) => ({ ...current, [id]: '' }));
     try {
-      const remarks = action === 'REJECT' ? decisionRemarks[id]?.trim() : undefined;
-      if (action === 'REJECT' && !remarks) return;
-      await api.branchAdmin.decideLeave(id, action, remarks);
+      await api.branchAdmin.decideLeave(id, action, action === 'REJECT' ? remarks : undefined);
       await load();
-      showToast(`Leave request ${action.toLowerCase()}d at Level 2.`, 'success');
+      setDecisionRemarks((current) => ({ ...current, [id]: '' }));
+      showToast(action === 'APPROVE' ? 'Leave approved. The teacher can now see the final decision.' : 'Leave rejected. The teacher can now see the reason.', 'success');
     } catch (next) {
       showToast(errorMessage(next), 'error');
     } finally {
@@ -453,11 +473,11 @@ export function TenantLeaveRequestsPage() {
                   </div>
                   <StatusBadge variant="warning">L2 Review</StatusBadge>
                 </div>
-                <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
-                  <Button disabled={busy === req.id} onClick={() => void mutate(req.id, 'APPROVE')}>Approve Leave</Button>
-                  <Button disabled={busy === req.id || !decisionRemarks[req.id]?.trim()} variant="danger" onClick={() => void mutate(req.id, 'REJECT')}>Reject Leave</Button>
+                <label style={{ display: 'grid', gap: 6, marginTop: 16, fontSize: 13, fontWeight: 700 }} htmlFor={`leave-remarks-${req.id}`}>Reason for rejection <span style={{ color: 'var(--text-muted)', fontSize: 12, fontWeight: 400 }}>Required only when rejecting.</span><textarea id={`leave-remarks-${req.id}`} style={{ ...input, minHeight: 72 }} maxLength={2000} value={decisionRemarks[req.id] ?? ''} aria-invalid={Boolean(decisionErrors[req.id]) || undefined} aria-describedby={decisionErrors[req.id] ? `leave-remarks-error-${req.id}` : undefined} onChange={(event) => { setDecisionRemarks((old) => ({ ...old, [req.id]: event.target.value })); if (decisionErrors[req.id]) setDecisionErrors((current) => ({ ...current, [req.id]: '' })); }} placeholder="Explain the decision to the teacher" />{decisionErrors[req.id] ? <span id={`leave-remarks-error-${req.id}`} role="alert" style={{ color: 'var(--color-error)', fontSize: 12 }}>{decisionErrors[req.id]}</span> : null}</label>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '16px', flexWrap: 'wrap' }}>
+                  <Button disabled={busy === req.id} onClick={() => void mutate(req.id, 'APPROVE')}>{busy === req.id ? 'Saving decision…' : 'Approve leave'}</Button>
+                  <Button disabled={busy === req.id} variant="danger" onClick={() => void mutate(req.id, 'REJECT')}>{busy === req.id ? 'Saving decision…' : 'Reject leave'}</Button>
                 </div>
-                <label style={{ display: 'grid', gap: 6, marginTop: 12, fontSize: 13, fontWeight: 700 }} htmlFor={`leave-remarks-${req.id}`}>Rejection reason<textarea id={`leave-remarks-${req.id}`} style={{ ...input, minHeight: 72 }} maxLength={2000} value={decisionRemarks[req.id] ?? ''} onChange={(event) => setDecisionRemarks((old) => ({ ...old, [req.id]: event.target.value }))} placeholder="Required only when rejecting" /></label>
               </div>
             ))}
           </div>
@@ -473,7 +493,7 @@ export function TenantLeaveRequestsPage() {
                 <div>
                   <strong>{req.staffName}</strong> · {req.leaveType.replaceAll('_', ' ')} ({req.branchName})
                 </div>
-                <StatusBadge variant={req.status === 'APPROVED' ? 'success' : 'error'}>{req.status}</StatusBadge>
+                <StatusBadge variant={req.status === 'APPROVED_LEVEL2' ? 'success' : 'error'}>{req.status === 'APPROVED_LEVEL2' ? 'Approved' : 'Rejected'}</StatusBadge>
               </div>
             ))}
           </div>

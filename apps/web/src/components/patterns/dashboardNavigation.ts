@@ -36,6 +36,7 @@ export const DASHBOARD_NAVIGATION: Record<DashboardRole, DashboardNavItem[]> = {
     { section: 'Academic', label: 'Grades', icon: 'stairs', path: '/tenant/grades' },
     { section: 'Academic', label: 'Timetables', icon: 'calendar_month', path: '/tenant/timetables' },
     { section: 'Academic', label: 'Courses', icon: 'menu_book', path: '/tenant/courses' },
+    { section: 'Academic', label: 'Results', icon: 'emoji_events', path: '/tenant/results' },
     { section: 'Finance', label: 'Fee & Billing', icon: 'payments', path: '/tenant/fees' },
     { section: 'Finance', label: 'Payroll', icon: 'account_balance_wallet', path: '/tenant/payroll' },
     { section: 'Finance', label: 'Petty Cash', icon: 'savings', path: '/tenant/petty-cash' },

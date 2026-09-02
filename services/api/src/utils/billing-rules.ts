@@ -12,6 +12,13 @@ export function canReleaseAdmissionLogins(admissionStatus: string, invoiceStatus
   return admissionStatus === 'READY_FOR_LOGIN' && invoiceStatus === 'PAID';
 }
 
+export function oneYearEnrollmentWindow(paidAt: Date) {
+  const validFrom = new Date(paidAt);
+  const validUntil = new Date(paidAt);
+  validUntil.setUTCFullYear(validUntil.getUTCFullYear() + 1);
+  return { validFrom, validUntil };
+}
+
 export function isInvoiceOverdue(
   status: string,
   dueDate: Date | string,

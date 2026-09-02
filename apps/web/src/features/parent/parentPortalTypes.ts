@@ -105,10 +105,13 @@ export interface ParentInvoice {
   childId: string;
   cycle: string;
   dueDate: string;
+  invoiceType: 'ADMISSION' | 'TUITION' | 'SUBJECT' | 'ACTIVITY';
+  paymentDate: string | null;
   state: InvoiceState;
   reference: string;
   netPayable: number;
   qrAvailable: boolean;
+  document: InvoiceDocumentData;
   lines: Array<{ label: string; amount: number }>;
 }
 
@@ -152,6 +155,8 @@ export interface ParentPortalDataset {
   bookingWindowHours: number;
   children: ParentChild[];
   selected: ParentChild | null;
+  billing: { billingMode: 'GRADE' | 'SUBJECT' | null; setupStatus: 'READY' | 'INCOMPLETE'; blockers: string[]; recurringTotal: number; lines: Array<{ type: 'GRADE' | 'SUBJECT' | 'ACTIVITY'; sourceId: string; label: string; className?: string; amount: number; status: string }> };
+  enrollmentAccess: { status: 'PENDING' | 'ACTIVE' | 'EXPIRED'; validFrom: string | null; validUntil: string | null };
   sessions: ParentSession[];
   attendance: ParentAttendance[];
   remarks: ParentRemark[];
@@ -175,3 +180,4 @@ export interface NepalPayPayload {
   studentName: string;
   qrString: string;
 }
+import type { InvoiceDocumentData } from '../../components/InvoiceDocument';

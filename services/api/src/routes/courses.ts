@@ -1,15 +1,15 @@
 import { Router, Response } from 'express';
-import { CourseType, Prisma } from '@prisma/client';
+import { CourseType, GradeBillingMode, Prisma } from '@prisma/client';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { canAccessBranch, hasBranchPermission, isTenantAdmin } from '../utils/access-control';
 import { parsePlainRecord, parseStrictKeys, readFiniteNumber, readTrimmedString, type ValidationResult } from '../utils/request-validation';
+import { recurringInvoiceType } from '../utils/billing-rules';
+import { normalizeSchedule, parseSchedule, SCHEDULE_DAYS } from '../utils/schedule';
 
 const router = Router();
 const COURSE_TYPES = new Set<string>(['REGULAR', 'MUSIC', 'SHORT_TERM', 'LONG_TERM', 'PERSONALIZED']);
-const SCHEDULE_DAYS = new Set(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
-const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 interface BulkCourseInput {
   name: string;
@@ -45,29 +45,6 @@ function parseFeeStructure(value: unknown): ValidationResult<{ monthlyBase: numb
   return monthlyBase.success ? { success: true, data: { monthlyBase: monthlyBase.data } } : monthlyBase;
 }
 
-function parseSchedule(value: unknown): ValidationResult<Array<Record<string, string>>> {
-  if (!Array.isArray(value) || value.length > 14) return { success: false, error: 'schedule must be an array of at most 14 timetable slots.' };
-  const slots: Array<Record<string, string>> = [];
-  for (const [index, slot] of value.entries()) {
-    const shape = parseStrictKeys(slot, ['day', 'start', 'end', 'startTime', 'endTime', 'room']);
-    if (!shape.success) return { success: false, error: `Schedule slot ${index + 1}: ${shape.error}` };
-    const day = shape.data.day;
-    const hasLegacyTimes = shape.data.start !== undefined || shape.data.end !== undefined;
-    const hasModernTimes = shape.data.startTime !== undefined || shape.data.endTime !== undefined;
-    if (hasLegacyTimes === hasModernTimes) {
-      return { success: false, error: `Schedule slot ${index + 1} must use either start/end or startTime/endTime.` };
-    }
-    const start = hasModernTimes ? shape.data.startTime : shape.data.start;
-    const end = hasModernTimes ? shape.data.endTime : shape.data.end;
-    if (typeof day !== 'string' || !SCHEDULE_DAYS.has(day) || typeof start !== 'string' || !TIME_PATTERN.test(start) || typeof end !== 'string' || !TIME_PATTERN.test(end) || start >= end) {
-      return { success: false, error: `Schedule slot ${index + 1} must have a valid weekday and an increasing HH:mm time range.` };
-    }
-    const room = typeof shape.data.room === 'string' ? shape.data.room.trim() : '';
-    if (room.length > 120) return { success: false, error: `Schedule slot ${index + 1} room must be 120 characters or fewer.` };
-    slots.push(hasModernTimes ? { day, startTime: start, endTime: end, ...(room ? { room } : {}) } : { day, start, end, ...(room ? { room } : {}) });
-  }
-  return { success: true, data: slots };
-}
 
 function parseBulkCourses(body: unknown): ValidationResult<{ branchId: string; items: BulkCourseInput[] }> {
   const request = parseStrictKeys(body, ['branchId', 'items']);
@@ -149,23 +126,26 @@ router.post(
       }
 
       // Optional grade must belong to the tenant.
-      let resolvedGradeId: string | null = null;
+      let resolvedGrade: { id: string; billingMode: GradeBillingMode } | null = null;
       if (gradeId) {
-        const grade = await prisma.grade.findFirst({ where: { id: gradeId, tenantId: req.tenantId! } });
+        const grade = await prisma.grade.findFirst({ where: { id: gradeId, tenantId: req.tenantId! }, select: { id: true, billingMode: true } });
         if (!grade) {
           return res.status(404).json({ error: 'Grade not found in your institution.' });
         }
-        resolvedGradeId = grade.id;
+        resolvedGrade = grade;
       }
+
+      const resolvedIsExtraActivity = type.data !== CourseType.REGULAR || isExtraActivity.data;
+      const includedInGradePackage = type.data === CourseType.REGULAR && !resolvedIsExtraActivity && resolvedGrade?.billingMode === GradeBillingMode.GRADE;
 
       const course = await prisma.course.create({
         data: {
           tenantId: req.tenantId!, branchId: branchId.data,
-          gradeId: resolvedGradeId,
+          gradeId: resolvedGrade?.id ?? null,
           name: name.data,
           description,
-          type: type.data!, feeStructure: feeStructure.data,
-          isExtraActivity: isExtraActivity.data, isTaxExempt: isTaxExempt.data,
+          type: type.data!, feeStructure: includedInGradePackage ? { monthlyBase: 0 } : feeStructure.data,
+          isExtraActivity: resolvedIsExtraActivity, isTaxExempt: isTaxExempt.data,
           taxPercentage: typeof taxPercentage === 'number' ? taxPercentage : taxPercentage.data,
         },
       });
@@ -195,8 +175,8 @@ router.post(
         return res.status(404).json({ error: 'Branch not found in your institution.' });
       }
 
-      const grades = await prisma.grade.findMany({ where: { tenantId: req.tenantId! }, select: { id: true } });
-      const gradeIds = new Set(grades.map((g) => g.id));
+      const grades = await prisma.grade.findMany({ where: { tenantId: req.tenantId! }, select: { id: true, billingMode: true } });
+      const gradeModes = new Map(grades.map((g) => [g.id, g.billingMode]));
 
       const existing = await prisma.course.findMany({
         where: { tenantId: req.tenantId!, branchId },
@@ -212,7 +192,7 @@ router.post(
           results.push({ index, name, status: 'error', error: 'Course name is required.' });
           continue;
         }
-        if (gradeId && !gradeIds.has(gradeId)) {
+        if (gradeId && !gradeModes.has(gradeId)) {
           results.push({ index, name, status: 'error', error: 'Grade not found in your institution.' });
           continue;
         }
@@ -234,7 +214,7 @@ router.post(
             name,
             description: item.description,
             type: item.type,
-            feeStructure: { monthlyBase: fee },
+            feeStructure: { monthlyBase: gradeId && gradeModes.get(gradeId) === 'GRADE' && item.type === 'REGULAR' ? 0 : fee },
             isTaxExempt: item.isTaxExempt,
           },
         });
@@ -266,7 +246,7 @@ router.get(
         orderBy: { createdAt: 'desc' },
         include: {
           branch: { select: { name: true } },
-          grade: { select: { id: true, name: true } },
+          grade: { select: { id: true, name: true, billingMode: true } },
           _count: { select: { classes: true, enrollments: true } },
         },
       });
@@ -280,8 +260,10 @@ router.get(
           branchName: c.branch.name,
           gradeId: c.gradeId,
           gradeName: c.grade?.name ?? null,
+          gradeBillingMode: c.grade?.billingMode ?? null,
           feeStructure: c.feeStructure,
           isTaxExempt: c.isTaxExempt,
+          isExtraActivity: c.isExtraActivity,
           taxPercentage: Number(c.taxPercentage),
           classCount: c._count.classes,
           enrollmentCount: c._count.enrollments,
@@ -304,7 +286,7 @@ router.get(
         where: { course: { tenantId: req.tenantId! }, ...(isTenantAdmin(req.user!) ? {} : { branchId: { in: req.user!.roles.filter((role: { roleName: string; branchId: string | null }) => role.roleName === 'Branch Admin' && role.branchId).map((role: { roleName: string; branchId: string | null }) => role.branchId as string) } }) },
         orderBy: { createdAt: 'desc' },
         include: {
-          course: { select: { name: true, type: true, grade: { select: { id: true, name: true } } } },
+          course: { select: { name: true, type: true, feeStructure: true, isTaxExempt: true, taxPercentage: true, grade: { select: { id: true, name: true, billingMode: true } } } },
           branch: { select: { name: true } },
           assignedTeacher: { select: { id: true, firstName: true, lastName: true } },
           enrollments: { where: { status: { in: ['ACTIVE', 'BLOCKED'] } }, include: { student: { include: { user: { select: { firstName: true, lastName: true, email: true } } } } }, orderBy: { student: { user: { firstName: 'asc' } } } },
@@ -315,13 +297,17 @@ router.get(
         classes: classes.map((c) => ({
           id: c.id,
           name: c.name,
-          schedule: c.schedule,
+          schedule: normalizeSchedule(c.schedule),
           courseId: c.courseId,
           courseName: c.course.name,
           courseType: c.course.type,
+          feeStructure: c.course.feeStructure,
+          isTaxExempt: c.course.isTaxExempt,
+          taxPercentage: Number(c.course.taxPercentage),
           // Grade is derived from the course — the class inherits it automatically.
           gradeId: c.course.grade?.id ?? null,
           gradeName: c.course.grade?.name ?? null,
+          gradeBillingMode: c.course.grade?.billingMode ?? null,
           branchId: c.branchId,
           branchName: c.branch.name,
           teacherId: c.teacherId,
@@ -353,7 +339,7 @@ router.post(
 
     try {
       // 1. Fetch course and verify it belongs to the caller's tenant.
-      const course = await prisma.course.findUnique({ where: { id: courseId } });
+      const course = await prisma.course.findUnique({ where: { id: courseId }, include: { grade: { select: { billingMode: true } } } });
       if (!course || course.tenantId !== req.tenantId) {
         return res.status(404).json({ error: 'Course not found in your institution.' });
       }
@@ -411,7 +397,8 @@ router.post(
 
       const feeStructure = (course.feeStructure ?? {}) as { monthlyBase?: number };
       const base = Number(feeStructure.monthlyBase || 0);
-      const monthlyDelta = course.isTaxExempt ? base : base * (1 + Number(course.taxPercentage || 13) / 100);
+      const isRecurringCharge = recurringInvoiceType(course.grade?.billingMode ?? 'GRADE', course.isExtraActivity);
+      const monthlyDelta = isRecurringCharge ? (course.isTaxExempt ? base : base * (1 + Number(course.taxPercentage || 13) / 100)) : 0;
 
       return res.status(201).json({
         message: 'Student enrolled.',
@@ -451,7 +438,7 @@ router.post(
           courseId: courseId.data,
           branchId: course.branchId,
           name: name.data,
-          schedule: schedule.data as Prisma.InputJsonValue,
+          schedule: schedule.data as unknown as Prisma.InputJsonValue,
         },
       });
       return res.status(201).json({ message: 'Class timetable created successfully.', class: cls });
@@ -462,7 +449,7 @@ router.post(
 );
 
 // 4b. Weekday abbreviations used in class schedules.
-const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const DAY_ABBR = SCHEDULE_DAYS;
 
 // Ensure a TeacherSession exists for the assigned teacher on today's date when
 // the class is scheduled today. This is the per-day session generation that a
@@ -472,7 +459,7 @@ async function ensureTodaySession(teacherId: string, classId: string, schedule: 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const todayAbbr = DAY_ABBR[today.getDay()];
-  const scheduledToday = Array.isArray(schedule) && schedule.some((slot: any) => slot?.day === todayAbbr);
+  const scheduledToday = normalizeSchedule(schedule).some((slot) => slot.day === todayAbbr);
   if (!scheduledToday) {
     return;
   }
@@ -502,7 +489,7 @@ router.put(
     if (shape.data.schedule !== undefined) {
       const schedule = parseSchedule(shape.data.schedule);
       if (!schedule.success) return res.status(400).json({ error: schedule.error });
-      data.schedule = schedule.data as Prisma.InputJsonValue;
+      data.schedule = schedule.data as unknown as Prisma.InputJsonValue;
     }
     const teacherIdValue = shape.data.teacherId;
     if (teacherIdValue !== undefined) {
@@ -536,13 +523,12 @@ router.put(
         if (!teacher) {
           return res.status(400).json({ error: 'Selected teacher is not a teacher in your institution.' });
         }
-        const nextSchedule = (data.schedule ?? cls.schedule) as Array<Record<string, string>>;
+        const nextSchedule = normalizeSchedule(data.schedule ?? cls.schedule);
         const otherClasses = await prisma.class.findMany({ where: { id: { not: id }, teacherId: data.teacherId, branchId: cls.branchId }, select: { name: true, schedule: true } });
         for (const other of otherClasses) {
-          const otherSlots = Array.isArray(other.schedule) ? other.schedule as Array<Record<string, string>> : [];
+          const otherSlots = normalizeSchedule(other.schedule);
           for (const slot of nextSchedule) {
-            const start = slot.start ?? slot.startTime; const end = slot.end ?? slot.endTime;
-            const collision = otherSlots.find((candidate) => candidate.day === slot.day && (candidate.start ?? candidate.startTime) < end && (candidate.end ?? candidate.endTime) > start);
+            const collision = otherSlots.find((candidate) => candidate.day === slot.day && candidate.startTime < slot.endTime && candidate.endTime > slot.startTime);
             if (collision) return res.status(409).json({ error: `This teacher is already scheduled for ${other.name} on ${slot.day} during that time.` });
           }
         }
@@ -612,7 +598,7 @@ router.get(
       if (!isTenantAdmin(req.user!) && !hasBranchMembership) {
         return res.status(403).json({ error: 'You cannot view classes for this branch.' });
       }
-      return res.json({ class: cls });
+      return res.json({ class: { ...cls, schedule: normalizeSchedule(cls.schedule) } });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to load class.' });
     }
@@ -650,7 +636,7 @@ router.get(
         classId: e.classId,
         className: e.class.name,
         courseId: e.courseId,
-        schedule: e.class.schedule,
+        schedule: normalizeSchedule(e.class.schedule),
       }));
       return res.json({ timetable });
     } catch (error: any) {
@@ -692,7 +678,7 @@ router.get(
         classId: c.id,
         className: c.name,
         courseId: c.courseId,
-        schedule: c.schedule,
+        schedule: normalizeSchedule(c.schedule),
       }));
       return res.json({ timetable });
     } catch (error: any) {
@@ -1095,6 +1081,17 @@ router.put(
         if (!grade) {
           return res.status(404).json({ error: 'Grade not found in your institution.' });
         }
+      }
+
+      // Package-billed academic subjects never carry a second recurring fee.
+      // Normalize on the server so older clients cannot accidentally double-price them.
+      const targetGradeId = data.gradeId === undefined ? course.gradeId : typeof data.gradeId === 'string' ? data.gradeId : null;
+      const targetType = data.type === undefined ? course.type : data.type;
+      const targetIsExtraActivity = targetType !== CourseType.REGULAR || (data.isExtraActivity === undefined ? course.isExtraActivity : Boolean(data.isExtraActivity));
+      data.isExtraActivity = targetIsExtraActivity;
+      if (targetGradeId && targetType === CourseType.REGULAR && !targetIsExtraActivity) {
+        const targetGrade = await prisma.grade.findFirst({ where: { id: targetGradeId, tenantId: req.tenantId! }, select: { billingMode: true } });
+        if (targetGrade?.billingMode === GradeBillingMode.GRADE) data.feeStructure = { monthlyBase: 0 };
       }
 
       const updated = await prisma.course.update({ where: { id }, data });

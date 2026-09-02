@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import prisma from '../utils/db';
+import { normalizeSchedule } from '../utils/schedule';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware } from '../middleware/auth';
 import { UserPayload } from '@tms/types';
@@ -84,14 +85,14 @@ router.get('/workspace', authMiddleware, async (req: TenantRequest, res: Respons
       stamps: stamps.map((stamp) => ({ ...stamp, branchName: stamp.branch.name })),
       todayClasses: sessions.map((session) => ({
         sessionId: session.id, classId: session.classId, className: session.class.name, courseName: session.class.course.name,
-        branch: session.class.branch, schedule: session.class.schedule, status: session.status,
+        branch: session.class.branch, schedule: normalizeSchedule(session.class.schedule), status: session.status,
         dailyUpdateSubmitted: session.dailyUpdateSubmitted, checkInTime: session.checkInTime, checkOutTime: session.checkOutTime,
       })),
       pendingUpdates: classes.flatMap((item) => item.sessions.filter((session) => !session.dailyUpdateSubmitted).map((session) => ({
         sessionId: session.id, classId: item.id, className: item.name, courseName: item.course.name, date: session.date,
       }))),
       classes: classes.map((item) => ({
-        id: item.id, name: item.name, subject: item.course.name, type: item.course.type, schedule: item.schedule,
+        id: item.id, name: item.name, subject: item.course.name, type: item.course.type, schedule: normalizeSchedule(item.schedule),
         branch: { id: item.branch.id, name: item.branch.name, address: item.branch.address, radiusMeters: item.branch.radiusMeters },
         students: item.enrollments.map((enrollment) => ({ id: enrollment.student.id, name: `${enrollment.student.user.firstName} ${enrollment.student.user.lastName}`, status: enrollment.status })),
         attendance: item.sessions.flatMap((session) => session.studentAttendance),
@@ -277,12 +278,11 @@ router.post('/results', authMiddleware, async (req: TenantRequest, res: Response
     const numeric = marks.map((item: any) => ({ studentId: String(item.studentId), score: Number(item.score) }));
     if (numeric.some((item: any) => !allowed.has(item.studentId) || item.score < 0 || item.score > max || !Number.isFinite(item.score))) return res.status(422).json({ error: 'Each mark must belong to an enrolled student and be within the full marks.' });
     const sorted = numeric.map((item: any) => item.score).sort((a: number, b: number) => a - b);
-    const created = await prisma.$transaction(numeric.map((item: any) => prisma.studentScore.create({ data: {
-      tenantId: req.tenantId!, studentId: item.studentId, recordedBy: req.user!.id, subject: subject.trim(), assessment: assessment.trim(),
-      score: item.score, maximum: max, passMarks: pass, percentile: Math.round((sorted.filter((value: number) => value <= item.score).length / sorted.length) * 10000) / 100,
-      resultSheetUrl: typeof item.resultSheetUrl === 'string' && item.resultSheetUrl ? item.resultSheetUrl : null, testDate: testDate ? new Date(testDate) : new Date(), publishedAt: null,
-    } })));
-    return res.status(201).json({ message: 'Result draft saved. Share it when ready.', resultIds: created.map((item) => item.id) });
+    const saved = await prisma.$transaction(numeric.map((item: any) => {
+      const scoreData = { recordedBy: req.user!.id, subject: subject.trim(), assessment: assessment.trim(), score: item.score, maximum: max, passMarks: pass, percentile: Math.round((sorted.filter((value: number) => value <= item.score).length / sorted.length) * 10000) / 100, resultSheetUrl: typeof item.resultSheetUrl === 'string' && item.resultSheetUrl ? item.resultSheetUrl : null, testDate: testDate ? new Date(testDate) : definition.testDate, publishedAt: null };
+      return prisma.studentScore.upsert({ where: { resultDefinitionId_studentId: { resultDefinitionId: definition.id, studentId: item.studentId } }, create: { tenantId: req.tenantId!, studentId: item.studentId, resultDefinitionId: definition.id, ...scoreData }, update: scoreData });
+    }));
+    return res.status(201).json({ message: 'Result drafts saved or updated. Share them when ready.', resultIds: saved.map((item) => item.id) });
   } catch (error: any) { return res.status(500).json({ error: 'Failed to save result draft.', details: error.message }); }
 });
 
@@ -292,6 +292,13 @@ router.post('/results/share', authMiddleware, async (req: TenantRequest, res: Re
   const update = await prisma.studentScore.updateMany({ where: { id: { in: ids }, tenantId: req.tenantId!, recordedBy: req.user!.id, publishedAt: null }, data: { publishedAt: new Date() } });
   if (!update.count) return res.status(409).json({ error: 'These results were already shared or are not yours.' });
   return res.json({ message: `${update.count} student result${update.count === 1 ? '' : 's'} shared.`, sharedCount: update.count });
+});
+
+router.delete('/results/:resultId', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const score = await prisma.studentScore.findFirst({ where: { id: req.params.resultId, tenantId: req.tenantId!, recordedBy: req.user!.id, publishedAt: null, resultDefinition: { class: { teacherId: req.user!.id } } } });
+  if (!score) return res.status(404).json({ error: 'An unpublished result draft owned by you was not found.' });
+  await prisma.studentScore.delete({ where: { id: score.id } });
+  return res.status(204).send();
 });
 
 router.post('/session/:sessionId/update', authMiddleware, async (req: TenantRequest, res: Response) => {

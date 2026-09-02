@@ -312,6 +312,7 @@ export const api = {
       request<any>('/homework', { method: 'POST', body: JSON.stringify(payload) }),
     saveResultDraft: async (payload: any) => request<{ message: string; resultIds: string[] }>('/teacher/results', { method: 'POST', body: JSON.stringify(payload) }),
     shareResults: async (resultIds: string[]) => request<any>('/teacher/results/share', { method: 'POST', body: JSON.stringify({ resultIds }) }),
+    deleteResultDraft: async (resultId: string) => request<void>(`/teacher/results/${encodeURIComponent(resultId)}`, { method: 'DELETE' }),
     requestLeave: async (payload: { branchId: string; leaveType: string; startDate: string; endDate: string; reason: string }) =>
       request<any>('/leaves/request', { method: 'POST', body: JSON.stringify(payload) }),
   },
@@ -441,19 +442,19 @@ export const api = {
     },
   },
 
-  // Grade levels (Nursery … Class 12)
+  // Grade levels (UKG … Class 12)
   grades: {
     list: async () => {
-      const data = await request<{ grades: Array<{ id: string; name: string; sortOrder: number; studentCount: number }> }>('/grades');
+      const data = await request<{ grades: Array<{ id: string; name: string; sortOrder: number; monthlyFee: number; billingMode: 'GRADE' | 'SUBJECT'; studentCount: number; courseCount: number }> }>('/grades');
       return data.grades ?? [];
     },
     seedDefaults: async () => {
       return request<{ message: string; created: number }>('/grades/seed-defaults', { method: 'POST' });
     },
-    create: async (name: string, sortOrder?: number, monthlyFee?: number) => {
-      return request<{ message: string; grade: any }>('/grades', { method: 'POST', body: JSON.stringify({ name, sortOrder, monthlyFee }) });
+    create: async (name: string, sortOrder?: number, monthlyFee?: number, billingMode?: 'GRADE' | 'SUBJECT') => {
+      return request<{ message: string; grade: any }>('/grades', { method: 'POST', body: JSON.stringify({ name, sortOrder, monthlyFee, billingMode }) });
     },
-    update: async (id: string, changes: { name?: string; sortOrder?: number; monthlyFee?: number }) => {
+    update: async (id: string, changes: { name?: string; sortOrder?: number; monthlyFee?: number; billingMode?: 'GRADE' | 'SUBJECT' }) => {
       return request<{ message: string; grade: any }>(`/grades/${id}`, { method: 'PUT', body: JSON.stringify(changes) });
     },
     remove: async (id: string) => {
@@ -578,6 +579,12 @@ export const api = {
     getDashboard: async (branchId?: string) => request<BranchAdminDashboardData>(`/branch-admin/dashboard${branchId ? `?branchId=${encodeURIComponent(branchId)}` : ''}`),
     getTeacherWorkflows: async (branchId?: string, date?: string) => request<any>(`/branch-admin/teacher-workflows?${new URLSearchParams({ ...(branchId ? { branchId } : {}), ...(date ? { date } : {}) }).toString()}`),
     createResultDefinition: async (payload: { branchId: string; classId: string; title: string; subject: string; testDate: string }) => request<any>('/branch-admin/result-definitions', { method: 'POST', body: JSON.stringify(payload) }),
+    getResultTemplate: async (resultId: string) => request<any>(`/branch-admin/result-definitions/${encodeURIComponent(resultId)}/template`),
+    importResults: async (resultId: string, payload: { maximum: number; passMarks: number; rows: Array<{ studentId: string; score: number }> }) => request<{ message: string; imported: number }>(`/branch-admin/result-definitions/${encodeURIComponent(resultId)}/import`, { method: 'POST', body: JSON.stringify(payload) }),
+    getResultReport: async (resultId: string) => request<any>(`/branch-admin/result-definitions/${encodeURIComponent(resultId)}/report`),
+    updateResultDefinition: async (resultId: string, payload: { title?: string; testDate?: string; isOpen?: boolean }) => request<any>(`/branch-admin/result-definitions/${encodeURIComponent(resultId)}`, { method: 'PUT', body: JSON.stringify(payload) }),
+    publishResultDefinition: async (resultId: string) => request<any>(`/branch-admin/result-definitions/${encodeURIComponent(resultId)}/publish`, { method: 'POST' }),
+    deleteResultDefinition: async (resultId: string) => request<void>(`/branch-admin/result-definitions/${encodeURIComponent(resultId)}`, { method: 'DELETE' }),
     getAppointments: async (branchId: string) => request<{ appointments: BranchAppointment[] }>(`/appointments/branch?branchId=${encodeURIComponent(branchId)}`),
     respondToAppointment: async (appointmentId: string, payload: { action: 'APPROVE' | 'REJECT'; scheduledTime?: string; remarks: string }) =>
       request<{ message: string }>(`/appointments/respond/${encodeURIComponent(appointmentId)}`, { method: 'POST', body: JSON.stringify(payload) }),

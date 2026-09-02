@@ -5,6 +5,7 @@ import { useToast } from './ui/Toast';
 import { StudentAnalytics } from './StudentAnalytics';
 import { api } from '../services/api';
 import { toBsLabel } from '../utils/nepaliDate';
+import { InvoiceDocumentDialog, type InvoiceDocumentData } from './InvoiceDocument';
 
 interface UserProfileDrawerProps {
   userId: string;
@@ -19,6 +20,7 @@ interface Profile {
   phone: string;
   status: string;
   createdAt: string;
+  institutionName: string;
   roles: Array<{ role: string; branchName: string | null }>;
   detail: {
     student?: {
@@ -30,8 +32,11 @@ interface Profile {
       grade: string | null;
       gradeTuition: number;
       monthlyFee: number;
-      enrollments: Array<{ id: string; courseName: string; className: string; status: string; extraFee?: number; billingHistory?: { paid: number; due: number } }>;
-      fees: { totalBilled: number; totalPaid: number; totalDue: number; overdueCount: number; invoices: Array<{ id: string; netPayable: number; status: string; dueDate: string }> };
+      guardians: Array<{ userId: string; name: string; email: string; phone: string; status: string }>;
+      enrollments: Array<{ id: string; courseName: string; className: string; status: string; accessStatus: string; validFrom: string | null; validUntil: string | null; category: 'ACADEMIC' | 'ACTIVITY'; fee: number; billingHistory?: { paid: number; due: number } }>;
+      billing: { billingMode: 'GRADE' | 'SUBJECT' | null; setupStatus: 'READY' | 'INCOMPLETE'; blockers: string[]; recurringTotal: number; lines: Array<{ type: 'GRADE' | 'SUBJECT' | 'ACTIVITY'; sourceId: string; enrollmentId?: string; label: string; className?: string; amount: number; status: string }> };
+      enrollmentAccess: { status: 'PENDING' | 'ACTIVE' | 'EXPIRED'; validFrom: string | null; validUntil: string | null };
+      fees: { totalBilled: number; totalPaid: number; totalDue: number; overdueCount: number; invoices: Array<{ id: string; invoiceType: 'ADMISSION' | 'TUITION' | 'SUBJECT' | 'ACTIVITY'; amount: number; discount: number; fine: number; panNumberSnapshot: string; vatRateSnapshot: number; lineItems: Array<{ label: string; amount: number }>; transactionId: string | null; createdAt: string; netPayable: number; status: string; dueDate: string; paymentDate: string | null; billingCycleStart: string; billingCycleEnd: string }> };
       futureBilling?: { projectedAnnualFee: number; nextInvoiceDate: string };
       attendance: Record<string, number>;
     };
@@ -88,6 +93,7 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
   const [enrollClass, setEnrollClass] = useState('');
   const [resetModalOpen, setResetModalOpen] = useState(false);
   const [tempPassword, setTempPassword] = useState('');
+  const [selectedInvoice, setSelectedInvoice] = useState<InvoiceDocumentData | null>(null);
 
   const openEnroll = async () => {
     setEnrollOpen(true);
@@ -344,8 +350,8 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
               {/* Student → fees + enrollments + attendance */}
               {profile.detail.student ? (
                 <>
-                  <div>
-                    <div style={sectionTitle}>Admission record</div>
+                  <details className="student-profile-disclosure">
+                    <summary><span><strong>Admission record</strong><small>{profile.detail.student.admissionNumber ?? 'No admission number'} · {new Date(profile.detail.student.admissionDate).toLocaleDateString('en-NP')}</small></span><span className="material-symbols-outlined" aria-hidden="true">expand_more</span></summary>
                     {profile.detail.student.admissionRecord ? (() => {
                       const record = profile.detail.student!.admissionRecord!;
                       const values: Array<[string, unknown]> = [
@@ -362,32 +368,59 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                       ];
                       return <dl style={{ ...rowCard, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px 16px', margin: 0 }}>{values.filter(([, value]) => value).map(([label, value]) => <div key={label}><dt style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</dt><dd style={{ margin: '4px 0 0', fontSize: 13.5, overflowWrap: 'anywhere' }}>{String(value)}</dd></div>)}</dl>;
                     })() : <div style={rowCard}><p style={{ color: 'var(--text-muted)', fontSize: 13 }}>No detailed admission record was saved for this student.</p></div>}
+                  </details>
+                  <div>
+                    <div style={sectionTitle}>Parents and guardians</div>
+                    <div className="student-guardian-list">
+                      {profile.detail.student.guardians.map((guardian) => (
+                        <div key={guardian.userId}>
+                          <span><strong>{guardian.name}</strong><small>{guardian.email}</small><small>{guardian.phone || 'No phone recorded'}</small></span>
+                          <StatusBadge variant={guardian.status === 'ACTIVE' ? 'success' : 'warning'}>{guardian.status}</StatusBadge>
+                        </div>
+                      ))}
+                      {!profile.detail.student.guardians.length ? <p>No parent or guardian account is linked.</p> : null}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={sectionTitle}>Academic placement</div>
+                    <div className="student-academic-list">
+                      {profile.detail.student.enrollments.filter((enrollment) => enrollment.category === 'ACADEMIC').map((enrollment) => (
+                        <div key={enrollment.id}><span><strong>{enrollment.courseName}</strong><small>{enrollment.className}{enrollment.validUntil ? ` · Valid until ${toBsLabel(enrollment.validUntil)} BS` : ''}</small></span><span><StatusBadge variant={enrollment.accessStatus === 'ACTIVE' ? 'success' : 'warning'}>{enrollment.accessStatus}</StatusBadge>{profile.detail.student!.billing.billingMode === 'SUBJECT' ? <b>{money(enrollment.fee)}/mo</b> : <b>Included</b>}</span></div>
+                      ))}
+                      {!profile.detail.student.enrollments.some((enrollment) => enrollment.category === 'ACADEMIC') ? <p>No academic class placement has been configured.</p> : null}
+                    </div>
                   </div>
                   <div>
                     <div style={sectionTitle}>Fees</div>
-                    <div style={{ ...rowCard, marginBottom: '10px' }}>
+                    {(() => {
+                      const admissionInvoice = profile.detail.student!.fees.invoices.find((invoice) => invoice.invoiceType === 'ADMISSION');
+                      const access = profile.detail.student!.enrollmentAccess;
+                      return <div className="student-admission-payment">
+                        <div><span className="material-symbols-outlined" aria-hidden="true">verified_user</span><span><strong>Admission payment</strong><small>One-time fee · separate from monthly tuition</small></span></div>
+                        <div className="student-admission-payment__amount"><strong>{admissionInvoice ? money(admissionInvoice.netPayable) : 'Not invoiced'}</strong><StatusBadge variant={admissionInvoice?.status === 'PAID' ? 'success' : 'warning'}>{admissionInvoice?.status ?? 'PENDING'}</StatusBadge></div>
+                        <dl>
+                          <div><dt>Paid on</dt><dd>{admissionInvoice?.paymentDate ? `${toBsLabel(admissionInvoice.paymentDate)} BS` : 'Awaiting payment'}</dd></div>
+                          <div><dt>Academic enrolment</dt><dd>{access.status === 'ACTIVE' ? 'Valid for one year' : access.status === 'EXPIRED' ? 'Expired' : 'Starts after payment'}</dd></div>
+                          <div><dt>Valid from</dt><dd>{access.validFrom ? `${toBsLabel(access.validFrom)} BS` : '—'}</dd></div>
+                          <div><dt>Valid until</dt><dd>{access.validUntil ? `${toBsLabel(access.validUntil)} BS` : '—'}</dd></div>
+                        </dl>
+                      </div>;
+                    })()}
+                    <div className={`student-billing-card${profile.detail.student.billing.setupStatus === 'INCOMPLETE' ? ' is-incomplete' : ''}`}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 600 }}>Recurring monthly fee</span>
-                        <span style={{ fontSize: '16px', fontWeight: 700, color: 'var(--color-primary)' }}>{money(profile.detail.student.monthlyFee)}/mo</span>
+                        <span><strong>Monthly billing plan</strong><small>{profile.detail.student.billing.billingMode === 'SUBJECT' ? 'Selected-subject billing' : 'Grade package billing'}</small></span>
+                        <span><strong>{profile.detail.student.billing.setupStatus === 'READY' ? `${money(profile.detail.student.monthlyFee)}/mo` : 'Setup incomplete'}</strong><StatusBadge variant={profile.detail.student.billing.setupStatus === 'READY' ? 'success' : 'warning'}>{profile.detail.student.billing.setupStatus}</StatusBadge></span>
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-muted)', marginTop: '6px' }}>
-                        <span>{profile.detail.student.grade ?? 'No grade'} tuition</span>
-                        <span>{money(profile.detail.student.gradeTuition)}</span>
-                      </div>
-                      {profile.detail.student.monthlyFee > profile.detail.student.gradeTuition ? (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-muted)', marginTop: '3px' }}>
-                          <span>Extra activities</span>
-                          <span>{money(profile.detail.student.monthlyFee - profile.detail.student.gradeTuition)}</span>
-                        </div>
-                      ) : null}
+                      {profile.detail.student.billing.blockers.map((blocker) => <p key={blocker} role="alert">{blocker}</p>)}
+                      <div className="student-billing-lines">{profile.detail.student.billing.lines.map((line) => <div key={`${line.type}-${line.sourceId}`}><span><b>{line.label}</b><small>{line.type === 'GRADE' ? 'Includes regular subjects' : line.className}</small></span><strong>{money(line.amount)}</strong></div>)}</div>
                     </div>
                     <div style={{ display: 'flex', gap: '8px' }}>
-                      <FeeStat label="Billed" value={money(profile.detail.student.fees.totalBilled)} />
-                      <FeeStat label="Paid" value={money(profile.detail.student.fees.totalPaid)} tone="paid" />
-                      <FeeStat label="Due" value={money(profile.detail.student.fees.totalDue)} tone="due" />
+                      <FeeStat label="All invoiced" value={money(profile.detail.student.fees.totalBilled)} />
+                      <FeeStat label="All paid" value={money(profile.detail.student.fees.totalPaid)} tone="paid" />
+                      <FeeStat label="Outstanding" value={money(profile.detail.student.fees.totalDue)} tone="due" />
                     </div>
 
-                    {profile.detail.student.futureBilling ? (
+                    {profile.detail.student.billing.setupStatus === 'READY' && profile.detail.student.futureBilling ? (
                       <div style={{ ...rowCard, marginTop: '10px', background: 'rgba(21, 96, 189, 0.04)' }}>
                         <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 600 }}>1-Year Future Billing Projection</div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
@@ -395,7 +428,7 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Next Invoice: {profile.detail.student.futureBilling.nextInvoiceDate}</span>
                         </div>
                       </div>
-                    ) : (
+                    ) : profile.detail.student.billing.setupStatus === 'READY' ? (
                       <div style={{ ...rowCard, marginTop: '10px', background: 'rgba(21, 96, 189, 0.04)' }}>
                         <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 600 }}>1-Year Future Billing Projection</div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
@@ -403,16 +436,16 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Calculated automatically</span>
                         </div>
                       </div>
-                    )}
+                    ) : null}
                     {profile.detail.student.fees.invoices.length > 0 ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
                         {profile.detail.student.fees.invoices.map((inv) => (
                           <div key={inv.id} style={{ ...rowCard, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <div>
-                              <div style={{ fontSize: '13.5px', fontWeight: 700 }}>{money(inv.netPayable)}</div>
-                              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Due {toBsLabel(inv.dueDate)} BS</div>
+                              <div style={{ fontSize: '13.5px', fontWeight: 700 }}>{inv.invoiceType === 'ADMISSION' ? 'One-time admission fee' : inv.invoiceType === 'SUBJECT' ? 'Monthly subject tuition' : inv.invoiceType === 'ACTIVITY' ? 'Optional activity fee' : 'Monthly grade tuition'}</div>
+                              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{money(inv.netPayable)} · {inv.status === 'PAID' && inv.paymentDate ? `Paid ${toBsLabel(inv.paymentDate)} BS` : `Due ${toBsLabel(inv.dueDate)} BS`}</div>
                             </div>
-                            <StatusBadge variant={inv.status === 'PAID' ? 'success' : inv.status === 'OVERDUE' ? 'error' : 'warning'}>{inv.status}</StatusBadge>
+                            <div className="student-invoice-actions"><StatusBadge variant={inv.status === 'PAID' ? 'success' : inv.status === 'OVERDUE' ? 'error' : 'warning'}>{inv.status}</StatusBadge><button type="button" onClick={() => setSelectedInvoice({ id: inv.id, invoiceType: inv.invoiceType, status: inv.status, institutionName: profile.institutionName, panNumber: inv.panNumberSnapshot, vatRate: inv.vatRateSnapshot, studentName: profile.name, admissionNumber: profile.detail.student!.admissionNumber, gradeName: profile.detail.student!.grade, branchName: profile.roles.find((role) => role.branchName)?.branchName, issuedAt: inv.createdAt, dueDate: inv.dueDate, paymentDate: inv.paymentDate, billingCycleStart: inv.billingCycleStart, billingCycleEnd: inv.billingCycleEnd, transactionId: inv.transactionId, lines: inv.lineItems, discount: inv.discount, fine: inv.fine, netPayable: inv.netPayable })}><span className="material-symbols-outlined" aria-hidden="true">receipt_long</span>View bill</button></div>
                           </div>
                         ))}
                       </div>
@@ -420,7 +453,7 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                   </div>
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                      <span style={sectionTitle as React.CSSProperties}>Extra activities ({profile.detail.student.enrollments.filter((e) => e.status === 'ACTIVE').length})</span>
+                      <span style={sectionTitle as React.CSSProperties}>Optional activities ({profile.detail.student.enrollments.filter((e) => e.category === 'ACTIVITY' && e.status === 'ACTIVE').length})</span>
                       {!enrollOpen ? (
                         <Button variant="outline" onClick={() => void openEnroll()} style={{ minHeight: '30px', height: '30px', padding: '4px 12px', fontSize: '12.5px' }}>
                           <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>add</span> Enroll
@@ -450,10 +483,10 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                       </div>
                     ) : null}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      {profile.detail.student.enrollments.length === 0 ? (
+                      {profile.detail.student.enrollments.filter((e) => e.category === 'ACTIVITY').length === 0 ? (
                         <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>No extra activities. Grade tuition covers all subjects.</p>
                       ) : (
-                        profile.detail.student.enrollments.map((e) => (
+                        profile.detail.student.enrollments.filter((e) => e.category === 'ACTIVITY').map((e) => (
                           <div key={e.id} style={{ ...rowCard, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
                             <div>
                               <div style={{ fontSize: '13.5px', fontWeight: 700 }}>{e.courseName}</div>
@@ -568,6 +601,8 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
       {showAnalytics ? (
         <StudentAnalytics userId={userId} fetcher={api.people.getAnalytics} onClose={() => setShowAnalytics(false)} />
       ) : null}
+
+      {selectedInvoice ? <InvoiceDocumentDialog data={selectedInvoice} onClose={() => setSelectedInvoice(null)} /> : null}
 
       {resetModalOpen && tempPassword ? (
         <div className="auth-dialog-overlay" role="dialog" aria-modal="true" style={{ zIndex: 100000 }}>

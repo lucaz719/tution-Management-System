@@ -505,3 +505,23 @@
   .parent-view,
   .parent-modal { animation: none; }
 }
+/* Shared recurring-plan summary shown above issued invoices. */
+.parent-billing-plan { display: grid; gap: 14px; }
+.parent-billing-plan.is-incomplete { border-color: var(--color-gold-text); background: var(--color-gold-bg); }
+.parent-billing-plan__total { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 14px; border-radius: var(--radius-md); background: var(--color-bg); }
+.parent-billing-plan__total span { color: var(--text-muted); font-size: 13px; }
+.parent-billing-plan__total strong { color: var(--color-primary); font-size: 19px; }
+.parent-billing-plan > p { margin: 0; color: var(--color-gold-text); font-size: 13px; }
+.parent-billing-plan .parent-invoice-lines small { display: block; margin-top: 2px; color: var(--text-muted); font-size: 11.5px; }
+.parent-admission-summary { display: grid; gap: var(--space-4); }
+.parent-admission-summary__payment { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.parent-admission-summary__payment > span { display: grid; gap: var(--space-1); }
+.parent-admission-summary__payment small { color: var(--text-muted); }
+.parent-admission-summary__payment strong { font-size: 1.4rem; }
+.parent-admission-summary dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); margin: 0; padding-top: var(--space-3); border-top: 1px solid var(--border); }
+.parent-admission-summary dl > div { display: grid; gap: var(--space-1); }
+.parent-admission-summary dt { color: var(--text-muted); font-size: .75rem; font-weight: 700; text-transform: uppercase; }
+.parent-admission-summary dd { margin: 0; font-weight: 600; }
+@media (max-width: 540px) { .parent-admission-summary dl { grid-template-columns: 1fr; } }
+.parent-invoice-actions { display: flex; gap: var(--space-2); }
+.parent-invoice-actions button { min-height: 40px; }
