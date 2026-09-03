@@ -54,6 +54,7 @@ const StaffTasksPage = lazy(() => import('../pages/StaffTasksPage').then((module
 const SuperAdminDashboard = lazy(() => import('../pages/SuperAdminDashboard').then((module) => ({ default: module.SuperAdminDashboard })));
 const SuperAdminTenants = lazy(() => import('../pages/SuperAdminTenants').then((module) => ({ default: module.SuperAdminTenants })));
 const SecurityPage = lazy(() => import('../pages/SecurityPage').then((module) => ({ default: module.SecurityPage })));
+const PaymentResultPage = lazy(() => import('../pages/PaymentResultPage').then((module) => ({ default: module.PaymentResultPage })));
 
 function RequireAuth() {
   const { isAuthenticated, isLoading, isTwoFactorPending } = useAuth();
@@ -322,6 +323,7 @@ const router = createBrowserRouter([
           },
 
           { path: '/staff/finance', element: <Suspense fallback={<FullPageSpinner />}><StaffFinancePage /></Suspense> },
+          { path: '/payment/result', element: <Suspense fallback={<FullPageSpinner />}><PaymentResultPage /></Suspense> },
           {
             element: <RequireRole allowedRoles={['RECEPTIONIST']} />,
             children: [

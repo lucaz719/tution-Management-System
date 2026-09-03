@@ -89,7 +89,7 @@ function drawInvoicePng(data: InvoiceDocumentData) {
   link.click();
 }
 
-export function InvoiceDocumentDialog({ data, onClose }: { data: InvoiceDocumentData; onClose: () => void }) {
+export function InvoiceDocumentDialog({ data, onClose, onPay }: { data: InvoiceDocumentData; onClose: () => void; onPay?: () => void }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const [exportError, setExportError] = useState('');
   const facts = invoiceFacts(data);
@@ -110,6 +110,15 @@ export function InvoiceDocumentDialog({ data, onClose }: { data: InvoiceDocument
     document.addEventListener('keydown', keyboard);
     return () => { document.removeEventListener('keydown', keyboard); document.body.style.overflow = previousOverflow; previousFocus?.focus(); };
   }, [onClose]);
+  useEffect(() => {
+    if (!onPay || data.status === 'PAID') return;
+    const actions = dialogRef.current?.querySelector<HTMLElement>('.invoice-document-toolbar > div:last-child');
+    if (!actions) return;
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = 'invoice-document-pay-button'; button.textContent = 'Pay this invoice';
+    button.addEventListener('click', onPay); actions.prepend(button);
+    return () => { button.removeEventListener('click', onPay); button.remove(); };
+  }, [data.status, onPay]);
   const download = () => { try { setExportError(''); drawInvoicePng(data); } catch (error) { setExportError(error instanceof Error ? error.message : 'Could not create the invoice image.'); } };
   return createPortal(<div className="invoice-document-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div ref={dialogRef} className="invoice-document-dialog" role="dialog" aria-modal="true" aria-labelledby="invoice-document-title" tabIndex={-1}><header className="invoice-document-toolbar"><div><strong>{documentHeading(data.status)} preview</strong><small>Print, save as PDF, or download a PNG image.</small></div><div><Button variant="outline" onClick={() => window.print()}><span className="material-symbols-outlined" aria-hidden="true">print</span>Print / PDF</Button><Button onClick={download}><span className="material-symbols-outlined" aria-hidden="true">image</span>Save PNG</Button><button type="button" onClick={onClose} aria-label={`Close ${documentHeading(data.status).toLowerCase()} preview`}><span className="material-symbols-outlined" aria-hidden="true">close</span></button></div></header>{exportError ? <p className="invoice-document-error" role="alert">{exportError}</p> : null}<div className="invoice-document-stage"><div className="invoice-printer" aria-hidden="true"><span /></div><article className="invoice-document-print"><header><div><h1>{data.institutionName}</h1><p>PAN {data.panNumber || 'Not recorded'}</p></div><h2 id="invoice-document-title">{documentHeading(data.status)}</h2><p>{invoiceTitle(data.invoiceType)}</p><p>#{shortId(data.id)} · <strong className={data.status === 'PAID' ? 'is-paid' : ''}>{data.status}</strong></p></header><section className="invoice-document-parties"><div><small>Student</small><strong>{data.studentName}</strong><span>{[data.admissionNumber, data.gradeName, data.branchName].filter(Boolean).join(' · ')}</span></div></section><dl className="invoice-document-facts">{facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl><table><thead><tr><th>Description</th><th>Amount</th></tr></thead><tbody>{data.lines.map((line, index) => <tr key={`${line.label}-${index}`}><td>{line.label}</td><td>{money(line.amount)}</td></tr>)}{data.discount > 0 ? <tr><td>Discount</td><td className="is-discount">−{money(data.discount)}</td></tr> : null}{data.fine > 0 ? <tr><td>Fine</td><td>{money(data.fine)}</td></tr> : null}</tbody><tfoot><tr><th>Total</th><th>{money(data.netPayable)}</th></tr></tfoot></table><div className="invoice-reference-bars" aria-hidden="true" /><code>#{data.id.toUpperCase()}</code><footer><p>Computer-generated {documentHeading(data.status).toLowerCase()} · No signature required</p><p>{data.institutionName} · PAN {data.panNumber || 'not recorded'}</p></footer></article></div></div></div>, document.body);
 }

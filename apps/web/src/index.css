@@ -1916,6 +1916,8 @@ h1, h2, h3, h4 {
 .invoice-document-toolbar > div:last-child { display: flex; align-items: center; gap: 8px; }
 .invoice-document-toolbar > div:last-child > button:last-child { display: grid; place-items: center; width: 40px; height: 40px; border: 0; border-radius: 10px; color: var(--text); background: var(--bg-subtle); cursor: pointer; }
 .invoice-document-toolbar > div:last-child > button:last-child:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 2px; }
+.invoice-document-pay-button { min-height: 40px; padding: 8px 14px; border: 0; border-radius: 10px; color: var(--color-primary-foreground); background: var(--color-primary); font: inherit; font-weight: 700; cursor: pointer; }
+.invoice-document-pay-button:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 2px; }
 .invoice-document-error { margin: 16px 24px 0; padding: 12px 14px; border-radius: 10px; color: var(--color-error); background: var(--color-error-soft); }
 .invoice-document-print { width: min(794px, calc(100% - 48px)); min-height: 1123px; margin: 24px auto; padding: 56px; color: #172033; background: #fff; border: 1px solid #d8e0ec; }
 .invoice-document-print > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding-top: 12px; border-top: 8px solid #1557b0; }
@@ -2009,6 +2011,66 @@ h1, h2, h3, h4 {
 .payments-skeleton { min-height: 520px; border-radius: var(--radius-lg); background: var(--bg-subtle); animation: grade-pulse 1.4s ease-in-out infinite; }
 @media (max-width: 700px) { .payments-page { padding: 20px 14px; } .payments-header, .payments-actions { align-items: stretch; flex-direction: column; } .payments-card-head { grid-template-columns: 44px minmax(0, 1fr); } .payments-switch { grid-column: 1 / -1; } .payments-endpoints, .payments-form-grid { grid-template-columns: 1fr; } .payments-endpoints small, .payments-form-grid .is-wide { grid-column: auto; } .payments-actions button { width: 100%; } }
 @media (prefers-reduced-motion: reduce) { .payments-skeleton { animation: none; } }
+.payment-checkout-backdrop { position: fixed; inset: 0; z-index: 13000; display: grid; place-items: center; padding: 20px; background: color-mix(in srgb, var(--text) 58%, transparent); }
+.payment-checkout { position: relative; width: min(700px, 100%); max-height: calc(100vh - 40px); overflow: auto; padding: 28px; border-radius: var(--radius-lg); color: var(--text); background: var(--bg-background); box-shadow: var(--shadow-xl); }
+.payment-checkout:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 3px; }
+.payment-checkout-close { position: absolute; top: 14px; right: 14px; display: grid; width: 44px; height: 44px; place-items: center; border: 0; border-radius: 10px; color: var(--text); background: var(--bg-subtle); cursor: pointer; }
+.payment-checkout button:focus-visible, .payment-checkout input:focus-visible, .payments-review a:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 2px; }
+.payment-checkout-eyebrow { color: var(--color-primary); font-size: 11px; font-weight: 800; letter-spacing: .1em; }
+.payment-checkout h2 { margin: 8px 52px 4px 0; font-size: 26px; }
+.payment-checkout > p { margin: 0; color: var(--text-muted); }
+.payment-checkout-total { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin: 20px 0; padding: 18px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-subtle); }
+.payment-checkout-total strong { font-size: 24px; font-variant-numeric: tabular-nums; }
+.payment-checkout-methods { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.payment-checkout-methods button { display: flex; align-items: center; gap: 12px; min-height: 84px; padding: 14px; border: 1px solid var(--border); border-radius: 14px; color: var(--text); background: var(--bg-card); text-align: left; cursor: pointer; }
+.payment-checkout-methods button.is-active { border-color: var(--color-primary); background: color-mix(in srgb, var(--color-primary) 8%, var(--bg-card)); box-shadow: inset 0 0 0 1px var(--color-primary); }
+.payment-checkout-methods button > span:last-child { display: grid; gap: 3px; }
+.payment-checkout-methods small { color: var(--text-muted); }
+.payment-checkout-notice, .payment-checkout-error { display: flex; align-items: flex-start; gap: 10px; margin-top: 18px; padding: 14px; border-radius: 12px; }
+.payment-checkout-notice { background: color-mix(in srgb, var(--color-primary) 8%, var(--bg-card)); }
+.payment-checkout-notice p { margin: 0; color: var(--text-muted); }
+.payment-checkout-error { color: var(--color-error); background: var(--color-error-soft); }
+.payment-checkout-primary { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 48px; margin-top: 18px; border: 0; border-radius: 12px; color: var(--color-primary-foreground); background: var(--color-primary); font: inherit; font-weight: 800; cursor: pointer; }
+.payment-checkout-primary:disabled { opacity: .6; cursor: not-allowed; }
+.payment-checkout-qr-form { display: grid; gap: 16px; margin-top: 18px; }
+.payment-checkout-qr { display: grid; place-items: center; min-height: 260px; padding: 10px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-card); }
+.payment-checkout-qr img { max-width: 100%; height: auto; }
+.payment-checkout-qr-form dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; }
+.payment-checkout-qr-form dl > div { padding: 10px; border: 1px solid var(--border); border-radius: 10px; }
+.payment-checkout-qr-form dt { color: var(--text-muted); font-size: 11px; text-transform: uppercase; }
+.payment-checkout-qr-form dd { margin: 4px 0 0; font-weight: 700; overflow-wrap: anywhere; }
+.payment-checkout-qr-form label { display: grid; gap: 6px; font-size: 13px; font-weight: 700; }
+.payment-checkout-qr-form input { min-height: 44px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; color: var(--text); background: var(--bg-background); }
+.payment-checkout-qr-form input[type="file"] { padding: 8px; }
+.payment-checkout-qr-form label small { color: var(--text-muted); font-weight: 500; }
+.payment-checkout-skeleton { height: 180px; border-radius: 14px; background: var(--bg-subtle); animation: grade-pulse 1.4s ease-in-out infinite; }
+.payment-checkout-result { display: grid; justify-items: center; gap: 10px; padding: 38px 12px; text-align: center; }
+.payment-checkout-result > .material-symbols-outlined { color: var(--color-warning); font-size: 52px; }
+.payment-checkout-result button { min-height: 44px; margin-top: 10px; padding: 10px 18px; border: 0; border-radius: 10px; color: var(--color-primary-foreground); background: var(--color-primary); font: inherit; font-weight: 700; cursor: pointer; }
+.payment-result-page { display: grid; min-height: calc(100vh - 120px); place-items: center; padding: 24px; }
+.payment-result-page > section { display: grid; width: min(560px, 100%); justify-items: center; gap: 12px; padding: 40px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-card); text-align: center; }
+.payment-result-page > section > .material-symbols-outlined { color: var(--color-primary); font-size: 60px; }
+.payment-result-page.is-success > section > .material-symbols-outlined { color: var(--color-success); }
+.payment-result-page.is-failed > section > .material-symbols-outlined { color: var(--color-error); }
+.payment-result-page h1, .payment-result-page p { margin: 0; }
+.payment-result-page p { color: var(--text-muted); line-height: 1.55; }
+.payment-result-page a { display: flex; align-items: center; gap: 8px; min-height: 44px; margin-top: 8px; padding: 10px 18px; border-radius: 10px; color: var(--color-primary-foreground); background: var(--color-primary); font-weight: 800; text-decoration: none; }
+.payment-result-page small { color: var(--text-muted); overflow-wrap: anywhere; }
+.payment-result-progress { width: 100%; height: 5px; overflow: hidden; border-radius: 99px; background: var(--bg-subtle); }
+.payment-result-progress::after { content: ''; display: block; width: 40%; height: 100%; border-radius: inherit; background: var(--color-primary); animation: payment-progress 1.4s ease-in-out infinite alternate; }
+@keyframes payment-progress { to { transform: translateX(150%); } }
+.payments-review-list { display: grid; gap: 12px; margin-top: 20px; }
+.payments-review-list article { display: grid; grid-template-columns: 96px minmax(180px, 1fr) auto; gap: 14px; align-items: start; padding: 14px; border: 1px solid var(--border); border-radius: 12px; }
+.payments-review-list img { display: block; width: 96px; height: 96px; object-fit: cover; border-radius: 8px; }
+.payments-review-list article > div:nth-child(2) { display: grid; gap: 4px; }
+.payments-review-list article small, .payments-review-list article span { color: var(--text-muted); }
+.payments-review-actions { grid-column: 2 / -1; display: grid; grid-template-columns: minmax(180px, 1fr) auto auto; gap: 8px; align-items: end; }
+.payments-review-actions label { display: grid; gap: 5px; font-size: 12px; font-weight: 700; }
+.payments-review-actions input { min-height: 40px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; color: var(--text); background: var(--bg-background); }
+.payments-review-empty { display: grid; justify-items: center; gap: 6px; padding: 36px; color: var(--text-muted); text-align: center; }
+.payments-review-empty .material-symbols-outlined { color: var(--color-success); font-size: 40px; }
+@media (max-width: 640px) { .payment-checkout-backdrop { padding: 0; } .payment-checkout { min-height: 100vh; max-height: 100vh; border-radius: 0; padding: 22px 16px calc(22px + env(safe-area-inset-bottom)); } .payment-checkout-methods, .payment-checkout-qr-form dl { grid-template-columns: 1fr; } .payment-result-page > section { padding: 28px 18px; } .payments-review-list article { grid-template-columns: 72px 1fr; } .payments-review-list img { width: 72px; height: 72px; } .payments-review-list article > .status-badge { grid-column: 2; } .payments-review-actions { grid-column: 1 / -1; grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { .payment-checkout-skeleton, .payment-result-progress::after { animation: none; } }
 .course-row-actions, .course-delete-confirm { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .course-row-actions button { width: 40px; min-width: 40px; height: 40px; padding: 0; }
 .course-row-actions button:last-child { color: var(--color-error); }

@@ -154,6 +154,9 @@ export const api = {
   // Finances
   finances: {
     getPaymentSettings: async () => request<{ connectIpsEnabled: boolean; staticQrEnabled: boolean; staticQrImageUrl: string; accountName: string; accountNumber: string; bankName: string; instructions: string }>('/finances/payment-settings'),
+    submitManualPayment: async (invoiceId: string, payload: { referenceId: string; receiptProof: string }) => request<{ txnId: string; status: string; message: string }>(`/finances/manual-payment/${encodeURIComponent(invoiceId)}`, { method: 'POST', body: JSON.stringify(payload) }),
+    getManualPayments: async () => request<{ attempts: Array<{ id: string; txnId: string; referenceId: string; amount: number; status: string; receiptProof: string; createdAt: string; reviewedAt: string | null; reviewRemarks: string | null; invoiceId: string; studentName: string }> }>('/finances/manual-payments'),
+    decideManualPayment: async (id: string, decision: 'APPROVE' | 'REJECT', remarks: string) => request<{ message: string }>(`/finances/manual-payments/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify({ decision, remarks }) }),
     getAccountantWorkspace: async () => request<AccountantWorkspace>('/finances/accountant-workspace'),
     getBillingLedger: async () => request<BillingLedger>('/finances/billing-ledger'),
     createInvoice: async (payload: { studentId: string; amount: number; discount: number; fine: number; invoiceType: 'TUITION' | 'SUBJECT' | 'ACTIVITY'; billingCycleStart: string; billingCycleEnd: string; dueDate: string }) =>

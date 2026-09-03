@@ -680,6 +680,11 @@ model PaymentAttempt {
   lastValidatedAt    DateTime?
   confirmedAt        DateTime?
   failedAt           DateTime?
+  receiptProof       String?              @db.Text
+  receiptMimeType    String?
+  reviewedBy         String?
+  reviewedAt         DateTime?
+  reviewRemarks      String?
   createdBy          String
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt

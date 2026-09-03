@@ -107,6 +107,7 @@ app.use('/api/auth', (req, res, next) => {
 // parser and cookie/session handling remain intact.
 app.all('/api/auth/*', monitorCredentialSignIn, toNodeHandler(auth));
 
+app.use('/api/finances/manual-payment', express.json({ limit: '2mb' }));
 app.use(express.json({ limit: '256kb' }));
 
 // Global tenant middleware; authenticated scope comes from the verified session.

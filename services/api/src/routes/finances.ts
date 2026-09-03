@@ -234,8 +234,12 @@ router.get('/connectips/return/success', async (req: TenantRequest, res: Respons
   try {
     const attempt = await validateAndConfirmConnectIps(txnId);
     if (!attempt) return res.status(404).json({ error: 'Payment attempt not found.' });
+    const appUrl = process.env.PAYMENT_FRONTEND_BASE_URL?.replace(/\/$/, '');
+    if (appUrl) return res.redirect(303, `${appUrl}/payment/result?txnId=${encodeURIComponent(attempt.txnId)}&status=${attempt.status.toLowerCase()}`);
     return res.json({ txnId: attempt.txnId, status: attempt.status });
   } catch {
+    const appUrl = process.env.PAYMENT_FRONTEND_BASE_URL?.replace(/\/$/, '');
+    if (appUrl) return res.redirect(303, `${appUrl}/payment/result?txnId=${encodeURIComponent(txnId)}&status=pending`);
     return res.status(502).json({ error: 'connectIPS validation is temporarily unavailable.' });
   }
 });
@@ -252,7 +256,56 @@ router.get('/connectips/return/failure', async (req: TenantRequest, res: Respons
     });
   }
   const current = await prisma.paymentAttempt.findUniqueOrThrow({ where: { id: attempt.id } });
+  const appUrl = process.env.PAYMENT_FRONTEND_BASE_URL?.replace(/\/$/, '');
+  if (appUrl) return res.redirect(303, `${appUrl}/payment/result?txnId=${encodeURIComponent(txnId)}&status=${current.status.toLowerCase()}`);
   return res.json({ txnId, status: current.status });
+});
+
+router.post('/manual-payment/:invoiceId', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const invoice = await loadInvoicePaymentAccess(req, req.params.invoiceId);
+  if (!invoice) return res.status(404).json({ error: 'Invoice not found or unavailable to this account.' });
+  if (invoice.status === 'PAID') return res.status(409).json({ error: 'Invoice is already paid.' });
+  const settingsTenant = await prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { paymentSettings: true } });
+  if (!paymentSettings(settingsTenant?.paymentSettings).staticQrEnabled) return res.status(503).json({ error: 'Manual QR payment is not enabled.' });
+  const shape = parseStrictKeys(req.body, ['referenceId', 'receiptProof']);
+  if (!shape.success) return res.status(400).json({ error: shape.error });
+  const referenceId = readTrimmedString(shape.data, 'referenceId', { required: true, maxLength: 80, pattern: /^[A-Za-z0-9._\/-]+$/, message: 'Enter a valid payment reference.' });
+  const receiptProof = readTrimmedString(shape.data, 'receiptProof', { required: true, maxLength: 1_500_000, pattern: /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/, message: 'Upload a PNG, JPEG, or WebP receipt under 1 MB.' });
+  if (!referenceId.success) return res.status(400).json({ error: referenceId.error });
+  if (!receiptProof.success) return res.status(400).json({ error: receiptProof.error });
+  const duplicate = await prisma.paymentAttempt.findFirst({ where: { tenantId: req.tenantId!, provider: 'BANK', referenceId: referenceId.data } });
+  if (duplicate) return res.status(409).json({ error: 'This payment reference was already submitted.' });
+  const txnId = `qr_${crypto.randomBytes(8).toString('hex')}`;
+  const attempt = await prisma.paymentAttempt.create({ data: { tenantId: req.tenantId!, invoiceId: invoice.id, provider: 'BANK', status: 'PENDING', txnId, referenceId: referenceId.data, amountPaisa: BigInt(Math.round(Number(invoice.netPayable) * 100)), receiptProof: receiptProof.data, receiptMimeType: receiptProof.data.slice(5, receiptProof.data.indexOf(';')), gatewayStatus: 'AWAITING_REVIEW', createdBy: req.user!.id } });
+  return res.status(201).json({ id: attempt.id, txnId, status: attempt.status, message: 'Receipt submitted for verification.' });
+});
+
+router.get('/manual-payments', authMiddleware, async (req: TenantRequest, res: Response) => {
+  if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may review payment receipts.' });
+  const attempts = await prisma.paymentAttempt.findMany({ where: { tenantId: req.tenantId!, provider: 'BANK', status: { in: ['PENDING', 'SUCCESS', 'FAILED'] } }, include: { invoice: { include: { student: { include: { user: true } } } } }, orderBy: { createdAt: 'desc' }, take: 100 });
+  return res.json({ attempts: attempts.map((attempt) => ({ id: attempt.id, txnId: attempt.txnId, referenceId: attempt.referenceId, amount: Number(attempt.amountPaisa) / 100, status: attempt.status, receiptProof: attempt.receiptProof, createdAt: attempt.createdAt, reviewedAt: attempt.reviewedAt, reviewRemarks: attempt.reviewRemarks, invoiceId: attempt.invoiceId, studentName: `${attempt.invoice.student.user.firstName} ${attempt.invoice.student.user.lastName}`.trim() })) });
+});
+
+router.post('/manual-payments/:id/decision', authMiddleware, async (req: TenantRequest, res: Response) => {
+  if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may review payment receipts.' });
+  const shape = parseStrictKeys(req.body, ['decision', 'remarks']);
+  if (!shape.success) return res.status(400).json({ error: shape.error });
+  const decision = readTrimmedString(shape.data, 'decision', { required: true, maxLength: 10, pattern: /^(APPROVE|REJECT)$/, message: 'Decision must be APPROVE or REJECT.' });
+  const remarks = readTrimmedString(shape.data, 'remarks', { required: false, maxLength: 500, message: 'Remarks are too long.' });
+  if (!decision.success) return res.status(400).json({ error: decision.error });
+  if (!remarks.success) return res.status(400).json({ error: remarks.error });
+  const attempt = await prisma.paymentAttempt.findFirst({ where: { id: req.params.id, tenantId: req.tenantId!, provider: 'BANK' }, include: { invoice: true } });
+  if (!attempt) return res.status(404).json({ error: 'Payment submission not found.' });
+  if (attempt.status !== 'PENDING') return res.status(409).json({ error: 'This payment submission was already reviewed.' });
+  if (decision.data === 'REJECT') { await prisma.paymentAttempt.update({ where: { id: attempt.id }, data: { status: 'FAILED', gatewayStatus: 'REJECTED', reviewRemarks: remarks.data, reviewedBy: req.user!.id, reviewedAt: new Date(), failedAt: new Date() } }); return res.json({ message: 'Payment receipt rejected.' }); }
+  await prisma.$transaction(async (tx) => {
+    const claimed = await tx.paymentAttempt.updateMany({ where: { id: attempt.id, status: 'PENDING' }, data: { status: 'SUCCESS', gatewayStatus: 'APPROVED', reviewRemarks: remarks.data, reviewedBy: req.user!.id, reviewedAt: new Date(), confirmedAt: new Date() } });
+    if (claimed.count !== 1) throw new Error('Payment was already reviewed.');
+    const paid = await tx.invoice.updateMany({ where: { id: attempt.invoiceId, tenantId: req.tenantId!, status: { in: ['UNPAID', 'OVERDUE', 'BLOCKED_OVERRIDE'] } }, data: { status: 'PAID', transactionId: attempt.referenceId, paymentDate: new Date() } });
+    if (paid.count !== 1) throw new Error('Invoice is already paid or unavailable.');
+  });
+  if (attempt.invoice.invoiceType === 'ADMISSION') await activateAdmissionAndSendLogins(req.tenantId!, attempt.invoice.studentId);
+  return res.json({ message: 'Payment approved and invoice marked paid.' });
 });
 
 router.get('/connectips/status/:txnId', authMiddleware, async (req: TenantRequest, res: Response) => {
