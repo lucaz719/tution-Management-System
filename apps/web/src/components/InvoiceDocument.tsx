@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from './ui/Button';
+import { toBsLabel } from '../utils/nepaliDate';
 
 export interface InvoiceDocumentData {
   id: string;
@@ -28,9 +29,9 @@ export interface InvoiceDocumentData {
 const invoiceTitle = (type: InvoiceDocumentData['invoiceType']) => type === 'ADMISSION'
   ? 'One-time admission fee'
   : type === 'SUBJECT' ? 'Monthly subject tuition'
-    : type === 'ACTIVITY' ? 'Optional activity fee' : 'Monthly grade tuition';
+    : type === 'ACTIVITY' ? 'Monthly activity fee' : 'Monthly grade tuition';
 const money = (value: number) => `NPR ${value.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const date = (value?: string | null) => value ? new Date(value).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kathmandu' }) : '—';
+const date = (value?: string | null) => toBsLabel(value);
 const shortId = (id: string) => id.slice(0, 8).toUpperCase();
 const documentHeading = (status: string) => status === 'PAID' ? 'Receipt' : 'Invoice';
 const invoiceFacts = (data: InvoiceDocumentData) => [

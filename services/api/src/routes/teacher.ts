@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import prisma from '../utils/db';
 import { normalizeSchedule } from '../utils/schedule';
+import { generateDailyTeacherSessions } from '../services/timetable-service';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware } from '../middleware/auth';
 import { UserPayload } from '@tms/types';
@@ -45,6 +46,7 @@ router.get('/workspace', authMiddleware, async (req: TenantRequest, res: Respons
   const user = req.user as UserPayload;
   const { start, end } = dayBounds();
   try {
+    await generateDailyTeacherSessions({ tenantId: req.tenantId! });
     const assignedClassIds = await prisma.class.findMany({
       where: { teacherId: user.id, course: { tenantId: req.tenantId! } },
       select: { id: true },

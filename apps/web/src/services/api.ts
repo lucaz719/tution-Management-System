@@ -520,7 +520,7 @@ export const api = {
       const data = await request<{ students: Array<{ studentId: string; studentName: string; studentEmail: string }> }>(`/courses/classes/${encodeURIComponent(classId)}/eligible-students`);
       return data.students ?? [];
     },
-    createClass: async (payload: { courseId: string; name: string; schedule: unknown; teacherId?: string | null }) => {
+    createClass: async (payload: { courseId: string; name: string; schedule: unknown; teacherId?: string | null; academicYear?: string; effectiveFrom?: string | null; effectiveUntil?: string | null }) => {
       return request<{ message: string; class: any }>('/courses/classes', {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -550,7 +550,7 @@ export const api = {
     unenroll: async (enrollmentId: string) => {
       return request<{ message: string }>(`/courses/enrollments/${enrollmentId}`, { method: 'DELETE' });
     },
-    updateClass: async (id: string, changes: { name?: string; schedule?: unknown; teacherId?: string | null }) => {
+    updateClass: async (id: string, changes: { name?: string; schedule?: unknown; teacherId?: string | null; academicYear?: string; effectiveFrom?: string | null; effectiveUntil?: string | null }) => {
       return request<{ message: string; class: any }>(`/courses/classes/${id}`, {
         method: 'PUT',
         body: JSON.stringify(changes),

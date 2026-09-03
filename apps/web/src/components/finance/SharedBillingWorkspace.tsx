@@ -3,12 +3,13 @@ import { api, type BillingInvoice, type BillingLedger, type BillingPayroll } fro
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { StatusBadge } from "../ui/StatusBadge";
+import { toBsLabel } from "../../utils/nepaliDate";
 
 type BillingTarget = { kind: "student"; id: string } | { kind: "teacher"; id: string } | null;
 type CreateMode = "student" | "teacher" | null;
 
 const money = (value: number) => `NPR ${Number(value || 0).toLocaleString("en-NP", { maximumFractionDigits: 2 })}`;
-const dateLabel = (value: string) => new Intl.DateTimeFormat("en-NP", { dateStyle: "medium" }).format(new Date(value));
+const dateLabel = (value: string) => toBsLabel(value);
 const monthLabel = (month: number, year: number) => new Intl.DateTimeFormat("en", { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1));
 const isoDate = (date: Date) => date.toISOString().slice(0, 10);
 
@@ -581,7 +582,7 @@ export function SharedBillingWorkspace({ heading = "Billing & payroll" }: { head
                   <select id="invoice-type" value={invoiceType} onChange={(event) => setInvoiceType(event.target.value as typeof invoiceType)}>
                     <option value="TUITION">Tuition</option>
                     <option value="SUBJECT">Subject</option>
-                    <option value="ACTIVITY">Activity / one-time</option>
+                    <option value="ACTIVITY">Monthly activity</option>
                   </select>
                 </label>
                 <label htmlFor="invoice-discount">

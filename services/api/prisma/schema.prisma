@@ -556,6 +556,9 @@ model Class {
   assignedTeacher   User?               @relation("AssignedClasses", fields: [teacherId], references: [id])
   name              String
   schedule          Json // Timetable days & time slots
+  academicYear      String              @default("")
+  effectiveFrom     DateTime?           @db.Date
+  effectiveUntil    DateTime?           @db.Date
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
   enrollments       Enrollment[]
@@ -565,6 +568,27 @@ model Class {
   homework          Homework[]
   syllabi           Syllabus[]
   resultDefinitions ResultDefinition[]
+  timetableVersions TimetableVersion[]
+
+  @@index([branchId, academicYear, effectiveFrom, effectiveUntil])
+}
+
+model TimetableVersion {
+  id            String   @id @default(uuid())
+  classId       String
+  class         Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  version       Int
+  academicYear  String
+  effectiveFrom DateTime? @db.Date
+  effectiveUntil DateTime? @db.Date
+  teacherId     String?
+  name          String
+  schedule      Json
+  changedBy     String
+  createdAt     DateTime @default(now())
+
+  @@unique([classId, version])
+  @@index([classId, createdAt])
 }
 
 // 12. Student Enrollment
@@ -617,6 +641,8 @@ model TeacherSession {
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
   studentAttendance    StudentAttendance[]
+
+  @@index([teacherId, classId, date])
 }
 
 // 15. Student Attendance

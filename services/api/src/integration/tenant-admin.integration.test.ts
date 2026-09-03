@@ -883,6 +883,22 @@ async function main(): Promise<void> {
       classId: classAId,
     });
     assert.equal(response.status, 409);
+    response = await request('POST', '/api/courses/classes', adminACookie, {
+      courseId: courseA.id,
+      name: 'Class 10 Mathematics Conflict',
+      schedule: [{ day: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date().getDay()], start: '09:30', end: '10:30' }],
+    });
+    assert.equal(response.status, 201);
+    const conflictingClassId = response.body.class.id;
+    response = await request('POST', '/api/courses/enroll', adminACookie, {
+      studentId: admissionStudentId,
+      courseId: courseA.id,
+      classId: conflictingClassId,
+    });
+    assert.equal(response.status, 409, 'students cannot be enrolled into overlapping active classes');
+    assert.match(response.body.error, /Student conflict:/);
+    assert(Array.isArray(response.body.conflicts));
+    assert.equal(await prisma.enrollment.count({ where: { studentId: admissionStudentId, classId: conflictingClassId } }), 0);
     response = await request('POST', '/api/courses/billing/block', adminACookie, {
       studentId: foreignStudent.id,
       courseId: courseB.id,
