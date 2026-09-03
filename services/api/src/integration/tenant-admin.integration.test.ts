@@ -772,6 +772,14 @@ async function main(): Promise<void> {
     });
     assert.equal(response.status, 201);
     assert(response.body.payrolls.some((item: any) => item.staffRecordId === staffRecord.id));
+    response = await request('GET', '/api/hr/payroll?month=6&year=2026&status=PENDING&search=staff-a', adminACookie);
+    assert.equal(response.status, 200, 'payroll supports period, status, and staff search filters');
+    assert(response.body.payrolls.every((item: any) => item.month === 6 && item.year === 2026 && item.status === 'PENDING'));
+    assert(response.body.payrolls.some((item: any) => item.staffRecordId === staffRecord.id));
+    assert(response.body.summary.staffCount >= response.body.payrolls.length);
+    assert(response.body.summary.netPayable >= 40000);
+    response = await request('GET', '/api/hr/payroll?month=13&year=2026', adminACookie);
+    assert.equal(response.status, 400, 'payroll rejects invalid period filters');
     const payroll = await prisma.payroll.create({
       data: {
         tenantId: tenantA.id,

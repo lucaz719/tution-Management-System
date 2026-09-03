@@ -174,7 +174,6 @@ model Tenant {
   maintenanceEscalationDays Int                      @default(3)
   leavePolicy               Json?
   performanceWeights        Json?
-  paymentSettings           Json?
   createdAt                 DateTime                 @default(now())
   updatedAt                 DateTime                 @updatedAt
   branches                  Branch[]

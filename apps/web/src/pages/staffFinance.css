@@ -424,3 +424,37 @@
 @media (max-width: 430px) {
   .result-workflow-steps { grid-template-columns: minmax(0, 1fr); }
 }
+
+.payroll-page { display: grid; gap: 18px; }
+.payroll-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.payroll-period-controls { display: grid; grid-template-columns: 190px 220px minmax(280px, 1fr); gap: 16px; align-items: end; }
+.payroll-period-controls label, .payroll-search { display: grid; gap: 6px; color: var(--color-text); font-size: 13px; font-weight: 700; }
+.payroll-period-controls input, .payroll-period-controls select, .payroll-reconcile input { min-height: 42px; padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--color-text); background: var(--color-surface); font: inherit; }
+.payroll-search > div { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.payroll-search .material-symbols-outlined { position: absolute; left: 12px; top: 11px; color: var(--text-muted); font-size: 20px; pointer-events: none; }
+.payroll-search input { padding-left: 40px; }
+.payroll-period-controls input:focus-visible, .payroll-period-controls select:focus-visible, .payroll-reconcile input:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 1px; }
+.payroll-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.payroll-summary article { display: grid; gap: 6px; padding: 18px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--color-surface); }
+.payroll-summary span { color: var(--text-muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+.payroll-summary strong { font-size: 23px; font-variant-numeric: tabular-nums; }
+.payroll-summary small, .payroll-table small { color: var(--text-muted); font-size: 12px; }
+.payroll-table-scroll { overflow-x: auto; }
+.payroll-table { width: 100%; min-width: 1120px; border-collapse: collapse; }
+.payroll-table th { padding: 12px 14px; border-bottom: 1px solid var(--border); color: var(--text-muted); background: color-mix(in srgb, var(--color-primary) 4%, var(--color-surface)); font-size: 11px; text-align: left; text-transform: uppercase; letter-spacing: .05em; }
+.payroll-table td { padding: 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.payroll-table tbody tr:last-child td { border-bottom: 0; }
+.payroll-table td:first-child strong, .payroll-table td:first-child small { display: block; }
+.payroll-net { font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.payroll-reconcile { display: grid; grid-template-columns: minmax(170px, 1fr) auto; gap: 6px 8px; min-width: 270px; }
+.payroll-reconcile label { grid-column: 1 / -1; font-size: 12px; font-weight: 700; }
+.payroll-complete { display: inline-flex; align-items: center; gap: 6px; color: var(--color-success); font-size: 13px; font-weight: 700; }
+.payroll-complete .material-symbols-outlined { font-size: 19px; }
+.payroll-empty { display: grid; min-height: 260px; justify-items: center; align-content: center; gap: 8px; padding: 28px; border: 1px dashed var(--border); border-radius: var(--radius-lg); color: var(--text-muted); background: var(--color-surface); text-align: center; }
+.payroll-empty > .material-symbols-outlined { color: var(--color-primary); font-size: 42px; }
+.payroll-empty p { max-width: 52ch; margin: 0 0 8px; }
+.payroll-list-skeleton { display: grid; gap: 10px; }
+.payroll-list-skeleton span { display: block; height: 68px; border-radius: var(--radius-md); background: var(--color-surface); animation: grade-pulse 1.4s ease-in-out infinite; }
+@media (max-width: 980px) { .payroll-period-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); } .payroll-search { grid-column: 1 / -1; } .payroll-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .payroll-heading { align-items: stretch; flex-direction: column; } .payroll-heading > button { width: 100%; } .payroll-period-controls, .payroll-summary { grid-template-columns: 1fr; } .payroll-search { grid-column: auto; } .payroll-search > div { grid-template-columns: 1fr; } .payroll-search .material-symbols-outlined { top: 11px; } }
+@media (prefers-reduced-motion: reduce) { .payroll-list-skeleton span { animation: none; } }

@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import { Prisma } from '@prisma/client';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
@@ -321,11 +322,47 @@ router.get(
   async (req: TenantRequest, res: Response) => {
     try {
       if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may view payroll.' });
-      const list = await prisma.payroll.findMany({
-          where: { tenantId: req.tenantId! },
+      const month = typeof req.query.month === 'string' ? Number(req.query.month) : undefined;
+      const year = typeof req.query.year === 'string' ? Number(req.query.year) : undefined;
+      const status = typeof req.query.status === 'string' ? req.query.status.trim() : '';
+      const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+      const allowedStatuses = ['PENDING', 'APPROVED_FOR_MANUAL_PAYMENT', 'MANUALLY_PAID'];
+      if ((month === undefined) !== (year === undefined)) return res.status(400).json({ error: 'month and year must be provided together.' });
+      if (month !== undefined && (!Number.isInteger(month) || month < 1 || month > 12)) return res.status(400).json({ error: 'month must be an integer between 1 and 12.' });
+      if (year !== undefined && (!Number.isInteger(year) || year < 2000 || year > 2100)) return res.status(400).json({ error: 'year must be an integer between 2000 and 2100.' });
+      if (status && !allowedStatuses.includes(status)) return res.status(400).json({ error: 'Invalid payroll status filter.' });
+      if (search.length > 120) return res.status(400).json({ error: 'Payroll search must be 120 characters or fewer.' });
+      const periodWhere: Prisma.PayrollWhereInput = {
+        tenantId: req.tenantId!,
+        ...(month !== undefined && year !== undefined ? { month, year } : {}),
+      };
+      const where: Prisma.PayrollWhereInput = {
+        ...periodWhere,
+        ...(status ? { status } : {}),
+        ...(search ? { staffRecord: { user: { OR: [
+          { firstName: { contains: search, mode: 'insensitive' } },
+          { lastName: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } },
+        ] } } } : {}),
+      };
+      const [list, periodRecords] = await Promise.all([prisma.payroll.findMany({
+          where,
           include: { staffRecord: { include: { user: true } } },
-        });
-      return res.status(200).json({ payrolls: list });
+          orderBy: [{ year: 'desc' }, { month: 'desc' }, { staffRecord: { user: { firstName: 'asc' } } }],
+          take: 500,
+      }), prisma.payroll.findMany({
+        where: periodWhere,
+        select: { baseSalary: true, bonuses: true, attendanceDeductions: true, netPayable: true, status: true },
+        take: 500,
+      })]);
+      const summary = periodRecords.reduce((result, payroll) => {
+        result.gross += payroll.baseSalary + payroll.bonuses;
+        result.deductions += payroll.attendanceDeductions;
+        result.netPayable += payroll.netPayable;
+        result.counts[payroll.status] = (result.counts[payroll.status] ?? 0) + 1;
+        return result;
+      }, { gross: 0, deductions: 0, netPayable: 0, counts: {} as Record<string, number> });
+      return res.status(200).json({ payrolls: list, summary: { ...summary, staffCount: periodRecords.length } });
     } catch {
       return res.status(500).json({ error: 'Failed to retrieve payrolls.' });
     }
