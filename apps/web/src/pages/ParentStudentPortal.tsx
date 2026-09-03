@@ -26,6 +26,8 @@ import { api } from '../services/api';
 import { submitConnectIpsForm } from '../utils/connectips';
 import { ChangePasswordForm } from '../components/ChangePasswordForm';
 import { InvoiceDocumentDialog } from '../components/InvoiceDocument';
+import { calendarDateLabel, calendarDayNumber, calendarMonthCells, calendarMonthLabel, isInCalendarMonth, moveCalendarMonth, toBsParts, type CalendarSystem } from '../utils/nepaliDate';
+import { CalendarSystemToggle } from '../components/CalendarSystemToggle';
 import '../features/parent/parentPortal.css';
 
 type ParentView = OriginalParentView | 'security';
@@ -211,7 +213,27 @@ function CertificatesView({ child }: { child: ParentChild }) {
 }
 function CalendarView({ child }: { child: ParentChild }) {
   const { events } = useParentData();
-  return <div className="parent-view"><section className="parent-card"><SectionHeader title={`${child.name}’s upcoming events`} description="This calendar never combines dates from another child." />{events.length ? <div className="parent-calendar-list">{events.map((event) => <article key={event.id}><div><strong>{event.day}</strong><span>{event.month}</span></div><div><ParentStatus label={event.kind} tone={event.kind === 'Holiday' ? 'success' : event.kind === 'Exam' ? 'error' : event.kind === 'Fee due' ? 'warning' : 'info'} iconName="event" /><h3>{event.title}</h3><p>{event.details}</p></div><time>{event.date}</time></article>)}</div> : <EmptyState title="No upcoming events" message="Published academic and fee dates will appear here." iconName="date_range" />}</section></div>;
+  const [calendarSystem, setCalendarSystem] = useState<CalendarSystem>('AD');
+  const today = useMemo(() => { const date = new Date(); date.setHours(0, 0, 0, 0); return date; }, []);
+  const datedEvents = useMemo(() => events.map((event) => { const date = new Date(event.date); date.setHours(0, 0, 0, 0); return { ...event, parsedDate: date }; }).filter((event) => !Number.isNaN(event.parsedDate.getTime())).sort((a, b) => a.parsedDate.getTime() - b.parsedDate.getTime()), [events]);
+  const firstEvent = datedEvents.find((event) => event.parsedDate >= today)?.parsedDate ?? today;
+  const [visibleMonth, setVisibleMonth] = useState(firstEvent);
+  const [selectedDate, setSelectedDate] = useState(firstEvent);
+  const cells = useMemo(() => calendarMonthCells(visibleMonth, calendarSystem), [visibleMonth, calendarSystem]);
+  const eventsForDate = (date: Date) => datedEvents.filter((event) => event.parsedDate.toDateString() === date.toDateString());
+  const selectedEvents = eventsForDate(selectedDate);
+  const selectDate = (date: Date) => { setSelectedDate(date); if (!isInCalendarMonth(date, visibleMonth, calendarSystem)) setVisibleMonth(date); };
+  const eventTone = (kind: string): ParentTone => kind === 'Holiday' ? 'success' : kind === 'Exam' ? 'error' : kind === 'Fee due' ? 'warning' : 'info';
+  return <div className="parent-view">
+    <section className="parent-card parent-academic-calendar">
+      <div className="parent-calendar-heading"><SectionHeader title={`${child.name}’s academic calendar`} description={`School events displayed in ${calendarSystem}. Switching calendars does not change the events.`} /><CalendarSystemToggle value={calendarSystem} onChange={setCalendarSystem} /></div>
+      <div className="parent-calendar-toolbar"><h3>{calendarMonthLabel(visibleMonth, calendarSystem)}</h3><div><button type="button" aria-label={`Previous ${calendarSystem} month`} onClick={() => setVisibleMonth((month) => moveCalendarMonth(month, -1, calendarSystem))}>{icon('chevron_left')}</button><button type="button" onClick={() => { setVisibleMonth(today); setSelectedDate(today); }}>Today</button><button type="button" aria-label={`Next ${calendarSystem} month`} onClick={() => setVisibleMonth((month) => moveCalendarMonth(month, 1, calendarSystem))}>{icon('chevron_right')}</button></div></div>
+      <div className="parent-calendar-layout"><div className="parent-calendar-grid-wrap"><div className="parent-calendar-weekdays" aria-hidden="true">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => <span key={day}>{day}</span>)}</div><div className="parent-calendar-grid" role="grid" aria-label={calendarMonthLabel(visibleMonth, calendarSystem)}>{cells.map((date) => { const dayEvents = eventsForDate(date); const outside = !isInCalendarMonth(date, visibleMonth, calendarSystem); const selected = date.toDateString() === selectedDate.toDateString(); const current = date.toDateString() === today.toDateString(); return <button type="button" role="gridcell" key={date.toISOString()} className={`${outside ? 'is-outside' : ''} ${selected ? 'is-selected' : ''} ${current ? 'is-today' : ''}`} aria-selected={selected} aria-label={`${calendarDateLabel(date, calendarSystem)}${dayEvents.length ? `, ${dayEvents.length} event${dayEvents.length === 1 ? '' : 's'}` : ''}`} onClick={() => selectDate(date)}><span>{calendarDayNumber(date, calendarSystem)}</span>{dayEvents.length ? <i aria-hidden="true">{dayEvents.slice(0, 3).map((event) => <b key={event.id} data-kind={event.kind} />)}</i> : null}</button>; })}</div></div>
+        <aside className="parent-calendar-selected" aria-live="polite"><span>Selected date</span><h3>{calendarDateLabel(selectedDate, calendarSystem)}</h3>{selectedEvents.length ? <div>{selectedEvents.map((event) => <article key={event.id}><ParentStatus label={event.kind} tone={eventTone(event.kind)} iconName="event" /><h4>{event.title}</h4><p>{event.details}</p></article>)}</div> : <EmptyState title="No events on this date" message="Choose a marked date to see its details." iconName="event_available" />}</aside>
+      </div>
+    </section>
+    <section className="parent-card"><SectionHeader title="Upcoming events" description={`${datedEvents.length} published event${datedEvents.length === 1 ? '' : 's'}`} />{datedEvents.length ? <div className="parent-calendar-list">{datedEvents.map((event) => { const bs = toBsParts(event.parsedDate); return <button type="button" key={event.id} onClick={() => selectDate(event.parsedDate)}><div><strong>{calendarDayNumber(event.parsedDate, calendarSystem)}</strong><span>{calendarSystem === 'AD' ? `${event.month} AD` : `${bs?.monthName} BS`}</span></div><div><ParentStatus label={event.kind} tone={eventTone(event.kind)} iconName="event" /><h3>{event.title}</h3><p>{event.details}</p></div><time dateTime={event.date}>{calendarDateLabel(event.parsedDate, calendarSystem, false)}</time>{icon('chevron_right')}</button>; })}</div> : <EmptyState title="No upcoming events" message="Published academic and fee dates will appear here." iconName="date_range" />}</section>
+  </div>;
 }
 function NotificationsView({ child, go, readIds, storeRead }: { child: ParentChild; go: (view: ParentView) => void; readIds: Set<string>; storeRead: (ids: Set<string>) => void }) {
   const { notifications } = useParentData();

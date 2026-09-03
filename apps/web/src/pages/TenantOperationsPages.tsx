@@ -16,6 +16,7 @@ import { financeApi, type Expense, type PettyCashRecord } from '../services/api/
 import { hrApi, type DocumentAlert, type PayrollRecord } from '../services/api/hr';
 import { resourcesApi, type MaintenanceTask } from '../services/api/resources';
 import { api } from '../services/api';
+import { calendarDateLabel, type CalendarSystem } from '../utils/nepaliDate';
 import './staffFinance.css';
 
 const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 };
@@ -206,11 +207,12 @@ export function TenantResourcesPage() {
 export function TenantCalendarPage() {
   const { showToast } = useToast(); const loader = useCallback(() => academicEventsApi.list(), []); const { data, loading, error, reload } = useRemote(loader);
   const [busy, setBusy] = useState(false); const [form, setForm] = useState({ title: '', description: '', eventType: 'EVENT' as EventType, startDate: '', endDate: '' });
+  const [calendarSystem, setCalendarSystem] = useState<CalendarSystem>('AD');
   const submit = async (event: FormEvent) => { event.preventDefault(); setBusy(true); try { await academicEventsApi.createTenantWide({ ...form, startDate: new Date(form.startDate).toISOString(), endDate: new Date(form.endDate).toISOString() }); showToast('Institution-wide event published.', 'success'); setForm({ title: '', description: '', eventType: 'EVENT', startDate: '', endDate: '' }); await reload(); } catch (next) { showToast(errorMessage(next), 'error'); } finally { setBusy(false); } };
   const events = data?.events ?? [];
   return <div style={{ display: 'grid', gap: 18 }}><Header title="Academic Calendar" description="Plan institution-wide events and review the complete academic month."/>
     {error ? <RemoteState kind="error" message={errorMessage(error)} onRetry={() => void reload()}/> : null}
-    <TenantAcademicCalendar events={events} loading={loading} />
+    <TenantAcademicCalendar events={events} loading={loading} calendarSystem={calendarSystem} onCalendarSystemChange={setCalendarSystem} />
     <div className="tenant-calendar-page__lower"><Card hoverable={false}><h3>New institution event</h3><form onSubmit={(e) => void submit(e)} style={{ display: 'grid', gap: 14, marginTop: 14 }}>
       <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700 }}>Event title<input style={input} placeholder="Parent orientation" value={form.title} onChange={(e) => setForm((old) => ({ ...old, title: e.target.value }))} required/></label>
       <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700 }}>Event type<select style={input} value={form.eventType} onChange={(e) => setForm((old) => ({ ...old, eventType: e.target.value as EventType }))}><option value="EVENT">Event</option><option value="HOLIDAY">Holiday</option><option value="EXAM">Exam</option><option value="FEE_DUE">Fee due</option></select></label>
@@ -218,7 +220,7 @@ export function TenantCalendarPage() {
       <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700 }}>Ends<input style={input} type="datetime-local" value={form.endDate} onChange={(e) => setForm((old) => ({ ...old, endDate: e.target.value }))} required/></label>
       <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700 }}>Description<textarea style={{ ...input, minHeight: 92, resize: 'vertical' }} placeholder="What should branches know about this event?" value={form.description} onChange={(e) => setForm((old) => ({ ...old, description: e.target.value }))}/></label>
       <Button disabled={busy} aria-busy={busy} type="submit">{busy ? 'Publishing…' : 'Publish to all branches'}</Button></form></Card>
-      <Card hoverable={false}><h3>Published events</h3><p style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 13 }}>Institution and branch events currently visible on the calendar.</p>{events.map((item: AcademicEvent) => <div key={item.id} style={row}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}><div><strong>{item.title}</strong><p style={{ marginTop: 4, fontSize: 12, color: 'var(--text-muted)' }}>{new Date(item.startDate).toLocaleString()} · {item.eventType.replace('_', ' ')}</p></div><StatusBadge variant={item.branchId ? 'info' : 'success'}>{item.branchId ? 'Branch' : 'Institution-wide'}</StatusBadge></div></div>)}</Card>
+      <Card hoverable={false}><h3>Published events</h3><p style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 13 }}>Institution and branch events displayed in {calendarSystem}.</p>{events.map((item: AcademicEvent) => <div key={item.id} style={row}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}><div><strong>{item.title}</strong><p style={{ marginTop: 4, fontSize: 12, color: 'var(--text-muted)' }}>{calendarDateLabel(new Date(item.startDate), calendarSystem, false)} · {new Date(item.startDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {item.eventType.replace('_', ' ')}</p></div><StatusBadge variant={item.branchId ? 'info' : 'success'}>{item.branchId ? 'Branch' : 'Institution-wide'}</StatusBadge></div></div>)}</Card>
     </div>
   </div>;
 }
@@ -279,7 +281,7 @@ export function TenantAdmissionsPage() {
   const requiredAdmissionFields = ['branchId','gradeId','admittedAt','studentFirst','studentLast','studentEmail','studentPhone','dateOfBirth','gender','nationality','permanentAddress','fatherName','fatherPhone','motherName','motherPhone','primaryParent','emergencyContactName','emergencyContactPhone','emergencyContactRelationship'] as const;
   const selectedPrimaryEmail = form.primaryParent === 'Father' ? form.fatherEmail : form.primaryParent === 'Mother' ? form.motherEmail : form.primaryParent === 'Optional parent' ? form.optionalParentEmail : '';
   const optionalParentComplete = form.primaryParent !== 'Optional parent' || Boolean(form.optionalParentName.trim() && form.optionalParentPhone.trim() && form.optionalParentEmail.trim());
-  const academicPlacementReady = subjectBilling ? selectedSubjectClassIds.length > 0 : Boolean(form.classId);
+  const academicPlacementReady = subjectBilling ? selectedSubjectClassIds.length > 0 : true;
   const canPrint = requiredAdmissionFields.every((key) => form[key].trim()) && academicPlacementReady && Boolean(selectedPrimaryEmail.trim()) && optionalParentComplete && !busy;
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -291,7 +293,7 @@ export function TenantAdmissionsPage() {
       const selectedParent = form.primaryParent === 'Father' ? { name: form.fatherName, email: form.fatherEmail, phone: form.fatherPhone } : form.primaryParent === 'Mother' ? { name: form.motherName, email: form.motherEmail, phone: form.motherPhone } : { name: form.optionalParentName, email: form.optionalParentEmail, phone: form.optionalParentPhone };
       if (form.studentEmail.trim().toLowerCase() === selectedParent.email.trim().toLowerCase()) throw new Error('Student and primary parent emails must be different.');
       const nameParts = selectedParent.name.trim().split(/\s+/); const firstName = nameParts.shift() ?? ''; const lastName = nameParts.join(' ') || firstName;
-      const classIds = subjectBilling ? selectedSubjectClassIds : [form.classId];
+      const classIds = subjectBilling ? selectedSubjectClassIds : [];
       const admission = await request<AdmissionResult>('/users/admissions', { method: 'POST', body: JSON.stringify({ branchId: form.branchId, gradeId: form.gradeId, classIds, student: { firstName: form.studentFirst, lastName: form.studentLast, email: form.studentEmail, phone: form.studentPhone }, parent: { firstName, lastName, email: selectedParent.email, phone: selectedParent.phone }, admissionDetails }) });
       setResult(admission); showToast(admission.message, admission.loginDelivery && !admission.loginDelivery.delivered ? 'error' : 'success');
     } catch (next) { setPrintAfterSave(false); showToast(errorMessage(next), 'error'); } finally { setBusy(false); }
@@ -305,7 +307,7 @@ export function TenantAdmissionsPage() {
       <div style={grid}>
         <label>Branch<select required style={input} value={form.branchId} onChange={(e) => { const branchId = e.target.value; const classId = classes.find((item) => item.branchId === branchId && item.gradeId === form.gradeId && item.courseType === 'REGULAR')?.id ?? ''; setSubjectClasses({}); setForm((old) => ({ ...old, branchId, classId })); }}>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
         <label>Grade<select required style={input} value={form.gradeId} onChange={(e) => { const gradeId = e.target.value; const nextGrade = grades.find((grade) => grade.id === gradeId); const classId = nextGrade?.billingMode === 'GRADE' ? classes.find((item) => item.branchId === form.branchId && item.gradeId === gradeId && item.courseType === 'REGULAR')?.id ?? '' : ''; setSubjectClasses({}); setForm((old) => ({ ...old, gradeId, classId })); }}>{grades.map((grade) => <option key={grade.id} value={grade.id}>{grade.name}</option>)}</select></label>
-        {!subjectBilling ? <label>Regular class<select required style={input} value={form.classId} onChange={(e) => setForm((old) => ({ ...old, classId: e.target.value }))}><option value="">Select class</option>{availableClasses.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.courseName}</option>)}</select>{!availableClasses.length ? <small style={{ color: 'var(--color-error)' }}>Create a regular class for this branch and grade before admission.</small> : null}</label> : <div><strong style={{ fontSize: 13 }}>Subject selection *</strong><small style={{ display: 'block', marginTop: 6, color: 'var(--text-muted)' }}>{selectedSubjectClassIds.length} subject{selectedSubjectClassIds.length === 1 ? '' : 's'} selected</small></div>}
+        {subjectBilling ? <div><strong style={{ fontSize: 13 }}>Subject selection *</strong><small style={{ display: 'block', marginTop: 6, color: 'var(--text-muted)' }}>{selectedSubjectClassIds.length} subject{selectedSubjectClassIds.length === 1 ? '' : 's'} selected</small></div> : <div><strong style={{ fontSize: 13 }}>Regular admission</strong><small style={{ display: 'block', marginTop: 6, color: 'var(--text-muted)' }}>The student is admitted to the selected grade. Extra-class enrollment is managed separately.</small></div>}
         <label>Admission date and time *<input required type="datetime-local" style={input} value={form.admittedAt} onChange={(e) => setForm((old) => ({ ...old, admittedAt: e.target.value }))}/></label>
       </div>
       {subjectBilling ? <fieldset className="admission-fieldset"><legend>Class 11–12 subjects and classes</legend><p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Select the subjects this student will study. Each selected subject contributes to monthly billing.</p><div className="admission-subject-grid">{subjectGroups.map((group) => { const selectable = group.fee > 0 && group.classes.length > 0; return <label key={group.courseId} className={`admission-subject-card${subjectClasses[group.courseId] ? ' is-selected' : ''}${!selectable ? ' is-disabled' : ''}`}><span><input type="checkbox" disabled={!selectable} checked={Boolean(subjectClasses[group.courseId])} onChange={(event) => setSubjectClasses((current) => ({ ...current, [group.courseId]: event.target.checked ? group.classes[0]?.id ?? '' : '' }))} /><strong>{group.courseName}</strong></span><small>{group.fee <= 0 ? 'Set the subject price in Courses first' : !group.classes.length ? 'Create a class for this subject first' : `NPR ${group.fee.toLocaleString('en-NP')}/month before tax`}</small>{subjectClasses[group.courseId] ? <select aria-label={`${group.courseName} class`} value={subjectClasses[group.courseId]} onChange={(event) => setSubjectClasses((current) => ({ ...current, [group.courseId]: event.target.value }))}>{group.classes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select> : null}</label>; })}</div>{!subjectGroups.length ? <p role="alert" style={{ color: 'var(--color-error)' }}>Create priced subjects and classes for this grade before admission.</p> : null}</fieldset> : null}
@@ -329,18 +331,32 @@ export function TenantAdmissionsPage() {
 }
 
 export function TenantCertificatesPage() {
-  const [templates, setTemplates] = useState([
-    { id: '1', name: 'Course Completion Certificate', type: 'COMPLETION', status: 'ACTIVE' },
-    { id: '2', name: 'Certificate of Merit', type: 'MERIT', status: 'ACTIVE' },
-    { id: '3', name: 'Leaving Certificate', type: 'LEAVING', status: 'DRAFT' },
-  ]);
+  const { showToast } = useToast();
+  const [templates, setTemplates] = useState<Array<{ id: string; name: string; type: string; status: string }>>([]);
   const [form, setForm] = useState({ name: '', type: 'COMPLETION' });
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const addTemplate = (e: FormEvent) => {
+  const loadTemplates = useCallback(async () => {
+    setLoading(true);
+    try { const result = await api.branchAdmin.getCertificateOptions(); setTemplates(result.templates.map((template) => ({ ...template, status: 'ACTIVE' }))); }
+    catch (next) { showToast(errorMessage(next), 'error'); }
+    finally { setLoading(false); }
+  }, [showToast]);
+  useEffect(() => { void loadTemplates(); }, [loadTemplates]);
+
+  const addTemplate = async (e: FormEvent) => {
     e.preventDefault();
-    if (!form.name.trim()) return;
-    setTemplates(old => [...old, { id: String(Date.now()), name: form.name, type: form.type, status: 'DRAFT' }]);
-    setForm({ name: '', type: 'COMPLETION' });
+    if (!form.name.trim() || !file) return;
+    setBusy(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error('Certificate file could not be read.')); reader.readAsDataURL(file); });
+      await request('/certificates/templates', { method: 'POST', body: JSON.stringify({ name: form.name.trim(), type: form.type, layoutConfig: { sourceFile: { name: file.name, mimeType: file.type, dataUrl } } }) });
+      setForm({ name: '', type: 'COMPLETION' }); setFile(null); const inputElement = document.getElementById('certificate-file') as HTMLInputElement | null; if (inputElement) inputElement.value = '';
+      await loadTemplates(); showToast('Certificate template uploaded and saved.', 'success');
+    } catch (next) { showToast(errorMessage(next), 'error'); }
+    finally { setBusy(false); }
   };
 
   return (
@@ -369,11 +385,11 @@ export function TenantCertificatesPage() {
                     <StatusBadge variant={t.status === 'ACTIVE' ? 'success' : 'warning'}>{t.status}</StatusBadge>
                   </td>
                   <td style={{ padding: '12px 8px', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                    <Button variant="outline" style={{ padding: '4px 8px', minHeight: 'unset', height: '28px', fontSize: '12px' }}>Edit Design</Button>
-                    {t.status === 'DRAFT' && <Button style={{ padding: '4px 8px', minHeight: 'unset', height: '28px', fontSize: '12px' }} onClick={() => setTemplates(old => old.map(x => x.id === t.id ? { ...x, status: 'ACTIVE' } : x))}>Activate</Button>}
+                    <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>Saved in institution library</span>
                   </td>
                 </tr>
               ))}
+              {!loading && !templates.length ? <tr><td colSpan={4} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>No certificate templates have been uploaded.</td></tr> : null}
             </tbody>
           </table>
         </Card>
@@ -390,15 +406,17 @@ export function TenantCertificatesPage() {
               Certificate Type
               <select style={input} value={form.type} onChange={e => setForm(old => ({ ...old, type: e.target.value }))}>
                 <option value="COMPLETION">Course Completion</option>
-                <option value="MERIT">Merit / Achievement</option>
-                <option value="LEAVING">Leaving / Transfer</option>
+                <option value="ACHIEVEMENT">Achievement</option>
+                <option value="ATTENDANCE">Attendance</option>
+                <option value="CUSTOM">Custom</option>
               </select>
             </label>
+            <label htmlFor="certificate-file" style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700 }}>Certificate file *<input id="certificate-file" type="file" accept="application/pdf,image/png,image/jpeg" required style={input} onChange={(event) => { const selected = event.target.files?.[0] ?? null; if (selected && selected.size > 5 * 1024 * 1024) { event.target.value = ''; setFile(null); showToast('Choose a PDF or image smaller than 5 MB.', 'error'); return; } setFile(selected); }} /><small style={{ color: 'var(--text-muted)', fontWeight: 400 }}>PDF, PNG, or JPG. Maximum 5 MB.</small></label>
             <div style={{ padding: '12px', background: 'var(--color-surface)', border: '1px solid var(--border)', borderRadius: '8px' }}>
               <strong style={{ fontSize: '13px' }}>Design Builder</strong>
               <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>Visual template editor will open after creation to add branding and placeholders (e.g. {"{{studentName}}"}, {"{{branchName}}"}).</p>
             </div>
-            <Button type="submit">Create Template</Button>
+            <Button type="submit" disabled={busy || !file} aria-busy={busy}>{busy ? 'Uploading…' : 'Upload template'}</Button>
           </form>
         </Card>
       </div>
@@ -414,6 +432,7 @@ export function TenantLeaveRequestsPage() {
   const [decisionErrors, setDecisionErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [selectedDecision, setSelectedDecision] = useState<(typeof requests)[number] | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setLoadError('');
@@ -489,16 +508,18 @@ export function TenantLeaveRequestsPage() {
           <h3 style={{ fontSize: '18px', marginBottom: '16px' }}>Recent Decisions</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {history.map(req => (
-              <div key={req.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', borderBottom: '1px solid var(--border)' }}>
+              <button type="button" key={req.id} onClick={() => setSelectedDecision(req)} aria-label={`View leave request details for ${req.staffName}`} style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', padding: '12px', border: 0, borderBottom: '1px solid var(--border)', background: 'transparent', color: 'var(--color-text)', cursor: 'pointer', textAlign: 'left', minHeight: 48 }}>
                 <div>
                   <strong>{req.staffName}</strong> · {req.leaveType.replaceAll('_', ' ')} ({req.branchName})
+                  <span style={{ display: 'block', marginTop: 4, color: 'var(--text-muted)', fontSize: 12 }}>View request details</span>
                 </div>
                 <StatusBadge variant={req.status === 'APPROVED_LEVEL2' ? 'success' : 'error'}>{req.status === 'APPROVED_LEVEL2' ? 'Approved' : 'Rejected'}</StatusBadge>
-              </div>
+              </button>
             ))}
           </div>
         </Card>
       )}
+      {selectedDecision ? <div role="dialog" aria-modal="true" aria-labelledby="leave-decision-title" onClick={() => setSelectedDecision(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.5)', display: 'grid', placeItems: 'center', padding: 16 }}><div onClick={(event) => event.stopPropagation()} style={{ width: 'min(560px, 100%)' }}><Card hoverable={false}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}><div><StatusBadge variant={selectedDecision.status === 'APPROVED_LEVEL2' ? 'success' : 'error'}>{selectedDecision.status === 'APPROVED_LEVEL2' ? 'Approved' : 'Rejected'}</StatusBadge><h3 id="leave-decision-title" style={{ marginTop: 10 }}>{selectedDecision.staffName}</h3><p style={{ color: 'var(--text-muted)', marginTop: 4 }}>{selectedDecision.branchName}</p></div><Button variant="outline" onClick={() => setSelectedDecision(null)}>Close</Button></div><dl style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginTop: 20 }}><div><dt style={{ color: 'var(--text-muted)', fontSize: 12 }}>Leave type</dt><dd style={{ margin: '4px 0 0', fontWeight: 600 }}>{selectedDecision.leaveType.replaceAll('_', ' ')}</dd></div><div><dt style={{ color: 'var(--text-muted)', fontSize: 12 }}>Dates</dt><dd style={{ margin: '4px 0 0', fontWeight: 600 }}>{new Date(selectedDecision.startDate).toLocaleDateString('en-NP')} – {new Date(selectedDecision.endDate).toLocaleDateString('en-NP')}</dd></div></dl><div style={{ marginTop: 20, padding: 14, border: '1px solid var(--border)', borderRadius: 8 }}><strong style={{ fontSize: 12 }}>Request reason</strong><p style={{ marginTop: 6 }}>{selectedDecision.reason}</p></div></Card></div></div> : null}
     </div>
   );
 }

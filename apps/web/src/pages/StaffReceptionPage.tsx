@@ -159,14 +159,14 @@ export function StaffReceptionPage() {
 
       {view === 'appointments' ? (
         <section className="reception-workspace" role="tabpanel">
-          <div className="reception-toolbar"><div><h3>Today’s appointments</h3><p>Confirm the visitor and direct them. Appointment changes are handled by teachers or administrators.</p></div><span className="read-only-chip"><span className="material-symbols-outlined">visibility</span> Read only</span></div>
+          <div className="reception-toolbar"><div><h3>Accepted appointments</h3><p>Approved and confirmed parent visits for the next 30 days. Verify the visitor and direct them on arrival.</p></div><span className="read-only-chip"><span className="material-symbols-outlined">visibility</span> Read only</span></div>
           {data.appointments.length ? <div className="appointment-list">{data.appointments.map((item) => (
             <article key={item.id} className="appointment-row">
-              <time dateTime={item.scheduledTime}>{TIME_FORMAT.format(new Date(item.scheduledTime))}</time>
+              <time dateTime={item.scheduledTime}><span style={{ display: 'block', fontSize: 12 }}>{new Intl.DateTimeFormat('en-NP', { month: 'short', day: 'numeric' }).format(new Date(item.scheduledTime))}</span>{TIME_FORMAT.format(new Date(item.scheduledTime))}</time>
               <div><strong>{item.parentName}</strong><span>Meeting with {item.destination}</span></div>
               <span className={`appointment-status appointment-status--${item.status.toLowerCase()}`}>{appointmentLabel(item.status)}</span>
             </article>
-          ))}</div> : <Empty icon="event_busy" title="No appointments today" detail="Booked parent and visitor appointments will appear here." />}
+          ))}</div> : <Empty icon="event_busy" title="No accepted appointments" detail="Appointments appear here after a Branch Admin or Tenant Admin accepts them." />}
         </section>
       ) : null}
 

@@ -246,9 +246,9 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
   const studentFields = validateNewUserBody(admissionShape.data.student);
   const parentFields = validateNewUserBody(admissionShape.data.parent);
   const admissionDetails = validateAdmissionDetails(admissionShape.data.admissionDetails);
-  if (!branchId || !gradeId || !classIds.length || classIds.length > 20 || !studentFields || !parentFields || !admissionDetails.success) {
+  if (!branchId || !gradeId || classIds.length > 20 || !studentFields || !parentFields || !admissionDetails.success) {
     return res.status(400).json({
-      error: admissionDetails.success ? 'Branch, grade, regular class, and complete student and primary guardian identity details are required.' : admissionDetails.error,
+      error: admissionDetails.success ? 'Branch, grade, and complete student and primary guardian identity details are required.' : admissionDetails.error,
     });
   }
 
@@ -262,8 +262,9 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
     }),
   ]);
   if (!branch || !grade || regularClasses.length !== classIds.length) return res.status(404).json({ error: 'Branch, grade, or a matching regular class was not found in your institution.' });
-  if (grade.billingMode === 'GRADE' && regularClasses.length !== 1) return res.status(400).json({ error: 'Package-billed grades require one regular class placement.' });
+  if (grade.billingMode === 'GRADE' && regularClasses.length) return res.status(400).json({ error: 'Regular admissions are grade-based. Enroll extra classes separately after admission.' });
   if (grade.billingMode === 'SUBJECT') {
+    if (!regularClasses.length) return res.status(400).json({ error: 'Choose at least one subject class for a subject-billed grade.' });
     if (new Set(regularClasses.map((item) => item.courseId)).size !== regularClasses.length) return res.status(400).json({ error: 'Choose only one class for each subject.' });
     const missingPrice = regularClasses.find((item) => Number((item.course.feeStructure as { monthlyBase?: number })?.monthlyBase ?? 0) <= 0);
     if (missingPrice) return res.status(409).json({ error: `${missingPrice.course.name} needs a monthly price before admission.` });
@@ -389,7 +390,7 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
         parentId: result.parent.id,
         branchId,
         gradeId,
-        classId: regularClass.id,
+        classId: regularClass?.id ?? null,
         classIds: regularClasses.map((item) => item.id),
         admissionNumber,
         admittedAt: admittedAt.toISOString(),
@@ -401,7 +402,7 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
           branchName: branch.name,
           branchAddress: branch.address,
           gradeName: grade.name,
-          className: regularClasses.map((item) => `${item.course.name} · ${item.name}`).join(', '),
+          className: regularClasses.length ? regularClasses.map((item) => `${item.course.name} · ${item.name}`).join(', ') : 'Regular grade admission',
           student: { ...studentFields, ...admissionDetails.data },
           primaryGuardian: savedAdmissionRecord.primaryGuardian,
           admittedBy: savedAdmissionRecord.admittedBy,

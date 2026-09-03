@@ -152,7 +152,7 @@ async function loadManagedResult(req: TenantRequest, resultId: string) {
           },
         },
       },
-      scores: { include: { student: { include: { user: { select: { firstName: true, lastName: true } } } } } },
+      scores: { include: { student: { include: { user: { select: { firstName: true, lastName: true } } } }, recorder: { select: { firstName: true, lastName: true } } } },
     },
   });
   if (!definition || !branchAllowed(req, definition.branchId, 'manage_branch_calendar')) return null;
@@ -212,7 +212,7 @@ router.get('/result-definitions/:id/report', async (req: TenantRequest, res: Res
   return res.json({
     institutionName: tenant?.name ?? 'Tuition Management System',
     event: { id: definition.id, title: definition.title, subject: definition.subject, testDate: definition.testDate, className: definition.class.name, gradeName: definition.class.course.grade?.name ?? 'Ungraded', branchName: definition.class.branch.name },
-    results: definition.scores.map((score) => ({ id: score.id, studentId: score.studentId, admissionNumber: definition.class.enrollments.find((entry) => entry.studentId === score.studentId)?.student.admissionNumber ?? '', studentName: `${score.student.user.firstName} ${score.student.user.lastName}`.trim(), score: Number(score.score), maximum: Number(score.maximum), passMarks: Number(score.passMarks ?? 0), percentile: Number(score.percentile ?? 0), published: Boolean(score.publishedAt) })).sort((a, b) => a.studentName.localeCompare(b.studentName)),
+    results: definition.scores.map((score) => ({ id: score.id, studentId: score.studentId, admissionNumber: definition.class.enrollments.find((entry) => entry.studentId === score.studentId)?.student.admissionNumber ?? '', studentName: `${score.student.user.firstName} ${score.student.user.lastName}`.trim(), teacherName: `${score.recorder.firstName} ${score.recorder.lastName}`.trim(), score: Number(score.score), maximum: Number(score.maximum), passMarks: Number(score.passMarks ?? 0), percentile: Number(score.percentile ?? 0), resultSheetUrl: score.resultSheetUrl, published: Boolean(score.publishedAt) })).sort((a, b) => a.studentName.localeCompare(b.studentName)),
   });
 });
 

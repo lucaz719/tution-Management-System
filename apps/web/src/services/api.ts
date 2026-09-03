@@ -512,6 +512,10 @@ export const api = {
       const data = await request<{ classes: any[] }>('/courses/classes');
       return data.classes ?? [];
     },
+    listEligibleClassStudents: async (classId: string) => {
+      const data = await request<{ students: Array<{ studentId: string; studentName: string; studentEmail: string }> }>(`/courses/classes/${encodeURIComponent(classId)}/eligible-students`);
+      return data.students ?? [];
+    },
     createClass: async (payload: { courseId: string; name: string; schedule: unknown; teacherId?: string | null }) => {
       return request<{ message: string; class: any }>('/courses/classes', {
         method: 'POST',
