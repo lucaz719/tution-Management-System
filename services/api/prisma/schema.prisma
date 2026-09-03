@@ -1106,6 +1106,12 @@ model Expense {
   updatedAt  DateTime @updatedAt
 }
 
+enum PayrollStatus {
+  PENDING
+  APPROVED_FOR_MANUAL_PAYMENT
+  MANUALLY_PAID
+}
+
 model Payroll {
   id                   String      @id @default(uuid())
   tenantId             String
@@ -1114,20 +1120,28 @@ model Payroll {
   staffRecord          StaffRecord @relation(fields: [staffRecordId], references: [id])
   month                Int
   year                 Int
-  baseSalary           Float
-  attendanceDeductions Float
-  bonuses              Float
-  netPayable           Float
-  status               String      @default("PENDING") // PENDING, APPROVED_FOR_MANUAL_PAYMENT, MANUALLY_PAID
+  payslipNumber        String      @unique
+  baseSalary           Decimal     @db.Decimal(12, 2)
+  attendanceDeductions Decimal     @db.Decimal(12, 2)
+  bonuses              Decimal     @db.Decimal(12, 2)
+  netPayable           Decimal     @db.Decimal(12, 2)
+  status               PayrollStatus @default(PENDING)
+  calculationBreakdown Json
+  adjustmentRemarks    String?
+  calculatedBy         String?
+  calculatedAt         DateTime    @default(now())
   approvedBy           String?
   approvedAt           DateTime?
   settlementReference  String?
+  paymentEvidence      String?
+  settlementDate       DateTime?
   reconciledBy         String?
   paymentDate          DateTime?
   createdAt            DateTime    @default(now())
   updatedAt            DateTime    @updatedAt
 
   @@unique([staffRecordId, month, year])
+  @@index([tenantId, year, month, status])
 }
 
 model RefundRequest {

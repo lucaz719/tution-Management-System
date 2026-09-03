@@ -1174,7 +1174,7 @@ router.get(
       return res.status(200).json(buildFinancialIntelligence({
         now,
         expenses,
-        payrolls,
+        payrolls: payrolls.map((item) => ({ ...item, netPayable: Number(item.netPayable) })),
         projectedIncomeNpr,
         activeEnrollments: enrollments.length,
       }));
@@ -1719,7 +1719,7 @@ router.get(
       const totalExpenses = expenses.reduce((sum: number, exp: any) => sum + Number(exp.amount), 0);
 
       const payrolls = await prisma.payroll.findMany({
-        where: { tenantId: req.tenantId!, status: 'PAID' },
+        where: { tenantId: req.tenantId!, status: 'MANUALLY_PAID' },
       });
       const totalPaidPayrolls = payrolls.reduce((sum: number, pay: any) => sum + Number(pay.netPayable), 0);
 

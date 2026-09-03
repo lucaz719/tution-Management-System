@@ -760,6 +760,10 @@ async function main(): Promise<void> {
     assert.equal(response.status, 403, 'Branch Admin cannot calculate tenant-wide payroll');
     response = await request('GET', '/api/hr/payroll', branchAdminCookie);
     assert.equal(response.status, 403, 'Branch Admin cannot view tenant-wide payroll');
+    response = await request('POST', '/api/hr/payroll/preview', adminACookie, { month: 6, year: 2026 });
+    assert.equal(response.status, 200, 'Tenant Admin can preview payroll without writing records');
+    assert(response.body.payrolls.some((item: any) => item.staffRecordId === staffRecord.id));
+    assert.equal(await prisma.payroll.count({ where: { tenantId: tenantA.id, month: 6, year: 2026 } }), 0);
     response = await request('POST', '/api/hr/payroll/calculate', adminACookie, {
       month: 6,
       year: 2026,
@@ -772,6 +776,8 @@ async function main(): Promise<void> {
     });
     assert.equal(response.status, 201);
     assert(response.body.payrolls.some((item: any) => item.staffRecordId === staffRecord.id));
+    response = await request('POST', '/api/hr/payroll/calculate', adminACookie, { month: 6, year: 2026 });
+    assert.equal(response.status, 409, 'duplicate payroll periods are rejected');
     response = await request('GET', '/api/hr/payroll?month=6&year=2026&status=PENDING&search=staff-a', adminACookie);
     assert.equal(response.status, 200, 'payroll supports period, status, and staff search filters');
     assert(response.body.payrolls.every((item: any) => item.month === 6 && item.year === 2026 && item.status === 'PENDING'));
@@ -786,11 +792,13 @@ async function main(): Promise<void> {
         staffRecordId: staffRecord.id,
         month: 7,
         year: 2026,
+        payslipNumber: `PS-202607-${staffRecord.id.slice(0, 8)}`,
         baseSalary: 40000,
         attendanceDeductions: 0,
         bonuses: 0,
         netPayable: 40000,
         status: 'PENDING',
+        calculationBreakdown: { baseSalary: 40000, bonuses: 0, deductions: 0, netPayable: 40000 },
       },
     });
     response = await request('POST', `/api/hr/payroll/approve/${payroll.id}`, adminBCookie, {});
@@ -811,6 +819,23 @@ async function main(): Promise<void> {
     assert.equal(response.status, 200);
     assert.equal(response.body.payroll.status, 'MANUALLY_PAID');
     assert.equal(response.body.payroll.settlementReference, 'BANK-SALARY-001');
+    const bulkPayroll = await prisma.payroll.create({ data: {
+      tenantId: tenantA.id, staffRecordId: staffRecord.id, month: 8, year: 2026,
+      payslipNumber: `PS-202608-${staffRecord.id.slice(0, 8)}`, baseSalary: 40000,
+      attendanceDeductions: 10.01, bonuses: 20.02, netPayable: 40010.01,
+      calculationBreakdown: { baseSalary: 40000, bonuses: 20.02, deductions: 10.01, netPayable: 40010.01 },
+      adjustmentRemarks: 'Integration adjustment', status: 'PENDING',
+    } });
+    response = await request('POST', '/api/hr/payroll/approve-bulk', adminBCookie, { ids: [bulkPayroll.id] });
+    assert.equal(response.status, 404, 'bulk approval hides foreign-tenant payroll identifiers');
+    response = await request('POST', '/api/hr/payroll/approve-bulk', adminACookie, { ids: [bulkPayroll.id] });
+    assert.equal(response.status, 200);
+    response = await request('POST', '/api/hr/payroll/reconcile-bulk', adminACookie, { entries: [{ id: bulkPayroll.id, reference: 'BANK-BULK-001', paymentEvidence: 'bank-statement-row-1' }] });
+    assert.equal(response.status, 200);
+    const settledBulk = await prisma.payroll.findUniqueOrThrow({ where: { id: bulkPayroll.id } });
+    assert.equal(settledBulk.status, 'MANUALLY_PAID');
+    assert.equal(settledBulk.paymentEvidence, 'bank-statement-row-1');
+    assert(settledBulk.settlementDate);
 
     // Courses, classes, enrollment, billing controls, timetable, and CRUD.
     response = await request('POST', '/api/courses/classes', adminACookie, {
