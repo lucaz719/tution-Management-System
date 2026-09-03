@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:tms_mobile/core/auth/role_codes.dart';
 import 'package:tms_mobile/features/auth/data/auth_service.dart';
 
 /// Global auth state — drives router guards and role-based navigation.
@@ -39,9 +40,12 @@ class AuthState {
     if (isTwoFactorPending) return '/2fa';
 
     return switch (user!.role) {
-      'TEACHER' => '/teacher/home',
-      'STUDENT' => '/student/home',
-      'PARENT' => '/parent/home',
+      RoleCodes.tenantAdmin => '/tenant/home',
+      RoleCodes.branchAdmin => '/branch/home',
+      RoleCodes.janitor => '/janitor/home',
+      RoleCodes.teacher => '/teacher/home',
+      RoleCodes.student => '/student/home',
+      RoleCodes.parent => '/parent/home',
       _ => '/login',
     };
   }

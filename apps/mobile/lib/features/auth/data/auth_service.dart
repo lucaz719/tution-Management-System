@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:tms_mobile/core/auth/role_codes.dart';
 import 'package:tms_mobile/core/network/api_client.dart';
 
 /// Represents a failure in the auth flow with a human-readable message.
@@ -40,12 +41,22 @@ class AuthUser {
         ? json['user'] as Map<String, dynamic>
         : json;
 
-    // Derive role — API returns 'roles' array with {roleName, permissions, branchId}
-    String role = 'TEACHER';
+    // API may return a direct role code/name or a roles entry with roleName.
+    String? rawRole;
     if (user['role'] is String) {
-      role = user['role'] as String;
+      rawRole = user['role'] as String;
     } else if (user['roles'] is List && (user['roles'] as List).isNotEmpty) {
-      role = (user['roles'] as List).first['roleName'] as String? ?? 'TEACHER';
+      final firstRole = (user['roles'] as List).first;
+      if (firstRole is Map) {
+        rawRole = firstRole['roleName'] as String?;
+      }
+    }
+
+    final role = normalizeRoleCode(rawRole);
+    if (role == null) {
+      throw const AuthFailure(
+        'Your account role is not supported by this mobile app.',
+      );
     }
 
     return AuthUser(
@@ -160,42 +171,42 @@ class AuthService {
   }
 
   /// Reset the password using the token from [verifyPasswordOtp].
-    static Future<void> resetPassword({
-      required String resetToken,
-      required String newPassword,
-    }) async {
-      try {
-        await _dio.post(
-          '/api/auth/reset-password',
-          data: {
-            'resetToken': resetToken,
-            'newPassword': newPassword,
-          },
-        );
-      } on DioException catch (e) {
-        throw AuthFailure(_extractMessage(e, 'Failed to reset password.'));
-      }
+  static Future<void> resetPassword({
+    required String resetToken,
+    required String newPassword,
+  }) async {
+    try {
+      await _dio.post(
+        '/api/auth/reset-password',
+        data: {
+          'resetToken': resetToken,
+          'newPassword': newPassword,
+        },
+      );
+    } on DioException catch (e) {
+      throw AuthFailure(_extractMessage(e, 'Failed to reset password.'));
     }
+  }
 
-    /// Change password for authenticated user (requires current password).
-    static Future<void> changePassword({
-      required String currentPassword,
-      required String newPassword,
-    }) async {
-      try {
-        await _dio.post(
-          '/api/auth/change-password',
-          data: {
-            'currentPassword': currentPassword,
-            'newPassword': newPassword,
-          },
-        );
-      } on DioException catch (e) {
-        throw AuthFailure(_extractMessage(e, 'Failed to change password.'));
-      }
+  /// Change password for authenticated user (requires current password).
+  static Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    try {
+      await _dio.post(
+        '/api/auth/change-password',
+        data: {
+          'currentPassword': currentPassword,
+          'newPassword': newPassword,
+        },
+      );
+    } on DioException catch (e) {
+      throw AuthFailure(_extractMessage(e, 'Failed to change password.'));
     }
+  }
 
-    /// Request a 2FA verification code for [email].
+  /// Request a 2FA verification code for [email].
   static Future<void> sendTwoFactorCode(String email) async {
     try {
       await _dio.post(

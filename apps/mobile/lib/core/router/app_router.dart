@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:tms_mobile/core/auth/role_codes.dart';
 import 'package:tms_mobile/core/providers/auth_provider.dart';
 import 'package:tms_mobile/features/auth/screens/login_screen.dart';
 import 'package:tms_mobile/features/auth/screens/forgot_password_screen.dart';
@@ -25,6 +26,11 @@ import 'package:tms_mobile/features/student/screens/student_attendance_screen.da
 import 'package:tms_mobile/features/student/screens/student_calendar_screen.dart';
 import 'package:tms_mobile/features/student/screens/student_certificates_screen.dart';
 import 'package:tms_mobile/features/student/screens/student_notifications_screen.dart';
+import 'package:tms_mobile/features/branch_manager/screens/branch_home_screen.dart';
+import 'package:tms_mobile/features/janitor/screens/janitor_home_screen.dart';
+import 'package:tms_mobile/features/janitor/screens/janitor_task_detail_screen.dart';
+import 'package:tms_mobile/features/janitor/models/janitor_task.dart';
+import 'package:tms_mobile/features/tenant_admin/screens/tenant_admin_home_screen.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authProvider);
@@ -73,9 +79,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // prevents an invalid deep link from rendering an unrelated UI first.
       if (isLoggedIn) {
         final allowedPrefix = switch (authState.user?.role) {
-          'TEACHER' => '/teacher/',
-          'STUDENT' => '/student/',
-          'PARENT' => '/parent/',
+          RoleCodes.tenantAdmin => '/tenant/',
+          RoleCodes.branchAdmin => '/branch/',
+          RoleCodes.janitor => '/janitor/',
+          RoleCodes.teacher => '/teacher/',
+          RoleCodes.student => '/student/',
+          RoleCodes.parent => '/parent/',
           _ => null,
         };
         if (allowedPrefix == null || !location.startsWith(allowedPrefix)) {
@@ -115,6 +124,54 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               ref.read(authProvider).user?.email ??
               '';
           return TwoFactorScreen(email: email);
+        },
+      ),
+
+      // ── Branch Manager routes (canonical role: BRANCH_ADMIN) ──
+      GoRoute(
+        path: '/branch/home',
+        builder: (BuildContext context, GoRouterState state) =>
+            const BranchHomeScreen(),
+      ),
+      GoRoute(
+        path: '/branch/change-password',
+        builder: (BuildContext context, GoRouterState state) =>
+            const ChangePasswordScreen(),
+      ),
+
+      // ── Tenant Admin routes ──
+      GoRoute(
+        path: '/tenant/home',
+        builder: (BuildContext context, GoRouterState state) =>
+            const TenantAdminHomeScreen(),
+      ),
+      GoRoute(
+        path: '/tenant/change-password',
+        builder: (BuildContext context, GoRouterState state) =>
+            const ChangePasswordScreen(),
+      ),
+
+      // ── Janitor routes ──
+      GoRoute(
+        path: '/janitor/home',
+        builder: (BuildContext context, GoRouterState state) =>
+            const JanitorHomeScreen(),
+      ),
+      GoRoute(
+        path: '/janitor/change-password',
+        builder: (BuildContext context, GoRouterState state) =>
+            const ChangePasswordScreen(),
+      ),
+      GoRoute(
+        path: '/janitor/task',
+        builder: (BuildContext context, GoRouterState state) {
+          final task = state.extra as JanitorTask?;
+          if (task == null) {
+            return const Scaffold(
+              body: Center(child: Text('Task details are unavailable.')),
+            );
+          }
+          return JanitorTaskDetailScreen(task: task);
         },
       ),
 

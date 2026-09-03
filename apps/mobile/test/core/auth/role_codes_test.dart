@@ -1,0 +1,60 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:tms_mobile/core/auth/role_codes.dart';
+import 'package:tms_mobile/features/auth/data/auth_service.dart';
+
+void main() {
+  group('normalizeRoleCode', () {
+    test('normalizes supported API display names to mobile role codes', () {
+      expect(normalizeRoleCode('Tenant Admin'), 'TENANT_ADMIN');
+      expect(normalizeRoleCode('Branch Admin'), 'BRANCH_ADMIN');
+      expect(normalizeRoleCode('Janitor'), 'JANITOR');
+    });
+
+    test('normalizes supported role codes regardless of surrounding whitespace',
+        () {
+      expect(normalizeRoleCode(' TENANT_ADMIN '), 'TENANT_ADMIN');
+      expect(normalizeRoleCode('branch_admin'), 'BRANCH_ADMIN');
+      expect(normalizeRoleCode('janitor'), 'JANITOR');
+    });
+
+    test('maps the Branch Manager product label to BRANCH_ADMIN', () {
+      expect(normalizeRoleCode('Branch Manager'), 'BRANCH_ADMIN');
+    });
+
+    test('returns null for absent or unsupported roles', () {
+      expect(normalizeRoleCode(null), isNull);
+      expect(normalizeRoleCode(''), isNull);
+      expect(normalizeRoleCode('Super Admin'), isNull);
+    });
+  });
+
+  group('AuthUser.fromJson', () {
+    test('stores the normalized role code from an API role display name', () {
+      final user = AuthUser.fromJson({
+        'user': {
+          'id': 'user-1',
+          'email': 'janitor@example.com',
+          'roles': [
+            {'roleName': 'Janitor'},
+          ],
+        },
+      });
+
+      expect(user.role, 'JANITOR');
+    });
+
+    test('throws AuthFailure for an unsupported role instead of defaulting',
+        () {
+      expect(
+        () => AuthUser.fromJson({
+          'user': {
+            'id': 'user-1',
+            'email': 'unknown@example.com',
+            'role': 'Super Admin',
+          },
+        }),
+        throwsA(isA<AuthFailure>()),
+      );
+    });
+  });
+}
