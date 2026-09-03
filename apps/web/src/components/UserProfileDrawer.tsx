@@ -52,7 +52,7 @@ export interface Profile {
       payroll?: { totalPaid: number; lastMonthPaid: number; nextMonthProjected: number; extraClassesPayroll?: number; history: Array<{ month: string; amount: number; status: string }> };
       timetable?: Array<{ id: string; day: string; time: string; subject: string; room: string }>;
     };
-    staff?: { designation: string; contractType: string; joiningDate: string; performanceScore?: number; hrAlerts?: Array<{ type: string; message: string; severity: 'warning' | 'error' | 'info' }> };
+    staff?: { designation: string; contractType: 'FIXED' | 'HOUR_RATE'; joiningDate: string; salaryStructure: { baseMonthlySalary?: number; hourlyRate?: number }; performanceScore?: number; hrAlerts?: Array<{ type: string; message: string; severity: 'warning' | 'error' | 'info' }> };
   };
 }
 
@@ -90,7 +90,7 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [grades, setGrades] = useState<Array<{ id: string; name: string }>>([]);
-  const [form, setForm] = useState({ firstName: '', lastName: '', phone: '', gradeName: '' });
+  const [form, setForm] = useState({ firstName: '', lastName: '', phone: '', gradeName: '', contractType: 'FIXED' as 'FIXED' | 'HOUR_RATE', compensationAmount: '' });
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [activities, setActivities] = useState<Array<{ id: string; name: string; classes: Array<{ id: string; name: string }> }>>([]);
@@ -160,7 +160,15 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
   const startEdit = () => {
     if (!profile) return;
     const [firstName, ...rest] = profile.name.split(' ');
-    setForm({ firstName, lastName: rest.join(' '), phone: profile.phone, gradeName: profile.detail.student?.grade ?? '' });
+    const staff = profile.detail.staff;
+    setForm({
+      firstName,
+      lastName: rest.join(' '),
+      phone: profile.phone,
+      gradeName: profile.detail.student?.grade ?? '',
+      contractType: staff?.contractType ?? 'FIXED',
+      compensationAmount: String(staff?.contractType === 'HOUR_RATE' ? staff.salaryStructure.hourlyRate ?? '' : staff?.salaryStructure.baseMonthlySalary ?? ''),
+    });
     if (isStudent && grades.length === 0) api.grades.list().then((g) => setGrades(g as Array<{ id: string; name: string }>)).catch(() => {});
     setEditing(true);
   };
@@ -168,12 +176,23 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
   const saveEdit = async () => {
     setBusy(true);
     try {
-      const changes: { firstName: string; lastName: string; phone: string; gradeId?: string | null } = {
+      const changes: { firstName: string; lastName: string; phone: string; gradeId?: string | null; contractType?: 'FIXED' | 'HOUR_RATE'; baseMonthlySalary?: number; hourlyRate?: number } = {
         firstName: form.firstName.trim(), lastName: form.lastName.trim(), phone: form.phone.trim(),
       };
       if (isStudent) {
         const g = grades.find((x) => x.name === form.gradeName);
         changes.gradeId = form.gradeName ? (g?.id ?? null) : null;
+      }
+      if (profile?.detail.staff) {
+        const amount = Number(form.compensationAmount);
+        if (!Number.isFinite(amount) || amount <= 0) {
+          showToast(form.contractType === 'FIXED' ? 'Enter a base monthly salary greater than zero.' : 'Enter an hourly rate greater than zero.', 'error');
+          setBusy(false);
+          return;
+        }
+        changes.contractType = form.contractType;
+        if (form.contractType === 'FIXED') changes.baseMonthlySalary = amount;
+        else changes.hourlyRate = amount;
       }
       const result = await api.people.update(userId, changes);
       if (result.droppedEnrollments && result.droppedEnrollments > 0) {
@@ -295,6 +314,18 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                       <input value={form.lastName} onChange={(e) => setForm((f) => ({ ...f, lastName: e.target.value }))} placeholder="Last name" style={editInput} />
                     </div>
                     <input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="Phone" style={editInput} />
+                    {profile.detail.staff ? (
+                      <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: 8 }}>
+                        <legend style={{ fontSize: 12, fontWeight: 700 }}>Compensation</legend>
+                        <label htmlFor="profile-contract-type" style={{ fontSize: 12, color: 'var(--text-muted)' }}>Contract type</label>
+                        <select id="profile-contract-type" value={form.contractType} onChange={(e) => setForm((f) => ({ ...f, contractType: e.target.value as 'FIXED' | 'HOUR_RATE', compensationAmount: '' }))} style={editInput}>
+                          <option value="FIXED">Fixed monthly salary</option>
+                          <option value="HOUR_RATE">Hourly, from confirmed session minutes</option>
+                        </select>
+                        <label htmlFor="profile-compensation-amount" style={{ fontSize: 12, color: 'var(--text-muted)' }}>{form.contractType === 'FIXED' ? 'Base monthly salary (NPR)' : 'Hourly rate (NPR)'}</label>
+                        <input id="profile-compensation-amount" type="text" inputMode="decimal" pattern="[0-9]+(?:\.[0-9]{1,2})?" value={form.compensationAmount} onChange={(e) => setForm((f) => ({ ...f, compensationAmount: e.target.value }))} placeholder={form.contractType === 'FIXED' ? '32000' : '500'} style={editInput} required />
+                      </fieldset>
+                    ) : null}
                     {isStudent ? (
                       <select value={form.gradeName} onChange={(e) => setForm((f) => ({ ...f, gradeName: e.target.value }))} style={editInput}>
                         <option value="">No grade</option>
@@ -314,6 +345,7 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                       <>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Designation</span><span>{profile.detail.staff.designation}</span></div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Contract</span><span>{profile.detail.staff.contractType}</span></div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>{profile.detail.staff.contractType === 'FIXED' ? 'Base monthly salary' : 'Hourly rate'}</span><span>{profile.detail.staff.contractType === 'FIXED' && profile.detail.staff.salaryStructure.baseMonthlySalary ? money(profile.detail.staff.salaryStructure.baseMonthlySalary) : profile.detail.staff.contractType === 'HOUR_RATE' && profile.detail.staff.salaryStructure.hourlyRate ? `${money(profile.detail.staff.salaryStructure.hourlyRate)}/hour` : 'Setup incomplete'}</span></div>
                         {profile.detail.staff.performanceScore !== undefined && (
                           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                             <span style={{ color: 'var(--text-muted)' }}>Performance Score</span>

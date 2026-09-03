@@ -750,7 +750,7 @@ async function main(): Promise<void> {
         joiningDate: new Date('2026-01-01'),
         designation: 'Teacher',
         contractType: 'FIXED',
-        salaryStructure: { basicMonthly: 40000 },
+        salaryStructure: { baseMonthlySalary: 40000 },
       },
     });
     response = await request('POST', '/api/hr/payroll/calculate', branchAdminCookie, {
@@ -1399,14 +1399,34 @@ async function main(): Promise<void> {
     assert.equal(response.status, 201);
     response = await request('POST', '/api/users', adminACookie, {
       branchId: branchA.id,
+      role: 'Teacher',
+      firstName: 'Missing',
+      lastName: 'Salary',
+      email: 'missing-salary@integration.tms.local',
+      phone: '9800000098',
+      contractType: 'FIXED',
+    });
+    assert.equal(response.status, 400, 'staff creation requires compensation');
+    response = await request('POST', '/api/users', adminACookie, {
+      branchId: branchA.id,
       role: 'Receptionist',
       firstName: 'Reception',
       lastName: 'User',
       email: 'reception-created@integration.tms.local',
       phone: '9800000022',
+      contractType: 'FIXED',
+      baseMonthlySalary: 28000,
     });
     assert.equal(response.status, 201);
     const createdUserId = response.body.user.id;
+    const createdStaff = await prisma.staffRecord.findUniqueOrThrow({ where: { userId: createdUserId } });
+    assert.deepEqual(createdStaff.salaryStructure, { baseMonthlySalary: 28000 });
+    response = await request('PUT', `/api/users/${createdUserId}`, adminACookie, {
+      contractType: 'HOUR_RATE',
+      hourlyRate: 550,
+    });
+    assert.equal(response.status, 200, 'existing staff compensation can be repaired or changed');
+    assert.deepEqual((await prisma.staffRecord.findUniqueOrThrow({ where: { userId: createdUserId } })).salaryStructure, { hourlyRate: 550 });
     response = await request('POST', '/api/users', adminACookie, {
       branchId: branchB.id,
       role: 'Receptionist',
@@ -1414,6 +1434,8 @@ async function main(): Promise<void> {
       lastName: 'User',
       email: 'foreign-created@integration.tms.local',
       phone: '9800000023',
+      contractType: 'FIXED',
+      baseMonthlySalary: 28000,
     });
     assert.equal(response.status, 404);
     response = await request('POST', '/api/users/bulk-students', adminACookie, {

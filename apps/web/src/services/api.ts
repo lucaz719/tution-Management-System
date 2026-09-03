@@ -153,11 +153,12 @@ export const api = {
 
   // Finances
   finances: {
+    getPaymentSettings: async () => request<{ connectIpsEnabled: boolean; staticQrEnabled: boolean; staticQrImageUrl: string; accountName: string; accountNumber: string; bankName: string; instructions: string }>('/finances/payment-settings'),
     getAccountantWorkspace: async () => request<AccountantWorkspace>('/finances/accountant-workspace'),
     getBillingLedger: async () => request<BillingLedger>('/finances/billing-ledger'),
     createInvoice: async (payload: { studentId: string; amount: number; discount: number; fine: number; invoiceType: 'TUITION' | 'SUBJECT' | 'ACTIVITY'; billingCycleStart: string; billingCycleEnd: string; dueDate: string }) =>
       request<{ message: string; invoice: BillingInvoice }>('/finances/billing-ledger/invoices', { method: 'POST', body: JSON.stringify(payload) }),
-    createPayroll: async (payload: { staffRecordId: string; month: number; year: number; baseSalary: number; bonuses: number; deductions: number }) =>
+    createPayroll: async (payload: { staffRecordId: string; month: number; year: number; bonuses: number; deductions: number }) =>
       request<{ message: string; payroll: BillingPayroll }>('/finances/billing-ledger/payrolls', { method: 'POST', body: JSON.stringify(payload) }),
     requestPettyCash: async (payload: { branchId: string; purpose: string; amount: number; items: Array<{ name: string; quantity: number; unitAmount: number }> }) =>
       request<{ message: string; pettyCash: AccountantWorkspace['pettyCash'][number] }>('/finances/petty-cash/request', {
@@ -412,7 +413,7 @@ export const api = {
         connections: { courses: string[]; teachers: string[]; parents: string[] };
       }>(`/users/${userId}/analytics`);
     },
-    update: async (userId: string, changes: { firstName?: string; lastName?: string; phone?: string; status?: string; gradeId?: string | null }) => {
+    update: async (userId: string, changes: { firstName?: string; lastName?: string; phone?: string; status?: string; gradeId?: string | null; contractType?: 'FIXED' | 'HOUR_RATE'; baseMonthlySalary?: number; hourlyRate?: number }) => {
       return request<{ message: string; droppedEnrollments?: number }>(`/users/${userId}`, { method: 'PUT', body: JSON.stringify(changes) });
     },
     deactivate: async (userId: string) => {
@@ -424,7 +425,7 @@ export const api = {
         body: JSON.stringify(payload),
       });
     },
-    create: async (payload: { firstName: string; lastName: string; email: string; phone?: string; role: string; branchId: string; gradeId?: string; studentId?: string }) => {
+    create: async (payload: { firstName: string; lastName: string; email: string; phone?: string; role: string; branchId: string; gradeId?: string; studentId?: string; contractType?: 'FIXED' | 'HOUR_RATE'; baseMonthlySalary?: number; hourlyRate?: number }) => {
       return request<{ message: string; user: any; temporaryPassword: string }>('/users', {
         method: 'POST',
         body: JSON.stringify(payload),

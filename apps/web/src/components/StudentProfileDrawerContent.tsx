@@ -16,8 +16,8 @@ interface StudentProfileDrawerContentProps {
   busy: boolean;
   editing: boolean;
   grades: Array<{ id: string; name: string }>;
-  form: { firstName: string; lastName: string; phone: string; gradeName: string };
-  setForm: React.Dispatch<React.SetStateAction<{ firstName: string; lastName: string; phone: string; gradeName: string }>>;
+  form: { firstName: string; lastName: string; phone: string; gradeName: string; contractType: 'FIXED' | 'HOUR_RATE'; compensationAmount: string };
+  setForm: React.Dispatch<React.SetStateAction<{ firstName: string; lastName: string; phone: string; gradeName: string; contractType: 'FIXED' | 'HOUR_RATE'; compensationAmount: string }>>;
   onStartEdit: () => void;
   onCancelEdit: () => void;
   onSaveEdit: () => Promise<void>;

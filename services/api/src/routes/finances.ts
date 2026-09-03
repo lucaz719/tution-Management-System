@@ -13,8 +13,69 @@ import { parsePlainRecord, parseStrictKeys, parseStrictObject, readBoolean, read
 import { activateAdmissionAndSendLogins } from '../utils/admission-logins';
 import { buildFinancialIntelligence } from '../utils/financial-intelligence';
 import { invoiceTypeLabel } from '../utils/invoice-document';
+import {
+  compensationStructure,
+  createPayrollRecords,
+  PayrollConfigurationError,
+  PayrollPeriodConflictError,
+} from '../services/payroll-service';
 
 const router = Router();
+
+type PaymentSettings = {
+  connectIpsEnabled: boolean;
+  staticQrEnabled: boolean;
+  staticQrImageUrl: string;
+  accountName: string;
+  accountNumber: string;
+  bankName: string;
+  instructions: string;
+};
+
+const defaultPaymentSettings: PaymentSettings = {
+  connectIpsEnabled: false, staticQrEnabled: false,
+  staticQrImageUrl: '', accountName: '', accountNumber: '', bankName: '', instructions: '',
+};
+
+function paymentSettings(value: Prisma.JsonValue | null | undefined): PaymentSettings {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return defaultPaymentSettings;
+  return { ...defaultPaymentSettings, ...(value as Partial<PaymentSettings>) };
+}
+
+router.get('/payment-settings', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const tenant = await prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { paymentSettings: true } });
+  if (!tenant) return res.status(404).json({ error: 'Tenant not found.' });
+  const settings = paymentSettings(tenant.paymentSettings);
+  const publicApiBaseUrl = (process.env.CONNECTIPS_PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+  return res.json({
+    ...settings,
+    connectIpsServerReady: process.env.CONNECTIPS_ENABLED === 'true',
+    connectIpsServerEnvironment: (process.env.CONNECTIPS_ENVIRONMENT || 'STAGING').toUpperCase(),
+    successReturnUrl: `${publicApiBaseUrl}/api/finances/connectips/return/success`,
+    failureReturnUrl: `${publicApiBaseUrl}/api/finances/connectips/return/failure`,
+  });
+});
+
+router.put('/payment-settings', authMiddleware, async (req: TenantRequest, res: Response) => {
+  if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may change payment settings.' });
+  const shape = parseStrictKeys(req.body, ['connectIpsEnabled', 'staticQrEnabled', 'staticQrImageUrl', 'accountName', 'accountNumber', 'bankName', 'instructions']);
+  if (!shape.success) return res.status(400).json({ error: shape.error });
+  const connectIpsEnabled = readBoolean(shape.data, 'connectIpsEnabled', 'connectIpsEnabled must be a boolean.');
+  const staticQrEnabled = readBoolean(shape.data, 'staticQrEnabled', 'staticQrEnabled must be a boolean.');
+  if (!connectIpsEnabled.success) return res.status(400).json({ error: connectIpsEnabled.error });
+  if (!staticQrEnabled.success) return res.status(400).json({ error: staticQrEnabled.error });
+  const text = (key: string, maxLength: number) => readTrimmedString(shape.data, key, { required: false, maxLength, message: `${key} is too long.` });
+  const staticQrImageUrl = text('staticQrImageUrl', 2000), accountName = text('accountName', 160), accountNumber = text('accountNumber', 80), bankName = text('bankName', 160), instructions = text('instructions', 500);
+  if (!staticQrImageUrl.success) return res.status(400).json({ error: staticQrImageUrl.error });
+  if (!accountName.success) return res.status(400).json({ error: accountName.error });
+  if (!accountNumber.success) return res.status(400).json({ error: accountNumber.error });
+  if (!bankName.success) return res.status(400).json({ error: bankName.error });
+  if (!instructions.success) return res.status(400).json({ error: instructions.error });
+  if (staticQrEnabled.data && !/^https:\/\//i.test(staticQrImageUrl.data)) return res.status(400).json({ error: 'An HTTPS static QR image URL is required.' });
+  const settings: PaymentSettings = { connectIpsEnabled: connectIpsEnabled.data, staticQrEnabled: staticQrEnabled.data, staticQrImageUrl: staticQrImageUrl.data, accountName: accountName.data, accountNumber: accountNumber.data, bankName: bankName.data, instructions: instructions.data };
+  await prisma.tenant.update({ where: { id: req.tenantId! }, data: { paymentSettings: settings } });
+  return res.json({ ...settings, message: 'Payment settings saved.' });
+});
 
 type PettyCashRequestItem = { name: string; quantity: number; unitAmount: number; totalAmount: number };
 
@@ -111,6 +172,9 @@ async function loadStudentBillingAccess(req: TenantRequest, studentId: string) {
 
 router.post('/connectips/initiate/:invoiceId', authMiddleware, async (req: TenantRequest, res: Response) => {
   try {
+    const tenant = await prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { paymentSettings: true } });
+    const settings = paymentSettings(tenant?.paymentSettings);
+    if (!settings.connectIpsEnabled) return res.status(503).json({ error: 'connectIPS is not enabled for this institution.' });
     const invoice = await loadInvoicePaymentAccess(req, req.params.invoiceId);
     if (!invoice) return res.status(404).json({ error: 'Invoice not found or unavailable to this account.' });
     if (invoice.status === 'PAID') return res.status(409).json({ error: 'Invoice is already paid.' });
@@ -273,11 +337,8 @@ function addMonths(value: Date, count: number): Date {
 }
 
 function staffBaseSalary(staff: { contractType: string; salaryStructure: Prisma.JsonValue }): number {
-  const structure = (staff.salaryStructure ?? {}) as { basicSalary?: number; hourlyRate?: number; expectedMonthlyHours?: number };
-  if (staff.contractType === 'HOUR_RATE') {
-    return num(structure.hourlyRate) * num(structure.expectedMonthlyHours);
-  }
-  return num(structure.basicSalary);
+  const configured = compensationStructure(staff.contractType, staff.salaryStructure);
+  return configured.success ? configured.value.baseMonthlySalary ?? 0 : 0;
 }
 
 // Shared, persisted billing contract for Accountants, Branch Admins and Tenant Admins.
@@ -418,15 +479,14 @@ router.post('/billing-ledger/payrolls', authMiddleware, async (req: TenantReques
   if (!access.isTenantAdmin && access.scopes.length === 0) {
     return res.status(403).json({ error: 'You do not have access to create payroll records.' });
   }
-  const shape = parseStrictKeys(req.body, ['staffRecordId', 'month', 'year', 'baseSalary', 'bonuses', 'deductions']);
+  const shape = parseStrictKeys(req.body, ['staffRecordId', 'month', 'year', 'bonuses', 'deductions']);
   if (!shape.success) return res.status(400).json({ error: shape.error });
   const staffRecordId = readTrimmedString(shape.data, 'staffRecordId', { required: true, maxLength: 128, message: 'A valid teacher is required.' });
   const month = readFiniteNumber(shape.data, 'month', { min: 1, max: 12, message: 'Month must be between 1 and 12.' });
   const year = readFiniteNumber(shape.data, 'year', { min: 2000, max: 2100, message: 'Year must be valid.' });
-  const baseSalary = readFiniteNumber(shape.data, 'baseSalary', { min: 0, max: 100_000_000, message: 'Base salary must be zero or greater.' });
   const bonuses = readFiniteNumber(shape.data, 'bonuses', { min: 0, max: 100_000_000, message: 'Bonuses must be zero or greater.' });
   const deductions = readFiniteNumber(shape.data, 'deductions', { min: 0, max: 100_000_000, message: 'Deductions must be zero or greater.' });
-  if (!staffRecordId.success || !month.success || !year.success || !baseSalary.success || !bonuses.success || !deductions.success || !Number.isInteger(month.data) || !Number.isInteger(year.data)) {
+  if (!staffRecordId.success || !month.success || !year.success || !bonuses.success || !deductions.success || !Number.isInteger(month.data) || !Number.isInteger(year.data)) {
     return res.status(400).json({ error: 'Valid teacher and payroll amounts are required.' });
   }
   const record = await prisma.staffRecord.findFirst({
@@ -439,12 +499,28 @@ router.post('/billing-ledger/payrolls', authMiddleware, async (req: TenantReques
     },
   });
   if (!record) return res.status(404).json({ error: 'Teacher not found or outside your billing scope.' });
-  const exists = await prisma.payroll.findFirst({ where: { tenantId: req.tenantId!, staffRecordId: record.id, month: month.data, year: year.data } });
-  if (exists) return res.status(409).json({ error: 'Payroll already exists for this teacher and month.' });
-  const netPayable = Math.round((baseSalary.data + bonuses.data - deductions.data) * 100) / 100;
-  if (netPayable < 0) return res.status(400).json({ error: 'Deductions cannot exceed salary plus bonuses.' });
-  const payroll = await prisma.payroll.create({ data: { tenantId: req.tenantId!, staffRecordId: record.id, month: month.data, year: year.data, baseSalary: baseSalary.data, bonuses: bonuses.data, attendanceDeductions: deductions.data, netPayable, status: 'PENDING' } });
-  return res.status(201).json({ message: 'Payroll created in the shared ledger.', payroll });
+  try {
+    const [payroll] = await createPayrollRecords({
+      tenantId: req.tenantId!,
+      staffRecordIds: [record.id],
+      month: month.data,
+      year: year.data,
+      bonuses: bonuses.data,
+      deductions: deductions.data,
+    });
+    return res.status(201).json({ message: 'Payroll created in the shared ledger.', payroll });
+  } catch (error) {
+    if (error instanceof PayrollConfigurationError) {
+      return res.status(422).json({ error: error.message, incompleteStaff: error.staff });
+    }
+    if (error instanceof PayrollPeriodConflictError) {
+      return res.status(409).json({ error: error.message, existingStaff: error.staff });
+    }
+    if (error instanceof Error && error.message === 'Deductions cannot exceed salary plus bonuses.') {
+      return res.status(400).json({ error: error.message });
+    }
+    return res.status(500).json({ error: 'Failed to create payroll.' });
+  }
 });
 
 // One scoped contract powers the Accountant workspace. It deliberately omits

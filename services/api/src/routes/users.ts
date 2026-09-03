@@ -17,7 +17,8 @@ import { activateAdmissionAndSendLogins } from '../utils/admission-logins';
 import { studentBillingSummary } from '../utils/student-billing-summary';
 import { invoiceLineItems } from '../utils/invoice-document';
 import { normalizeSchedule } from '../utils/schedule';
-import { parseStrictKeys, parseStrictObject, readTrimmedString } from '../utils/request-validation';
+import { parseStrictKeys, parseStrictObject, readFiniteNumber, readTrimmedString } from '../utils/request-validation';
+import { salaryStructureFor, type SupportedContractType } from '../services/payroll-service';
 
 const router = Router();
 
@@ -61,6 +62,8 @@ interface CreateUserResult {
   temporaryPassword: string;
 }
 
+const STAFF_ROLE_NAMES: CanonicalRoleName[] = ['Teacher', 'Accountant', 'Receptionist', 'Janitor'];
+
 // Shared creation core: creates the User, assigns the role scoped to a branch
 // (or tenant-wide for Branch Admin managers), and creates the matching domain
 // record (StaffRecord / Student / Parent).
@@ -76,6 +79,7 @@ async function provisionUser(params: {
   linkedStudentId?: string | null;
   status?: 'ACTIVE' | 'INACTIVE';
   admissionStatus?: 'PENDING_PAYMENT' | 'READY_FOR_LOGIN' | 'ACTIVE';
+  compensation?: { contractType: SupportedContractType; amount: number };
 }): Promise<CreateUserResult> {
   const temporaryPassword = generateTempPassword();
   const passwordHash = await bcrypt.hash(temporaryPassword, 10);
@@ -108,14 +112,15 @@ async function provisionUser(params: {
       data: { userId: created.id, roleId, branchId: params.branchId },
     });
 
-    if (['Teacher', 'Accountant', 'Receptionist', 'Janitor'].includes(params.roleName)) {
+    if (STAFF_ROLE_NAMES.includes(params.roleName)) {
+      if (!params.compensation) throw new Error('Compensation is required when creating staff.');
       await tx.staffRecord.create({
         data: {
           userId: created.id,
           joiningDate: new Date(),
           designation: params.roleName,
-          contractType: 'FIXED',
-          salaryStructure: {},
+          contractType: params.compensation.contractType,
+          salaryStructure: salaryStructureFor(params.compensation.contractType, params.compensation.amount),
         },
       });
     } else if (params.roleName === 'Student') {
@@ -1115,6 +1120,7 @@ router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Respo
         designation: user.staffRecord.designation,
         contractType: user.staffRecord.contractType,
         joiningDate: user.staffRecord.joiningDate,
+        salaryStructure: user.staffRecord.salaryStructure,
       };
     }
 
@@ -1384,7 +1390,7 @@ router.post('/', authMiddleware, async (req: TenantRequest, res: Response) => {
     return res.status(403).json({ error: 'You do not have permission to create users.' });
   }
 
-  const requestShape = parseStrictKeys(req.body, ['firstName', 'lastName', 'email', 'phone', 'role', 'branchId', 'gradeId']);
+  const requestShape = parseStrictKeys(req.body, ['firstName', 'lastName', 'email', 'phone', 'role', 'branchId', 'gradeId', 'studentId', 'contractType', 'baseMonthlySalary', 'hourlyRate']);
   if (!requestShape.success) return res.status(400).json({ error: requestShape.error });
   const fields = validateNewUserBody({
     firstName: requestShape.data.firstName,
@@ -1408,6 +1414,24 @@ router.post('/', authMiddleware, async (req: TenantRequest, res: Response) => {
   }
   if (roleName === 'Branch Admin') {
     return res.status(400).json({ error: 'Use the branch-manager endpoint to create Branch Admins.' });
+  }
+
+  let compensation: { contractType: SupportedContractType; amount: number } | undefined;
+  if (STAFF_ROLE_NAMES.includes(roleName)) {
+    const contractType = typeof requestShape.data.contractType === 'string' ? requestShape.data.contractType.trim() : '';
+    if (contractType !== 'FIXED' && contractType !== 'HOUR_RATE') {
+      return res.status(400).json({ error: 'Staff contractType must be FIXED or HOUR_RATE.' });
+    }
+    const field = contractType === 'FIXED' ? 'baseMonthlySalary' : 'hourlyRate';
+    const amount = readFiniteNumber(requestShape.data, field, {
+      min: 0.01,
+      max: 100_000_000,
+      message: contractType === 'FIXED'
+        ? 'Base monthly salary must be greater than zero.'
+        : 'Hourly rate must be greater than zero.',
+    });
+    if (!amount.success) return res.status(400).json({ error: amount.error });
+    compensation = { contractType, amount: amount.data };
   }
 
   const branchId = typeof requestShape.data.branchId === 'string' ? requestShape.data.branchId.trim() : '';
@@ -1466,6 +1490,7 @@ router.post('/', authMiddleware, async (req: TenantRequest, res: Response) => {
       branchId,
       gradeId,
       linkedStudentId,
+      compensation,
     });
 
     return res.status(201).json({
@@ -1715,7 +1740,7 @@ async function loadManageableUser(req: TenantRequest, id: string) {
 
   const user = await prisma.user.findFirst({
     where: { id, tenantId: req.tenantId! },
-    include: { userRoles: true, student: true },
+    include: { userRoles: true, student: true, staffRecord: true },
   });
   if (!user) return { error: 404 as const };
 
@@ -1739,6 +1764,24 @@ router.put('/:id', authMiddleware, async (req: TenantRequest, res: Response) => 
   if (typeof req.body?.phone === 'string') data.phone = req.body.phone.trim();
   if (['ACTIVE', 'INACTIVE', 'SUSPENDED'].includes(req.body?.status)) data.status = req.body.status;
 
+  let compensationUpdate: { contractType: SupportedContractType; salaryStructure: ReturnType<typeof salaryStructureFor> } | null = null;
+  if (user.staffRecord && ['contractType', 'baseMonthlySalary', 'hourlyRate'].some((field) => field in (req.body ?? {}))) {
+    const contractType = typeof req.body.contractType === 'string' ? req.body.contractType.trim() : user.staffRecord.contractType;
+    if (contractType !== 'FIXED' && contractType !== 'HOUR_RATE') {
+      return res.status(400).json({ error: 'Staff contractType must be FIXED or HOUR_RATE.' });
+    }
+    const field = contractType === 'FIXED' ? 'baseMonthlySalary' : 'hourlyRate';
+    const amount = readFiniteNumber(req.body, field, {
+      min: 0.01,
+      max: 100_000_000,
+      message: contractType === 'FIXED'
+        ? 'Base monthly salary must be greater than zero.'
+        : 'Hourly rate must be greater than zero.',
+    });
+    if (!amount.success) return res.status(400).json({ error: amount.error });
+    compensationUpdate = { contractType, salaryStructure: salaryStructureFor(contractType, amount.data) };
+  }
+
   // Grade reassignment (students only): string sets, null clears.
   let gradeUpdate: { gradeId: string | null } | null = null;
   if (user.student && 'gradeId' in (req.body ?? {})) {
@@ -1751,7 +1794,7 @@ router.put('/:id', authMiddleware, async (req: TenantRequest, res: Response) => 
     }
   }
 
-  if (Object.keys(data).length === 0 && !gradeUpdate) {
+  if (Object.keys(data).length === 0 && !gradeUpdate && !compensationUpdate) {
     return res.status(400).json({ error: 'Nothing to update.' });
   }
 
@@ -1760,6 +1803,9 @@ router.put('/:id', authMiddleware, async (req: TenantRequest, res: Response) => 
   try {
     if (Object.keys(data).length > 0) await prisma.user.update({ where: { id: user.id }, data });
     if (gradeUpdate && user.student) await prisma.student.update({ where: { id: user.student.id }, data: gradeUpdate });
+    if (compensationUpdate && user.staffRecord) {
+      await prisma.staffRecord.update({ where: { id: user.staffRecord.id }, data: compensationUpdate });
+    }
 
     // Promotion reconciliation: moving to a new grade completes active enrolments
     // in courses tied to a *different* graded level, so monthly billing (which is

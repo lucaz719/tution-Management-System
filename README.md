@@ -157,6 +157,13 @@ when the schema is current.
 ### connectIPS payments
 
 connectIPS is disabled by default. Configure the `CONNECTIPS_*` values shown in
+`.env.docker.example`. Set `CONNECTIPS_ENVIRONMENT=STAGING` with UAT gateway
+credentials, and use `LIVE` only in the production container. Set
+`CONNECTIPS_PUBLIC_BASE_URL` to the externally reachable API origin for each
+deployment. For the current staging API use
+`https://api.staging.sanskardipshikshalaya.com.np`; production uses
+`https://api.tms.sanskardipshikshalaya.com.np`. The Payments
+screen reports this container-owned environment but cannot change it.
 `services/api/.env.example` using NCHL-issued UAT credentials. The creditor PFX
 must be supplied as base64 and must never be committed.
 

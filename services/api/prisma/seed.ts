@@ -241,7 +241,7 @@ async function seedDemoTenant(): Promise<void> {
             joiningDate: new Date('2025-01-05'),
             designation: spec.roleName,
             contractType: 'FIXED',
-            salaryStructure: { basicMonthly: 45000 },
+            salaryStructure: { baseMonthlySalary: 45000 },
           },
         });
       }
@@ -411,8 +411,6 @@ async function seedDemoPortalData(tenantId: string, branchId: string): Promise<v
   if (teacherStaff) {
     await prisma.staffPerformanceScore.upsert({ where: { staffRecordId: teacherStaff.id }, update: {}, create: { staffRecordId: teacherStaff.id, overallScore: 92, attendanceRate: 96, classUpdateRate: 94, studentFeedbackScore: 4.6, parentFeedbackScore: 4.7, leaveComplianceRate: 100, scoreHistory: [{ month: 'Baisakh', score: 88 }, { month: 'Jestha', score: 90 }, { month: 'Ashadh', score: 92 }] } });
     await prisma.staffDocument.upsert({ where: { id: 'demo-staff-document' }, update: {}, create: { id: 'demo-staff-document', staffRecordId: teacherStaff.id, documentType: 'CONTRACT', fileUrl: '/demo/staff/teacher-contract.pdf', expiryDate: daysFromNow(240) } });
-    await prisma.payroll.upsert({ where: { id: 'demo-payroll-current' }, update: {}, create: { id: 'demo-payroll-current', tenantId, staffRecordId: teacherStaff.id, month: now.getMonth() + 1, year: now.getFullYear(), baseSalary: 45000, attendanceDeductions: 0, bonuses: 2500, netPayable: 47500, status: 'APPROVED_FOR_MANUAL_PAYMENT', approvedBy: tenantAdmin.id, approvedAt: now } });
-    await prisma.payroll.upsert({ where: { id: 'demo-payroll-paid' }, update: {}, create: { id: 'demo-payroll-paid', tenantId, staffRecordId: teacherStaff.id, month: now.getMonth() || 12, year: now.getMonth() ? now.getFullYear() : now.getFullYear() - 1, baseSalary: 45000, attendanceDeductions: 500, bonuses: 1000, netPayable: 45500, status: 'MANUALLY_PAID', approvedBy: tenantAdmin.id, approvedAt: daysFromNow(-25), settlementReference: 'BANK-DEMO-8842', reconciledBy: accountant.id, paymentDate: daysFromNow(-24) } });
   }
 
   const wallet = await prisma.canteenWallet.upsert({ where: { studentId: student.id }, update: { balance: 850 }, create: { studentId: student.id, balance: 850, status: 'ACTIVE' } });

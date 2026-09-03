@@ -22,6 +22,7 @@
     "test:request-validation": "ts-node src/utils/request-validation.test.ts",
     "test:schedule": "ts-node src/utils/schedule.test.ts",
     "test:financial-intelligence": "ts-node src/utils/financial-intelligence.test.ts",
+    "test:payroll": "ts-node src/services/payroll-service.test.ts",
     "test:route-auth": "ts-node src/routes/route-authentication.test.ts",
     "test:tenant-admin:integration": "ts-node src/integration/tenant-admin.integration.test.ts"
   },
