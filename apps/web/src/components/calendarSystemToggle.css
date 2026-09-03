@@ -1,0 +1,4 @@
+.calendar-system-toggle { display: inline-flex; padding: 3px; border: 1px solid var(--border); border-radius: 9px; background: var(--color-surface); }
+.calendar-system-toggle button { min-width: 44px; min-height: 34px; padding: 0 12px; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); font: inherit; font-size: 13px; font-weight: 800; cursor: pointer; }
+.calendar-system-toggle button[aria-pressed="true"] { background: var(--bg-card); color: var(--color-primary); box-shadow: 0 1px 3px color-mix(in srgb, var(--color-text) 14%, transparent); }
+.calendar-system-toggle button:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }

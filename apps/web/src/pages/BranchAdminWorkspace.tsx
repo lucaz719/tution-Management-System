@@ -8,25 +8,33 @@ import { api, type BranchAppointment } from '../services/api';
 import { resourcesApi, type MaintenanceTask } from '../services/api/resources';
 import { API_BASE_URL, request } from '../services/api/client';
 import { normalizeSchedule, type ScheduleSlot } from '../utils/schedule';
+import { calendarDateLabel, calendarDayNumber, calendarMonthCells, calendarMonthLabel, isInCalendarMonth, moveCalendarMonth, type CalendarSystem } from '../utils/nepaliDate';
+import { CalendarSystemToggle } from '../components/CalendarSystemToggle';
+
+function calendarDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+import { TimetableWorkspace } from '../components/timetable/TimetableWorkspace';
 import './staffFinance.css';
 
-function CalendarGrid({ onDateClick, events }: { onDateClick: (date: Date) => void; events: Record<string, string> }) {
+function CalendarGrid({ onDateClick, events, calendarSystem = 'AD', onCalendarSystemChange }: { onDateClick: (date: Date) => void; events: Record<string, string>; calendarSystem?: CalendarSystem; onCalendarSystemChange?: (system: CalendarSystem) => void }) {
   const [visibleMonth, setVisibleMonth] = useState(() => { const now = new Date(); return new Date(now.getFullYear(), now.getMonth(), 1); });
   
-  const monthCells = useMemo(() => {
-    const firstWeekday = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), 1).getDay();
-    return Array.from({ length: 42 }, (_, index) => new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), index - firstWeekday + 1));
-  }, [visibleMonth]);
+  const monthCells = useMemo(() => calendarMonthCells(visibleMonth, calendarSystem), [visibleMonth, calendarSystem]);
 
-  const moveMonth = (amount: number) => setVisibleMonth(m => new Date(m.getFullYear(), m.getMonth() + amount, 1));
+  const moveMonth = (amount: number) => setVisibleMonth(m => moveCalendarMonth(m, amount, calendarSystem));
   
   const today = new Date();
   
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', marginBottom: '16px' }}>
-        <h3 style={{ fontSize: '16px', fontWeight: 600 }}>{visibleMonth.toLocaleDateString('en', { month: 'long', year: 'numeric' })}</h3>
+        <div><h3 style={{ fontSize: '16px', fontWeight: 600 }}>{calendarMonthLabel(visibleMonth, calendarSystem)}</h3></div>
         <div style={{ display: 'flex', gap: '8px' }}>
+          {onCalendarSystemChange ? <CalendarSystemToggle value={calendarSystem} onChange={onCalendarSystemChange} /> : null}
           <Button variant="outline" style={{ minHeight: '32px', height: '32px', padding: '0 8px' }} onClick={() => moveMonth(-1)}>&larr;</Button>
           <Button variant="outline" style={{ minHeight: '32px', height: '32px', padding: '0 12px' }} onClick={() => setVisibleMonth(new Date(today.getFullYear(), today.getMonth(), 1))}>Today</Button>
           <Button variant="outline" style={{ minHeight: '32px', height: '32px', padding: '0 8px' }} onClick={() => moveMonth(1)}>&rarr;</Button>
@@ -38,29 +46,28 @@ function CalendarGrid({ onDateClick, events }: { onDateClick: (date: Date) => vo
         ))}
         {monthCells.map((date) => {
           // Adjust to local date string to avoid timezone shift on ISO string
-          const year = date.getFullYear();
-          const month = String(date.getMonth() + 1).padStart(2, '0');
-          const day = String(date.getDate()).padStart(2, '0');
-          const dateStr = `${year}-${month}-${day}`;
+          const dateStr = calendarDateKey(date);
           
           const hasEvent = !!events[dateStr];
-          const isOutside = date.getMonth() !== visibleMonth.getMonth();
+          const isOutside = !isInCalendarMonth(date, visibleMonth, calendarSystem);
           const isToday = date.toDateString() === today.toDateString();
           
           return (
-            <div
+            <button
+              type="button"
               key={date.toISOString()}
               onClick={() => onDateClick(date)}
+              aria-label={`${calendarDateLabel(date, calendarSystem)}${hasEvent ? `, ${events[dateStr]}` : ''}`}
               style={{
                 padding: '12px 4px', textAlign: 'center', border: `1px solid ${isToday ? 'var(--color-primary)' : 'var(--border)'}`,
                 borderRadius: '8px', cursor: 'pointer', background: hasEvent ? 'var(--color-primary-soft, #e6f0fa)' : isOutside ? 'var(--color-surface)' : '#fff',
-                color: hasEvent ? 'var(--color-primary)' : isOutside ? 'var(--text-muted)' : 'var(--text)', fontWeight: hasEvent || isToday ? 700 : 400,
+                color: hasEvent ? 'var(--color-primary)' : isOutside ? 'var(--text-muted)' : 'var(--text)', fontWeight: hasEvent || isToday ? 700 : 400, fontFamily: 'inherit',
                 opacity: isOutside ? 0.6 : 1
               }}
             >
-              <div style={{ fontSize: '14px' }}>{date.getDate()}</div>
+              <div style={{ fontSize: '14px' }}>{calendarDayNumber(date, calendarSystem)}</div>
               {hasEvent && <div style={{ fontSize: '10px', marginTop: '4px', color: 'var(--color-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', padding: '0 2px' }}>{events[dateStr]}</div>}
-            </div>
+            </button>
           );
         })}
       </div>
@@ -487,6 +494,7 @@ function FeeBillingView() {
 function BranchCalendarView() {
   const action = useAction();
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [calendarSystem, setCalendarSystem] = useState<CalendarSystem>('AD');
   const [showAddEvent, setShowAddEvent] = useState(false);
   const [events, setEvents] = useState<Record<string, string>>({});
   const [branchId, setBranchId] = useState('');
@@ -548,15 +556,15 @@ function BranchCalendarView() {
             </div>
           )}
 
-          {loading ? <p aria-busy="true" style={{ padding: 24, color: 'var(--text-muted)' }}>Loading academic calendar…</p> : loadError ? <div><Feedback message="" error={loadError} /><Button variant="outline" onClick={() => void load()}>Try again</Button></div> : <CalendarGrid onDateClick={setSelectedDate} events={events} />}
+          {loading ? <p aria-busy="true" style={{ padding: 24, color: 'var(--text-muted)' }}>Loading academic calendar…</p> : loadError ? <div><Feedback message="" error={loadError} /><Button variant="outline" onClick={() => void load()}>Try again</Button></div> : <CalendarGrid onDateClick={setSelectedDate} events={events} calendarSystem={calendarSystem} onCalendarSystemChange={setCalendarSystem} />}
         </Card>
         {selectedDate && (
           <Card hoverable={false}>
-            <h2 style={{ fontSize: '18px' }}>Events on {selectedDate.toLocaleDateString()}</h2>
+            <h2 style={{ fontSize: '18px' }}>Events on {calendarDateLabel(selectedDate, calendarSystem)}</h2>
             <div style={{ marginTop: '16px' }}>
-              {events[selectedDate.toISOString().split('T')[0]] ? (
+              {events[calendarDateKey(selectedDate)] ? (
                 <div style={{ padding: '12px', border: '1px solid var(--border)', borderRadius: '8px', borderLeft: '4px solid var(--color-primary)' }}>
-                  <div style={{ fontWeight: 600, fontSize: '14px' }}>{events[selectedDate.toISOString().split('T')[0]]}</div>
+                  <div style={{ fontWeight: 600, fontSize: '14px' }}>{events[calendarDateKey(selectedDate)]}</div>
                   <div style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '4px' }}>All Day Event</div>
                 </div>
               ) : (
@@ -990,8 +998,8 @@ function CertificatesView() {
 }
 
 function BranchClassesView() {
-  const [classes, setClasses] = useState<any[]>([]); const [branches, setBranches] = useState<any[]>([]); const [grades, setGrades] = useState<any[]>([]); const [people, setPeople] = useState<any[]>([]); const [selectedId, setSelectedId] = useState(''); const [creating, setCreating] = useState(false); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [extraSourceId, setExtraSourceId] = useState(''); const action = useAction();
-  const [createForm, setCreateForm] = useState({ branchId: '', gradeId: '', name: '', subject: '', kind: 'REGULAR', monthlyFee: '0', teacherId: '', sourceClassId: '', studentIds: [] as string[] });
+  const [classes, setClasses] = useState<any[]>([]); const [branches, setBranches] = useState<any[]>([]); const [grades, setGrades] = useState<any[]>([]); const [people, setPeople] = useState<any[]>([]); const [selectedId, setSelectedId] = useState(''); const [creating, setCreating] = useState(false); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [extraSourceId, setExtraSourceId] = useState(''); const [eligibleStudents, setEligibleStudents] = useState<Array<{ studentId: string; studentName: string; studentEmail: string }>>([]); const [eligibleLoading, setEligibleLoading] = useState(false); const action = useAction();
+  const [createForm, setCreateForm] = useState({ branchId: '', gradeId: '', name: 'A', subject: '', kind: 'REGULAR', monthlyFee: '0', teacherId: '', sourceClassId: '', studentIds: [] as string[] });
   const [editForm, setEditForm] = useState({ name: '', teacherId: '' });
   const selected = classes.find((item) => item.id === selectedId);
   const teachers = people.filter((person) => person.roles.some((role: any) => role.role === 'Teacher' && (!createForm.branchId || role.branchId === createForm.branchId)));
@@ -1003,12 +1011,13 @@ function BranchClassesView() {
   const eligibleForSelected = (selectedSourceClass?.enrollments || []).filter((enrollment: any) => !selected?.enrollments?.some((current: any) => current.studentId === enrollment.studentId));
   const load = async () => { setLoading(true); setError(''); try { const [classList, branchList, gradeList, personList] = await Promise.all([api.academics.listClasses(), api.branches.list(), api.grades.list(), api.people.list()]); setClasses(classList); setBranches(branchList); setGrades(gradeList); setPeople(personList); setCreateForm((current) => ({ ...current, branchId: current.branchId || branchList[0]?.id || '', gradeId: current.gradeId || gradeList[0]?.id || '' })); if (selectedId && !classList.some((item: any) => item.id === selectedId)) setSelectedId(''); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Classes could not be loaded.'); } finally { setLoading(false); } };
   useEffect(() => { void load(); }, []);
-  const openDetails = (item: any) => { setSelectedId(item.id); setCreating(false); setEditForm({ name: item.name, teacherId: item.teacherId || '' }); const sources = classes.filter((candidate) => candidate.courseType === 'REGULAR' && candidate.branchId === item.branchId && (!item.gradeId || candidate.gradeId === item.gradeId)); setExtraSourceId(sources[0]?.id || ''); };
+  const loadEligibleStudents = async (classId: string) => { setEligibleLoading(true); try { setEligibleStudents(await api.academics.listEligibleClassStudents(classId)); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Eligible students could not be loaded.'); setEligibleStudents([]); } finally { setEligibleLoading(false); } };
+  const openDetails = (item: any) => { setSelectedId(item.id); setCreating(false); setEditForm({ name: item.name, teacherId: item.teacherId || '' }); const sources = classes.filter((candidate) => candidate.courseType === 'REGULAR' && candidate.branchId === item.branchId && (!item.gradeId || candidate.gradeId === item.gradeId)); setExtraSourceId(sources[0]?.id || ''); void loadEligibleStudents(item.id); };
   const toggleStudent = (studentId: string) => setCreateForm((current) => ({ ...current, studentIds: current.studentIds.includes(studentId) ? current.studentIds.filter((id) => id !== studentId) : [...current.studentIds, studentId] }));
-  const createClass = (event: FormEvent) => { event.preventDefault(); void action.run(async () => { const courseResult = await api.academics.createCourse({ branchId: createForm.branchId, gradeId: createForm.gradeId || undefined, name: createForm.subject.trim(), type: createForm.kind === 'REGULAR' ? 'REGULAR' : 'SHORT_TERM', feeStructure: { monthlyBase: Number(createForm.monthlyFee || 0) }, isExtraActivity: createForm.kind === 'EXTRA', isTaxExempt: false }); const classResult = await api.academics.createClass({ courseId: courseResult.course.id, name: createForm.name.trim(), schedule: [] }); if (createForm.teacherId) await api.academics.updateClass(classResult.class.id, { teacherId: createForm.teacherId }); if (createForm.kind === 'EXTRA') for (const studentId of createForm.studentIds) await api.academics.enroll(studentId, courseResult.course.id, classResult.class.id); setCreating(false); setCreateForm((current) => ({ ...current, name: '', subject: '', monthlyFee: '0', teacherId: '', sourceClassId: '', studentIds: [] })); await load(); }, `${createForm.kind === 'REGULAR' ? 'Regular' : 'Extra'} class created.`); };
+  const createClass = (event: FormEvent) => { event.preventDefault(); const selectedGrade = grades.find((grade) => grade.id === createForm.gradeId); const className = createForm.kind === 'REGULAR' ? `${selectedGrade?.name || 'Grade'} - Section ${createForm.name}` : createForm.name.trim(); void action.run(async () => { const courseResult = await api.academics.createCourse({ branchId: createForm.branchId, gradeId: createForm.gradeId || undefined, name: createForm.subject.trim(), type: createForm.kind === 'REGULAR' ? 'REGULAR' : 'SHORT_TERM', feeStructure: { monthlyBase: Number(createForm.monthlyFee || 0) }, isExtraActivity: createForm.kind === 'EXTRA', isTaxExempt: false }); const classResult = await api.academics.createClass({ courseId: courseResult.course.id, name: className, schedule: [] }); if (createForm.teacherId) await api.academics.updateClass(classResult.class.id, { teacherId: createForm.teacherId }); if (createForm.kind === 'EXTRA') for (const studentId of createForm.studentIds) await api.academics.enroll(studentId, courseResult.course.id, classResult.class.id); setCreating(false); setCreateForm((current) => ({ ...current, name: 'A', subject: '', monthlyFee: '0', teacherId: '', sourceClassId: '', studentIds: [] })); await load(); }, `${createForm.kind === 'REGULAR' ? 'Regular' : 'Extra'} class created.`); };
   const saveDetails = (event: FormEvent) => { event.preventDefault(); if (!selected) return; void action.run(async () => { await api.academics.updateClass(selected.id, { name: editForm.name.trim(), teacherId: editForm.teacherId || null }); await load(); }, 'Class details updated.'); };
-  const addStudent = (studentId: string) => { if (!selected || !studentId) return; void action.run(async () => { await api.academics.enroll(studentId, selected.courseId, selected.id); await load(); }, 'Student enrolled in class.'); };
-  const removeStudent = (enrollmentId: string) => { void action.run(async () => { await api.academics.unenroll(enrollmentId); await load(); }, 'Student removed from class.'); };
+  const addStudent = (studentId: string) => { if (!selected || !studentId) return; void action.run(async () => { await api.academics.enroll(studentId, selected.courseId, selected.id); await load(); await loadEligibleStudents(selected.id); }, 'Student enrolled in class.'); };
+  const removeStudent = (enrollmentId: string) => { if (!selected) return; void action.run(async () => { await api.academics.unenroll(enrollmentId); await load(); await loadEligibleStudents(selected.id); }, 'Student removed from class.'); };
   const deleteClass = () => { if (!selected || selected.enrollments?.length) { setError('Remove all enrolled students before deleting this class.'); return; } void action.run(async () => { await api.academics.deleteClass(selected.id); setSelectedId(''); await load(); }, 'Class deleted.'); };
   const selectedTeachers = people.filter((person) => person.roles.some((role: any) => role.role === 'Teacher' && role.branchId === selected?.branchId));
 
@@ -1019,10 +1028,10 @@ function BranchClassesView() {
       <h2 style={{ fontSize: 18 }}>Create regular or extra class</h2>
       <form onSubmit={createClass} style={{ ...form, marginTop: 16 }} aria-busy={action.busy}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 14 }}>
-          <label style={label}>Class type<select style={field} value={createForm.kind} onChange={(event) => setCreateForm({ ...createForm, kind: event.target.value, sourceClassId: '', studentIds: [] })}><option value="REGULAR">Regular class</option><option value="EXTRA">Extra class</option></select></label>
+          <label style={label}>Class type<select style={field} value={createForm.kind} onChange={(event) => setCreateForm({ ...createForm, kind: event.target.value, name: event.target.value === 'REGULAR' ? 'A' : '', sourceClassId: '', studentIds: [] })}><option value="REGULAR">Regular class</option><option value="EXTRA">Extra class</option></select></label>
           <label style={label}>Branch<select required style={field} value={createForm.branchId} onChange={(event) => setCreateForm({ ...createForm, branchId: event.target.value, teacherId: '', sourceClassId: '', studentIds: [] })}>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
           <label style={label}>Grade<select required style={field} value={createForm.gradeId} onChange={(event) => setCreateForm({ ...createForm, gradeId: event.target.value, sourceClassId: '', studentIds: [] })}><option value="">Select grade</option>{grades.map((grade) => <option key={grade.id} value={grade.id}>{grade.name}</option>)}</select></label>
-          <label style={label}>Class name<input required style={field} value={createForm.name} onChange={(event) => setCreateForm({ ...createForm, name: event.target.value })} placeholder="Grade 8 A" /></label>
+          {createForm.kind === 'REGULAR' ? <label style={label}>Section<select required style={field} value={createForm.name} onChange={(event) => setCreateForm({ ...createForm, name: event.target.value })}><option value="A">Section A</option><option value="B">Section B</option><option value="C">Section C</option><option value="D">Section D</option></select><small>The class name is generated from the selected grade and section.</small></label> : <label style={label}>Class name<input required style={field} value={createForm.name} onChange={(event) => setCreateForm({ ...createForm, name: event.target.value })} placeholder="Robotics Club" /></label>}
           <label style={label}>Subject or activity<input required style={field} value={createForm.subject} onChange={(event) => setCreateForm({ ...createForm, subject: event.target.value })} placeholder="Mathematics or Robotics" /></label>
           <label style={label}>Monthly fee (NPR)<input required inputMode="decimal" pattern="[0-9]+(?:\.[0-9]{1,2})?" style={field} value={createForm.monthlyFee} onChange={(event) => setCreateForm({ ...createForm, monthlyFee: event.target.value })} /></label>
           <label style={label}>Teacher<select style={field} value={createForm.teacherId} onChange={(event) => setCreateForm({ ...createForm, teacherId: event.target.value })}><option value="">Assign later</option>{teachers.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.name}</option>)}</select></label>
@@ -1031,7 +1040,7 @@ function BranchClassesView() {
           <legend style={{ padding: '0 6px', fontWeight: 700 }}>Choose students ({createForm.studentIds.length} selected)</legend>
           <label style={label}>Existing regular class<select required style={field} value={createForm.sourceClassId} onChange={(event) => setCreateForm({ ...createForm, sourceClassId: event.target.value, studentIds: [] })}><option value="">Select a regular class</option>{regularSourceClasses.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.enrollmentCount} students</option>)}</select></label>
           {!regularSourceClasses.length ? <p style={{ color: 'var(--text-muted)', marginTop: 10 }}>No regular classes are available for this branch and grade. Create a regular class and admit students into it first.</p> : !createForm.sourceClassId ? <p style={{ color: 'var(--text-muted)', marginTop: 10 }}>Choose a regular class to see its students.</p> : sourceStudents.length ? <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 8, marginTop: 10 }}>{sourceStudents.map((student: any) => <label key={student.studentId} style={{ display: 'flex', gap: 8, alignItems: 'center', minHeight: 40 }}><input type="checkbox" checked={createForm.studentIds.includes(student.studentId)} onChange={() => toggleStudent(student.studentId)} />{student.studentName}</label>)}</div> : <p style={{ color: 'var(--text-muted)', marginTop: 10 }}>This regular class has no admitted students yet.</p>}
-        </fieldset> : <div role="note" style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 14, color: 'var(--text-muted)' }}><strong style={{ color: 'var(--color-text)' }}>Students are assigned during admission.</strong><br />Every student admitted to this regular class automatically receives its timetable.</div>}
+        </fieldset> : <div role="note" style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 14, color: 'var(--text-muted)' }}><strong style={{ color: 'var(--color-text)' }}>Grade-linked roster</strong><br />After creating the section, assign admitted students from the selected grade in the class details.</div>}
         <div style={{ display: 'flex', gap: 8 }}><Button type="submit" disabled={action.busy}>{action.busy ? 'Creating…' : 'Create class'}</Button><Button type="button" variant="outline" onClick={() => setCreating(false)}>Cancel</Button></div>
       </form>
     </Card> : null}
@@ -1041,8 +1050,8 @@ function BranchClassesView() {
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><StatusBadge variant={selected.courseType === 'REGULAR' ? 'info' : 'success'}>{selected.courseType === 'REGULAR' ? 'Regular class' : 'Extra class'}</StatusBadge><h2 style={{ marginTop: 10 }}>{selected.name}</h2><p style={{ color: 'var(--text-muted)' }}>{selected.gradeName || 'No grade'} · {selected.courseName} · {selected.branchName}</p></div><Button variant="danger" onClick={deleteClass} disabled={action.busy}>Delete class</Button></div>
         <form onSubmit={saveDetails} style={{ ...form, marginTop: 18 }}><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}><label style={label}>Class name<input required style={field} value={editForm.name} onChange={(event) => setEditForm({ ...editForm, name: event.target.value })} /></label><label style={label}>Assigned teacher<select style={field} value={editForm.teacherId} onChange={(event) => setEditForm({ ...editForm, teacherId: event.target.value })}><option value="">Unassigned</option>{selectedTeachers.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.name}</option>)}</select></label></div><Button type="submit" disabled={action.busy}>Save details</Button></form>
         <section style={{ marginTop: 22 }}><h3 style={{ fontSize: 16 }}>Enrolled students ({selected.enrollments?.length || 0})</h3>
-          {selected.courseType === 'REGULAR' ? <p role="note" style={{ color: 'var(--text-muted)', margin: '8px 0 12px' }}>This roster is managed through Admissions. Students admitted to this class automatically receive its weekly timetable.</p> : <div style={{ display: 'grid', gap: 10, margin: '10px 0' }}><label style={label}>Choose from regular class<select style={field} value={extraSourceId} onChange={(event) => setExtraSourceId(event.target.value)}><option value="">Select a regular class</option>{selectedRegularClasses.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.enrollmentCount} students</option>)}</select></label><div style={{ display: 'flex', gap: 8 }}><select id="class-add-student" aria-label="Student to enroll" style={field} defaultValue="" key={extraSourceId}><option value="">Select a student</option>{eligibleForSelected.map((student: any) => <option key={student.studentId} value={student.studentId}>{student.studentName}</option>)}</select><Button type="button" disabled={!extraSourceId || !eligibleForSelected.length} onClick={() => { const element = document.getElementById('class-add-student') as HTMLSelectElement | null; if (element?.value) addStudent(element.value); }}>Enroll</Button></div>{!selectedRegularClasses.length ? <p style={{ color: 'var(--text-muted)' }}>No matching regular class is available.</p> : extraSourceId && !eligibleForSelected.length ? <p style={{ color: 'var(--text-muted)' }}>All students from this regular class are already enrolled, or the class is empty.</p> : null}</div>}
-          {selected.enrollments?.length ? <div style={{ display: 'grid', gap: 8 }}>{selected.enrollments.map((enrollment: any) => <div key={enrollment.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: 10, border: '1px solid var(--border)', borderRadius: 8 }}><span><strong>{enrollment.studentName}</strong><small style={{ display: 'block', color: 'var(--text-muted)' }}>{enrollment.studentEmail}</small></span>{selected.courseType !== 'REGULAR' ? <Button variant="outline" onClick={() => removeStudent(enrollment.id)}>Remove</Button> : null}</div>)}</div> : <p style={{ color: 'var(--text-muted)' }}>{selected.courseType === 'REGULAR' ? 'No students have been admitted to this class yet.' : 'No students enrolled yet.'}</p>}
+          {selected.courseType === 'REGULAR' ? <div style={{ display: 'grid', gap: 10, margin: '10px 0' }}><p role="note" style={{ color: 'var(--text-muted)' }}>Only active students admitted to {selected.gradeName || 'this grade'} at {selected.branchName} are available.</p><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><select id="class-add-grade-student" aria-label="Student from this grade to enroll" style={{ ...field, flex: '1 1 240px' }} defaultValue="" key={`${selected.id}-${eligibleStudents.length}`} disabled={eligibleLoading}><option value="">{eligibleLoading ? 'Loading students…' : 'Select a student from this grade'}</option>{eligibleStudents.map((student) => <option key={student.studentId} value={student.studentId}>{student.studentName} · {student.studentEmail}</option>)}</select><Button type="button" disabled={eligibleLoading || !eligibleStudents.length} onClick={() => { const element = document.getElementById('class-add-grade-student') as HTMLSelectElement | null; if (element?.value) addStudent(element.value); }}>Add to class</Button></div>{!eligibleLoading && !eligibleStudents.length ? <p style={{ color: 'var(--text-muted)' }}>Every eligible student is already assigned, or this grade has no active admitted students.</p> : null}</div> : <div style={{ display: 'grid', gap: 10, margin: '10px 0' }}><label style={label}>Choose from regular class<select style={field} value={extraSourceId} onChange={(event) => setExtraSourceId(event.target.value)}><option value="">Select a regular class</option>{selectedRegularClasses.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.enrollmentCount} students</option>)}</select></label><div style={{ display: 'flex', gap: 8 }}><select id="class-add-student" aria-label="Student to enroll" style={field} defaultValue="" key={extraSourceId}><option value="">Select a student</option>{eligibleForSelected.map((student: any) => <option key={student.studentId} value={student.studentId}>{student.studentName}</option>)}</select><Button type="button" disabled={!extraSourceId || !eligibleForSelected.length} onClick={() => { const element = document.getElementById('class-add-student') as HTMLSelectElement | null; if (element?.value) addStudent(element.value); }}>Enroll</Button></div>{!selectedRegularClasses.length ? <p style={{ color: 'var(--text-muted)' }}>No matching regular class is available.</p> : extraSourceId && !eligibleForSelected.length ? <p style={{ color: 'var(--text-muted)' }}>All students from this regular class are already enrolled, or the class is empty.</p> : null}</div>}
+          {selected.enrollments?.length ? <div style={{ display: 'grid', gap: 8 }}>{selected.enrollments.map((enrollment: any) => <div key={enrollment.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: 10, border: '1px solid var(--border)', borderRadius: 8 }}><span><strong>{enrollment.studentName}</strong><small style={{ display: 'block', color: 'var(--text-muted)' }}>{enrollment.studentEmail}</small></span><Button type="button" variant="outline" onClick={() => removeStudent(enrollment.id)}>Remove</Button></div>)}</div> : <p style={{ color: 'var(--text-muted)' }}>No students assigned to this class yet.</p>}
         </section>
       </Card> : <Card hoverable={false} style={{ minHeight: 260, display: 'grid', placeItems: 'center', color: 'var(--text-muted)' }}>Select a class to manage it.</Card>}
     </div> : null}
@@ -1822,7 +1831,7 @@ void LegacyTimetableView;
 const WEEK_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DAY_NAMES: Record<string, string> = { Sun: 'Sunday', Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday', Thu: 'Thursday', Fri: 'Friday', Sat: 'Saturday' };
 
-function TimetableView() {
+function LegacyManagedTimetableView() {
   const [classes, setClasses] = useState<any[]>([]); const [courses, setCourses] = useState<any[]>([]); const [teachers, setTeachers] = useState<any[]>([]); const [selectedId, setSelectedId] = useState(''); const [teacherId, setTeacherId] = useState(''); const [slots, setSlots] = useState<WeeklySlot[]>([]); const [editingIndex, setEditingIndex] = useState<number | null>(null); const [slotForm, setSlotForm] = useState<WeeklySlot>({ day: 'Sun', startTime: '08:00', endTime: '09:00', room: '' }); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const action = useAction();
   const selected = classes.find((item) => item.id === selectedId);
   const availableTeachers = teachers.filter((teacher) => teacher.roles.some((role: any) => role.role === 'Teacher' && role.branchId === selected?.branchId));
@@ -1846,6 +1855,9 @@ function TimetableView() {
     </>}
   </Page>;
 }
+
+void LegacyManagedTimetableView;
+function TimetableView() { return <TimetableWorkspace />; }
 
 function LiveBranchTeachersView() {
   const [data, setData] = useState<any>(null);

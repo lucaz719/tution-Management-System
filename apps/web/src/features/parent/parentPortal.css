@@ -227,6 +227,7 @@
 .parent-leave-list,
 .parent-certificate-list,
 .parent-calendar-list { display: flex; flex-direction: column; }
+.parent-calendar-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-4); }
 .parent-remark-list article { padding: var(--sp-4) var(--sp-1); border-bottom: 1px solid var(--parent-border); }
 .parent-remark-list article:last-child { border-bottom: 0; }
 .parent-remark-list h3 { margin-top: var(--sp-2); font-size: 14px; }
@@ -420,6 +421,8 @@
 .parent-calendar-list h3 { margin: 7px 0 3px; font-size: 15px; }
 .parent-calendar-list p,
 .parent-calendar-list time { color: var(--parent-muted); font-size: 12px; }
+.parent-calendar-list time span, .parent-calendar-list time small { display: block; text-align: right; }
+.parent-calendar-list time small { margin-top: 3px; font-weight: 700; color: var(--parent-blue); }
 
 .parent-notification-actions { justify-content: space-between; gap: var(--sp-4); }
 .parent-notification-actions p { color: var(--parent-muted); font-size: 12px; }
@@ -492,10 +495,12 @@
   .parent-participant-fieldset > div { grid-template-columns: 1fr; }
   .parent-leave-list article,
   .parent-certificate-list article,
+  .parent-calendar-heading { flex-direction: column; }
   .parent-calendar-list article { align-items: flex-start; flex-wrap: wrap; }
   .parent-certificate-list article > div { flex: 1 0 calc(100% - 56px); }
   .parent-certificate-list button { margin-left: 56px; }
-  .parent-calendar-list time { display: none; }
+  .parent-calendar-list time { display: block; width: 100%; }
+  .parent-calendar-list time span, .parent-calendar-list time small { text-align: left; }
   .parent-notification-actions { align-items: flex-start; flex-direction: column; }
   .parent-notification-list > button { grid-template-columns: 8px 36px 1fr; padding: 14px; }
   .parent-notification-list > button > .material-symbols-outlined:last-child { display: none; }

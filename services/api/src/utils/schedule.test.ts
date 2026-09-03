@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { normalizeSchedule, parseSchedule } from './schedule';
+import { firstScheduleOverlap, normalizeSchedule, parseSchedule } from './schedule';
 
 const canonical = [{ day: 'Sun', startTime: '08:00', endTime: '09:00', room: 'Lab 1' }];
 assert.deepEqual(normalizeSchedule(canonical), canonical);
@@ -18,6 +18,21 @@ assert.equal(parseSchedule([
   { day: 'Fri', startTime: '08:00', endTime: '09:00', room: 'A' },
   { day: 'Fri', startTime: '08:00', endTime: '09:00', room: 'A' },
 ]).success, false);
+assert.equal(parseSchedule([
+  { day: 'Fri', startTime: '08:00', endTime: '09:00', room: 'A' },
+  { day: 'Fri', startTime: '08:30', endTime: '09:30', room: 'B' },
+]).success, false, 'a class cannot overlap itself');
 assert.deepEqual(normalizeSchedule({ days: ['Sun'], time: '08:00' }), [], 'unsupported legacy objects do not leak into portal responses');
+assert.deepEqual(
+  firstScheduleOverlap(
+    [{ day: 'Sat', startTime: '08:00', endTime: '09:00', room: '' }],
+    [{ day: 'Sat', startTime: '08:30', endTime: '09:30', room: '' }],
+  )?.left.startTime,
+  '08:00',
+);
+assert.equal(firstScheduleOverlap(
+  [{ day: 'Sat', startTime: '08:00', endTime: '09:00', room: '' }],
+  [{ day: 'Sat', startTime: '09:00', endTime: '10:00', room: '' }],
+), null, 'back-to-back slots do not conflict');
 
 console.log('schedule contract tests passed');

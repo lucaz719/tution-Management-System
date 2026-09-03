@@ -11,6 +11,23 @@ export interface ScheduleSlot {
   room: string;
 }
 
+export interface ScheduleOverlap {
+  left: ScheduleSlot;
+  right: ScheduleSlot;
+}
+
+export function slotsOverlap(left: ScheduleSlot, right: ScheduleSlot): boolean {
+  return left.day === right.day && left.startTime < right.endTime && left.endTime > right.startTime;
+}
+
+export function firstScheduleOverlap(left: ScheduleSlot[], right: ScheduleSlot[]): ScheduleOverlap | null {
+  for (const leftSlot of left) {
+    const rightSlot = right.find((candidate) => slotsOverlap(leftSlot, candidate));
+    if (rightSlot) return { left: leftSlot, right: rightSlot };
+  }
+  return null;
+}
+
 function canonicalSlot(value: unknown): ScheduleSlot | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const slot = value as Record<string, unknown>;
@@ -52,6 +69,13 @@ export function parseSchedule(value: unknown): ValidationResult<ScheduleSlot[]> 
   const uniqueSlots = new Set(slots.map((slot) => `${slot.day}:${slot.startTime}:${slot.endTime}:${slot.room.toLowerCase()}`));
   if (uniqueSlots.size !== slots.length) {
     return { success: false, error: 'schedule cannot contain duplicate timetable slots.' };
+  }
+  for (let left = 0; left < slots.length; left += 1) {
+    for (let right = left + 1; right < slots.length; right += 1) {
+      if (slotsOverlap(slots[left], slots[right])) {
+        return { success: false, error: `Schedule slots ${left + 1} and ${right + 1} overlap.` };
+      }
+    }
   }
   return { success: true, data: slots };
 }

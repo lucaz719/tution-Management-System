@@ -24,6 +24,8 @@ import type {
 import { errorMessage } from '../services/api/client';
 import { ChangePasswordForm } from '../components/ChangePasswordForm';
 import { InvoiceDocumentDialog } from '../components/InvoiceDocument';
+import { calendarDateLabel, calendarDayNumber, toBsParts, type CalendarSystem } from '../utils/nepaliDate';
+import { CalendarSystemToggle } from '../components/CalendarSystemToggle';
 import '../features/parent/parentPortal.css';
 
 type ParentView = OriginalParentView | 'security';
@@ -201,7 +203,8 @@ function CertificatesView({ child }: { child: ParentChild }) {
 }
 function CalendarView({ child }: { child: ParentChild }) {
   const { events } = useParentData();
-  return <div className="parent-view"><section className="parent-card"><SectionHeader title={`${child.name}’s upcoming events`} description="This calendar never combines dates from another child." />{events.length ? <div className="parent-calendar-list">{events.map((event) => <article key={event.id}><div><strong>{event.day}</strong><span>{event.month}</span></div><div><ParentStatus label={event.kind} tone={event.kind === 'Holiday' ? 'success' : event.kind === 'Exam' ? 'error' : event.kind === 'Fee due' ? 'warning' : 'info'} iconName="event" /><h3>{event.title}</h3><p>{event.details}</p></div><time>{event.date}</time></article>)}</div> : <EmptyState title="No upcoming events" message="Published academic and fee dates will appear here." iconName="date_range" />}</section></div>;
+  const [calendarSystem, setCalendarSystem] = useState<CalendarSystem>('AD');
+  return <div className="parent-view"><section className="parent-card"><div className="parent-calendar-heading"><SectionHeader title={`${child.name}’s upcoming events`} description={`Dates are displayed in ${calendarSystem}. Switch calendars without changing the published events.`} /><CalendarSystemToggle value={calendarSystem} onChange={setCalendarSystem} /></div>{events.length ? <div className="parent-calendar-list">{events.map((event) => { const date = new Date(event.date); const bs = toBsParts(date); return <article key={event.id}><div><strong>{calendarDayNumber(date, calendarSystem)}</strong><span>{calendarSystem === 'AD' ? `${event.month} AD` : `${bs?.monthName} BS`}</span></div><div><ParentStatus label={event.kind} tone={event.kind === 'Holiday' ? 'success' : event.kind === 'Exam' ? 'error' : event.kind === 'Fee due' ? 'warning' : 'info'} iconName="event" /><h3>{event.title}</h3><p>{event.details}</p></div><time dateTime={event.date}>{calendarDateLabel(date, calendarSystem, false)}</time></article>; })}</div> : <EmptyState title="No upcoming events" message="Published academic and fee dates will appear here." iconName="date_range" />}</section></div>;
 }
 function NotificationsView({ child, go, readIds, storeRead }: { child: ParentChild; go: (view: ParentView) => void; readIds: Set<string>; storeRead: (ids: Set<string>) => void }) {
   const { notifications } = useParentData();

@@ -4,6 +4,8 @@ import { Card } from '../components/ui/Card';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { useToast } from '../components/ui/Toast';
 import { api } from '../services/api';
+import { calendarDateLabel, type CalendarSystem } from '../utils/nepaliDate';
+import { CalendarSystemToggle } from '../components/CalendarSystemToggle';
 
 type Tab = 'policies' | 'approvals' | 'finance' | 'calendar' | 'hr';
 type Weights = Record<'attendance' | 'updateCompliance' | 'feedback' | 'leaveCompliance' | 'taskCompletion', number>;
@@ -44,6 +46,7 @@ function downloadCsv(entries: any[]) {
 export function TenantControlCenter() {
   const { showToast } = useToast();
   const [tab, setTab] = useState<Tab>('policies');
+  const [calendarSystem, setCalendarSystem] = useState<CalendarSystem>('AD');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [config, setConfig] = useState<any>(null);
@@ -267,7 +270,7 @@ export function TenantControlCenter() {
           <label style={label}>Description<textarea style={input} value={eventForm.description} onChange={(e) => setEventForm((old) => ({ ...old, description: e.target.value }))} /></label>
           <Button type="submit">Publish to every branch</Button>
         </form></Card>
-        <Card hoverable={false}><h3>Institution calendar</h3>{events.map((item) => <div key={item.id} style={{ borderTop: '1px solid #E8EDF3', padding: '12px 0' }}><strong>{item.title}</strong><p style={{ fontSize: 12, color: 'var(--text-muted)' }}>{new Date(item.startDate).toLocaleString()} · {item.eventType}</p>{!item.branchId ? <StatusBadge variant="info">Read-only institution event</StatusBadge> : null}</div>)}</Card>
+        <Card hoverable={false}><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}><h3>Institution calendar</h3><CalendarSystemToggle value={calendarSystem} onChange={setCalendarSystem} /></div>{events.map((item) => <div key={item.id} style={{ borderTop: '1px solid #E8EDF3', padding: '12px 0' }}><strong>{item.title}</strong><p style={{ fontSize: 12, color: 'var(--text-muted)' }}>{calendarDateLabel(new Date(item.startDate), calendarSystem, false)} · {new Date(item.startDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {item.eventType}</p>{!item.branchId ? <StatusBadge variant="info">Read-only institution event</StatusBadge> : null}</div>)}</Card>
       </div> : null}
 
       {tab === 'hr' ? <Card hoverable={false}><h3>Contracts & documents expiring within 30 days</h3>

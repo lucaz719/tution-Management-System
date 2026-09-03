@@ -32,7 +32,7 @@ function todayRange() {
 router.get('/today', authMiddleware, async (req: TenantRequest, res: Response) => {
   const branchId = receptionistBranch(req, res);
   if (!branchId) return;
-  const { start } = todayRange();
+  const { start, end } = todayRange();
   const appointmentHorizon = new Date(start);
   appointmentHorizon.setDate(appointmentHorizon.getDate() + 30);
 

@@ -1,0 +1,82 @@
+.timetable-workspace { display: grid; width: 100%; max-width: 1280px; gap: 20px; margin: 0 auto; color: var(--text); }
+.timetable-page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.timetable-page-header h1 { margin: 2px 0 4px; font-size: 28px; line-height: 1.2; }
+.timetable-page-header p { max-width: 68ch; color: var(--text-muted); }
+.timetable-eyebrow { color: var(--color-primary); font-size: 12px; font-weight: 800; letter-spacing: .08em; }
+.timetable-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.timetable-summary article { display: grid; gap: 4px; min-height: 92px; padding: 18px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-card); }
+.timetable-summary strong { font-size: 24px; line-height: 1; }
+.timetable-summary span { color: var(--text-muted); font-size: 13px; font-weight: 650; }
+.timetable-filters { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto; align-items: end; gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-card); }
+.timetable-filters label, .timetable-path label, .timetable-details label, .timetable-slot-fields label { display: grid; gap: 6px; color: var(--text); font-size: 13px; font-weight: 700; }
+.timetable-filters select, .timetable-path select, .timetable-details select, .timetable-details input, .timetable-slot-fields select, .timetable-slot-fields input { width: 100%; min-height: 44px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-card); color: var(--text); font: inherit; }
+.timetable-filters select:focus-visible, .timetable-path select:focus-visible, .timetable-details select:focus-visible, .timetable-details input:focus-visible, .timetable-slot-fields select:focus-visible, .timetable-slot-fields input:focus-visible, .timetable-slot-actions button:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.timetable-class-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+.timetable-class-card { display: grid; gap: 16px; padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-card); }
+.timetable-class-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.timetable-class-card h2 { font-size: 17px; line-height: 1.3; }
+.timetable-class-card header p { margin-top: 4px; color: var(--text-muted); font-size: 13px; }
+.timetable-card-schedule { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border-radius: 10px; background: var(--color-surface); color: var(--text); font-size: 13px; line-height: 1.55; }
+.timetable-card-schedule .material-symbols-outlined { color: var(--color-primary); font-size: 20px; }
+.timetable-class-card dl { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; margin: 0; }
+.timetable-class-card dl div { display: grid; gap: 3px; }
+.timetable-class-card dt { color: var(--text-muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+.timetable-class-card dd { margin: 0; font-size: 14px; font-weight: 700; }
+.timetable-class-card footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
+.timetable-class-card footer button { min-height: 40px; }
+.timetable-empty, .timetable-load-error { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 260px; padding: 32px; border: 1px dashed var(--border); border-radius: var(--radius-md); background: var(--bg-card); text-align: center; }
+.timetable-empty > .material-symbols-outlined { color: var(--color-primary); font-size: 42px; }
+.timetable-empty p, .timetable-load-error p { color: var(--text-muted); }
+.timetable-load-error { align-items: flex-start; text-align: left; }
+.timetable-load-error > .material-symbols-outlined { color: var(--color-error); font-size: 32px; }
+.timetable-skeleton { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.timetable-skeleton i { min-height: 220px; border-radius: var(--radius-md); background: var(--color-surface); animation: timetable-pulse 1.2s ease-in-out infinite alternate; }
+@keyframes timetable-pulse { to { opacity: .48; } }
+.timetable-drawer { width: min(620px, 100%); }
+.timetable-form { display: contents; }
+.timetable-path, .timetable-details, .timetable-slot-editor { display: grid; gap: 14px; margin: 0; padding: 0; border: 0; }
+.timetable-path legend, .timetable-details legend, .timetable-slot-editor legend, .timetable-step h3, .timetable-conflicts h3 { margin-bottom: 4px; font-size: 15px; font-weight: 800; }
+.timetable-path label > span, .timetable-details label > span, .timetable-slot-editor legend > span { color: var(--color-error); }
+.timetable-details label > span, .timetable-slot-fields label > span { color: var(--text-muted); font-weight: 500; }
+.timetable-details label small { color: var(--text-muted); font-size: 12px; font-weight: 500; }
+.timetable-details, .timetable-step, .timetable-conflicts { padding-top: 20px; border-top: 1px solid var(--border); }
+.timetable-locked-path { display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--color-surface); }
+.timetable-locked-path > .material-symbols-outlined { color: var(--color-primary); }
+.timetable-locked-path div { display: grid; gap: 3px; }
+.timetable-locked-path span { color: var(--text-muted); font-size: 13px; }
+.timetable-field-help { margin-top: -8px; color: var(--text-muted); font-size: 12px; }
+.timetable-slot-list { display: grid; gap: 8px; }
+.timetable-slot-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 64px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-card); }
+.timetable-slot-card.is-editing { border-color: var(--color-primary); background: var(--color-surface); }
+.timetable-slot-card > .material-symbols-outlined { color: var(--color-primary); font-size: 20px; }
+.timetable-slot-card div { display: grid; gap: 3px; }
+.timetable-slot-card strong { font-size: 13px; }
+.timetable-slot-card small { color: var(--text-muted); font-size: 12px; }
+.timetable-slot-actions { display: flex !important; grid-auto-flow: column; gap: 8px !important; }
+.timetable-slot-actions button { display: inline-grid; width: 40px; height: 40px; place-items: center; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-card); color: var(--color-primary); cursor: pointer; }
+.timetable-slot-actions button.is-danger { color: var(--color-error); }
+.timetable-slot-actions .material-symbols-outlined { font-size: 19px; }
+.timetable-slot-empty { display: flex; align-items: center; gap: 8px; min-height: 56px; padding: 12px; border: 1px dashed var(--border); border-radius: 10px; color: var(--text-muted); font-size: 13px; }
+.timetable-slot-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.timetable-slot-editor-actions { display: flex; gap: 8px; }
+.timetable-inline-error, .timetable-form-error { padding: 10px 12px; border-radius: 9px; background: rgba(214, 69, 69, .1); color: var(--color-error); font-size: 13px; font-weight: 650; }
+.timetable-conflicts > p, .timetable-conflicts > div { margin-top: 10px; padding: 12px; border-radius: 10px; font-size: 13px; }
+.timetable-conflicts .is-checking, .timetable-conflicts .is-clear { display: flex; align-items: center; gap: 8px; }
+.timetable-conflicts .is-checking, .timetable-conflicts .is-idle { background: var(--color-surface); color: var(--text-muted); }
+.timetable-conflicts .is-clear { background: rgba(0, 171, 102, .1); color: var(--color-success); font-weight: 700; }
+.timetable-conflicts .is-error { background: rgba(214, 69, 69, .1); color: var(--color-error); }
+.timetable-conflicts .is-error ul { display: grid; gap: 6px; margin: 8px 0 0; padding-left: 18px; }
+.timetable-conflicts .is-error button { margin-top: 10px; }
+.timetable-delete-confirm { display: grid; gap: 12px; padding: 12px; border: 1px solid rgba(214, 69, 69, .35); border-radius: 10px; background: rgba(214, 69, 69, .08); }
+.timetable-delete-confirm p { color: var(--text); font-size: 13px; }
+.timetable-delete-confirm div { display: flex; gap: 8px; }
+@media (max-width: 760px) {
+  .timetable-page-header { align-items: stretch; flex-direction: column; }
+  .timetable-page-header > button { width: 100%; }
+  .timetable-summary { grid-template-columns: 1fr 1fr; }
+  .timetable-filters { grid-template-columns: 1fr; }
+  .timetable-class-grid, .timetable-skeleton { grid-template-columns: 1fr; }
+  .timetable-slot-fields { grid-template-columns: 1fr; }
+  .timetable-drawer { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) { .timetable-skeleton i { animation: none; } }
