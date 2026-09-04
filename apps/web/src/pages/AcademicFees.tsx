@@ -489,12 +489,14 @@ export function AcademicFees() {
                     ) : <div className="fee-invoice-list">{invoices.map((inv) => (
                       <article key={inv.id} className="fee-invoice-row">
                         <header>
-                          <div><span>{inv.invoiceType.toLowerCase().replaceAll('_', ' ')}</span><strong>{toBsMonthLabel(inv.billingCycleStart)}</strong></div>
+                          <div><span>{inv.invoiceType.toLowerCase().replaceAll('_', ' ')}</span><strong>{inv.invoiceType === 'ADMISSION' ? inv.status === 'PAID' && inv.paymentDate ? `Paid ${toBsLabel(inv.paymentDate)}` : 'Awaiting admission payment' : toBsMonthLabel(inv.billingCycleStart)}</strong></div>
                           {inv.status === 'PAID' ? <StatusBadge variant="success">Paid</StatusBadge> : inv.overdue ? <StatusBadge variant="error">Overdue</StatusBadge> : <StatusBadge variant="warning">Unpaid</StatusBadge>}
                         </header>
                         <div className="fee-invoice-copy">
                           <strong>{money(inv.netPayable)}</strong>
+                          {inv.invoiceType === 'ADMISSION' && inv.status === 'PAID' ? <span><b>Valid until {toBsLabel(inv.billingCycleEnd)}</b><small>{adDate(inv.paymentDate || inv.billingCycleStart)} AD paid · {adDate(inv.billingCycleEnd)} AD expiry</small></span> :
                           <span><b>Due {toBsLabel(inv.dueDate)}</b><small>{adDate(inv.dueDate)} AD{inv.paymentDate ? ` · paid ${adDate(inv.paymentDate)} AD` : ''}</small></span>
+                          }
                         </div>
                         {inv.status !== 'PAID' ? (
                           <footer className="fee-invoice-actions">

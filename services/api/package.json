@@ -21,6 +21,7 @@
     "test:runtime-config": "ts-node src/utils/runtime-config.test.ts",
     "test:request-validation": "ts-node src/utils/request-validation.test.ts",
     "test:schedule": "ts-node src/utils/schedule.test.ts",
+    "test:nepali": "ts-node src/utils/nepali.test.ts",
     "test:timetable": "ts-node src/services/timetable-service.test.ts",
     "test:financial-intelligence": "ts-node src/utils/financial-intelligence.test.ts",
     "test:payroll": "ts-node src/services/payroll-service.test.ts",

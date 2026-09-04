@@ -4,7 +4,7 @@ import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { MockSmsSender } from '../utils/notifications';
-import { getBillingPeriod } from '../utils/nepali';
+import { getAdmissionTenure, getBillingPeriod } from '../utils/nepali';
 import { canApprovePettyCashL1, canReleasePettyCash, hasBranchPermission, isTenantAdmin } from '../utils/access-control';
 import crypto from 'node:crypto';
 import { isInvoiceOverdue, recurringInvoiceType } from '../utils/billing-rules';
@@ -296,10 +296,12 @@ router.post('/manual-payments/:id/decision', authMiddleware, async (req: TenantR
   if (!attempt) return res.status(404).json({ error: 'Payment submission not found.' });
   if (attempt.status !== 'PENDING') return res.status(409).json({ error: 'This payment submission was already reviewed.' });
   if (decision.data === 'REJECT') { await prisma.paymentAttempt.update({ where: { id: attempt.id }, data: { status: 'FAILED', gatewayStatus: 'REJECTED', reviewRemarks: remarks.data, reviewedBy: req.user!.id, reviewedAt: new Date(), failedAt: new Date() } }); return res.json({ message: 'Payment receipt rejected.' }); }
+  const paidAt = new Date();
+  const admissionTenure = attempt.invoice.invoiceType === 'ADMISSION' ? await getAdmissionTenure(paidAt) : null;
   await prisma.$transaction(async (tx) => {
-    const claimed = await tx.paymentAttempt.updateMany({ where: { id: attempt.id, status: 'PENDING' }, data: { status: 'SUCCESS', gatewayStatus: 'APPROVED', reviewRemarks: remarks.data, reviewedBy: req.user!.id, reviewedAt: new Date(), confirmedAt: new Date() } });
+    const claimed = await tx.paymentAttempt.updateMany({ where: { id: attempt.id, status: 'PENDING' }, data: { status: 'SUCCESS', gatewayStatus: 'APPROVED', reviewRemarks: remarks.data, reviewedBy: req.user!.id, reviewedAt: paidAt, confirmedAt: paidAt } });
     if (claimed.count !== 1) throw new Error('Payment was already reviewed.');
-    const paid = await tx.invoice.updateMany({ where: { id: attempt.invoiceId, tenantId: req.tenantId!, status: { in: ['UNPAID', 'OVERDUE', 'BLOCKED_OVERRIDE'] } }, data: { status: 'PAID', transactionId: attempt.referenceId, paymentDate: new Date() } });
+    const paid = await tx.invoice.updateMany({ where: { id: attempt.invoiceId, tenantId: req.tenantId!, status: { in: ['UNPAID', 'OVERDUE', 'BLOCKED_OVERRIDE'] } }, data: { status: 'PAID', transactionId: attempt.referenceId, paymentDate: paidAt, ...(admissionTenure ? { billingCycleStart: admissionTenure.start, billingCycleEnd: admissionTenure.end } : {}) } });
     if (paid.count !== 1) throw new Error('Invoice is already paid or unavailable.');
   });
   if (attempt.invoice.invoiceType === 'ADMISSION') await activateAdmissionAndSendLogins(req.tenantId!, attempt.invoice.studentId);
@@ -845,10 +847,15 @@ router.get(
           ORDER BY "recipient" ASC
         `,
       ]);
+      const normalizedInvoices = await Promise.all(invoices.map(async (invoice) => {
+        if (invoice.invoiceType !== 'ADMISSION' || invoice.status !== 'PAID' || !invoice.paymentDate) return invoice;
+        const tenure = await getAdmissionTenure(invoice.paymentDate);
+        return { ...invoice, billingCycleStart: tenure.start, billingCycleEnd: tenure.end };
+      }));
       return res.json({
         admissionStatus: student.admissionStatus,
         loginDeliveries,
-        invoices: invoices.map((i) => ({
+        invoices: normalizedInvoices.map((i) => ({
           id: i.id,
           invoiceType: i.invoiceType,
           netPayable: num(i.netPayable),
@@ -912,10 +919,12 @@ router.post(
       if (invoice.status === 'PAID') {
         return res.status(400).json({ error: 'This invoice is already paid.' });
       }
+      const paidAt = new Date();
+      const admissionTenure = invoice.invoiceType === 'ADMISSION' ? await getAdmissionTenure(paidAt) : null;
       const updated = await prisma.$transaction(async (tx) => {
         const transition = await tx.invoice.updateMany({
           where: { id, tenantId: req.tenantId!, status: { not: 'PAID' } },
-          data: { status: 'PAID', paymentDate: new Date(), transactionId },
+          data: { status: 'PAID', paymentDate: paidAt, transactionId, ...(admissionTenure ? { billingCycleStart: admissionTenure.start, billingCycleEnd: admissionTenure.end } : {}) },
         });
         if (transition.count !== 1) return null;
         const paid = await tx.invoice.findUniqueOrThrow({ where: { id } });
