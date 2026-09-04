@@ -156,6 +156,7 @@ export const api = {
     getPaymentSettings: async () => request<{ connectIpsEnabled: boolean; staticQrEnabled: boolean; staticQrImageUrl: string; accountName: string; accountNumber: string; bankName: string; instructions: string }>('/finances/payment-settings'),
     submitManualPayment: async (invoiceId: string, payload: { referenceId: string; receiptProof: string }) => request<{ txnId: string; status: string; message: string }>(`/finances/manual-payment/${encodeURIComponent(invoiceId)}`, { method: 'POST', body: JSON.stringify(payload) }),
     getManualPayments: async () => request<{ attempts: Array<{ id: string; txnId: string; referenceId: string; amount: number; status: string; receiptProof: string; createdAt: string; reviewedAt: string | null; reviewRemarks: string | null; invoiceId: string; studentName: string }> }>('/finances/manual-payments'),
+    getPaymentAttempts: async () => request<{ attempts: Array<{ id: string; txnId: string; provider: 'CONNECTIPS' | 'BANK'; referenceId: string; amount: number; status: string; gatewayStatus: string | null; gatewayMessage: string | null; receiptProof: string | null; createdAt: string; confirmedAt: string | null; failedAt: string | null; reviewedAt: string | null; reviewRemarks: string | null; invoiceId: string; invoiceStatus: string; studentName: string }> }>('/finances/payment-attempts'),
     decideManualPayment: async (id: string, decision: 'APPROVE' | 'REJECT', remarks: string) => request<{ message: string }>(`/finances/manual-payments/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify({ decision, remarks }) }),
     getAccountantWorkspace: async () => request<AccountantWorkspace>('/finances/accountant-workspace'),
     getBillingLedger: async () => request<BillingLedger>('/finances/billing-ledger'),
@@ -519,7 +520,7 @@ export const api = {
       const data = await request<{ students: Array<{ studentId: string; studentName: string; studentEmail: string }> }>(`/courses/classes/${encodeURIComponent(classId)}/eligible-students`);
       return data.students ?? [];
     },
-    createClass: async (payload: { courseId: string; name: string; schedule: unknown; teacherId?: string | null }) => {
+    createClass: async (payload: { courseId: string; name: string; schedule: unknown; teacherId?: string | null; academicYear?: string; effectiveFrom?: string | null; effectiveUntil?: string | null }) => {
       return request<{ message: string; class: any }>('/courses/classes', {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -549,7 +550,7 @@ export const api = {
     unenroll: async (enrollmentId: string) => {
       return request<{ message: string }>(`/courses/enrollments/${enrollmentId}`, { method: 'DELETE' });
     },
-    updateClass: async (id: string, changes: { name?: string; schedule?: unknown; teacherId?: string | null }) => {
+    updateClass: async (id: string, changes: { name?: string; schedule?: unknown; teacherId?: string | null; academicYear?: string; effectiveFrom?: string | null; effectiveUntil?: string | null }) => {
       return request<{ message: string; class: any }>(`/courses/classes/${id}`, {
         method: 'PUT',
         body: JSON.stringify(changes),

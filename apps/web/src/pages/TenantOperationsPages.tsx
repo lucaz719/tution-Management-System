@@ -13,7 +13,7 @@ import { TenantAcademicCalendar } from '../features/tenant/TenantAcademicCalenda
 import { academicEventsApi, type AcademicEvent, type EventType } from '../services/api/academicEvents';
 import { API_BASE_URL, ApiError, errorMessage, request } from '../services/api/client';
 import { financeApi, type Expense, type PettyCashRecord } from '../services/api/finance';
-import { hrApi, type DocumentAlert, type PayrollRecord } from '../services/api/hr';
+import { hrApi, type DocumentAlert, type PayrollPreviewRecord, type PayrollRecord } from '../services/api/hr';
 import { resourcesApi, type MaintenanceTask } from '../services/api/resources';
 import { api } from '../services/api';
 import { calendarDateLabel, toBsMonthRangeLabel, toDualDateLabel, type CalendarSystem } from '../utils/nepaliDate';
@@ -177,22 +177,45 @@ export function TenantReportsPage() {
 
 export function TenantPayrollPage() {
   const { showToast } = useToast();
-  const loader = useCallback(() => hrApi.payroll(), []);
+  const now = new Date();
+  const [period, setPeriod] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
+  const [status, setStatus] = useState('');
+  const [searchDraft, setSearchDraft] = useState('');
+  const [search, setSearch] = useState('');
+  const [busy, setBusy] = useState('');
+  const [references, setReferences] = useState<Record<string, string>>({});
+  const [preview, setPreview] = useState<PayrollPreviewRecord[] | null>(null);
+  const [year, month] = period.split('-').map(Number);
+  const loader = useCallback(() => hrApi.payroll({ month, year, status, search }), [month, year, status, search]);
   const { data, loading, error, reload } = useRemote(loader);
-  const now = new Date(); const [month, setMonth] = useState(now.getMonth() + 1); const [year, setYear] = useState(now.getFullYear());
-  const [busy, setBusy] = useState(''); const [references, setReferences] = useState<Record<string, string>>({});
   const mutate = async (record: PayrollRecord, action: 'APPROVE' | 'RECONCILE') => {
     if (action === 'RECONCILE' && !references[record.id]?.trim()) return showToast('External payment reference is required.', 'error');
     if (!window.confirm(action === 'APPROVE' ? 'Approve this salary obligation for external payment?' : 'Confirm salary was paid outside TMS?')) return;
     setBusy(record.id); try { if (action === 'APPROVE') await hrApi.approve(record.id); else await hrApi.reconcile(record.id, references[record.id]); showToast('Payroll updated.', 'success'); await reload(); } catch (next) { showToast(errorMessage(next), 'error'); if (next instanceof ApiError && next.isConflict) await reload(); } finally { setBusy(''); }
   };
-  const calculate = async () => { setBusy('calculate'); try { await hrApi.calculate(month, year); showToast('Payroll calculated.', 'success'); await reload(); } catch (next) { showToast(errorMessage(next), 'error'); } finally { setBusy(''); } };
-  return <div style={{ display: 'grid', gap: 18 }}><Header title="Payroll" description="Calculate and approve obligations; salaries are paid outside TMS."/><Card hoverable={false}><div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}><input aria-label="Payroll month" style={{ ...input, width: 120 }} type="number" min="1" max="12" value={month} onChange={(e) => setMonth(Number(e.target.value))}/><input aria-label="Payroll year" style={{ ...input, width: 140 }} type="number" value={year} onChange={(e) => setYear(Number(e.target.value))}/><Button disabled={busy === 'calculate'} onClick={() => void calculate()}>Calculate period</Button></div></Card>
-    {loading ? <RemoteState kind="loading"/> : error ? <RemoteState kind="error" message={errorMessage(error)} onRetry={() => void reload()}/> : !data?.payrolls.length ? <RemoteState kind="empty" message="No payroll records yet."/> :
-    <Card hoverable={false}>{data.payrolls.map((record) => <div key={record.id} style={row}><div style={{ display: 'flex', justifyContent: 'space-between' }}><div><strong>{record.staffRecord.user.firstName} {record.staffRecord.user.lastName}</strong><p style={{ color: 'var(--text-muted)', fontSize: 12 }}>{record.month}/{record.year} · {record.staffRecord.designation}</p></div><div><strong>NPR {Number(record.netPayable).toLocaleString()}</strong><br/><StatusBadge variant="info">{record.status}</StatusBadge></div></div>
-      {record.status === 'PENDING' ? <Button disabled={busy === record.id} onClick={() => void mutate(record, 'APPROVE')}>Approve for external payment</Button> : null}
-      {record.status === 'APPROVED_FOR_MANUAL_PAYMENT' ? <div style={{ display: 'flex', gap: 8 }}><input style={input} placeholder="External payment reference" value={references[record.id] ?? ''} onChange={(e) => setReferences((old) => ({ ...old, [record.id]: e.target.value }))}/><Button disabled={busy === record.id} onClick={() => void mutate(record, 'RECONCILE')}>Reconcile</Button></div> : null}
-    </div>)}</Card>}</div>;
+  const loadPreview = async () => { setBusy('preview'); try { setPreview((await hrApi.preview(month, year)).payrolls); } catch (next) { showToast(errorMessage(next), 'error'); } finally { setBusy(''); } };
+  const calculate = async () => { setBusy('calculate'); try { await hrApi.calculate(month, year); setPreview(null); showToast('Payroll calculated.', 'success'); await reload(); } catch (next) { showToast(errorMessage(next), 'error'); } finally { setBusy(''); } };
+  const summary = data?.summary ?? { staffCount: 0, gross: 0, deductions: 0, netPayable: 0, counts: {} };
+  const periodLabel = new Date(year, month - 1).toLocaleDateString('en-NP', { month: 'long', year: 'numeric' });
+  const statusLabel = (value: string) => value === 'PENDING' ? 'Awaiting approval' : value === 'APPROVED_FOR_MANUAL_PAYMENT' ? 'Ready for payment' : 'Paid externally';
+  const statusVariant = (value: string) => value === 'MANUALLY_PAID' ? 'success' : value === 'PENDING' ? 'warning' : 'info';
+  return <div className="payroll-page">
+    <div className="payroll-heading"><Header title="Payroll" description="Preview, prepare, approve, and reconcile salary obligations by period."/><Button disabled={Boolean(busy)} aria-busy={busy === 'preview'} onClick={() => void loadPreview()}>{busy === 'preview' ? 'Preparing preview…' : `Preview ${periodLabel}`}</Button></div>
+    <Card hoverable={false}><div className="payroll-period-controls">
+      <label htmlFor="payroll-period">Payroll period<input id="payroll-period" type="month" min="2000-01" max="2100-12" value={period} onChange={(event) => setPeriod(event.target.value)} /></label>
+      <label htmlFor="payroll-status">Status<select id="payroll-status" value={status} onChange={(event) => setStatus(event.target.value)}><option value="">All statuses</option><option value="PENDING">Awaiting approval</option><option value="APPROVED_FOR_MANUAL_PAYMENT">Ready for payment</option><option value="MANUALLY_PAID">Paid externally</option></select></label>
+      <form className="payroll-search" onSubmit={(event) => { event.preventDefault(); setSearch(searchDraft.trim()); }}><label htmlFor="payroll-search">Search staff</label><div><span className="material-symbols-outlined" aria-hidden="true">search</span><input id="payroll-search" type="search" autoComplete="off" value={searchDraft} placeholder="Name or email" onChange={(event) => setSearchDraft(event.target.value)} /><Button type="submit" variant="secondary">Search</Button></div></form>
+    </div></Card>
+    <section className="payroll-summary" aria-label={`${periodLabel} payroll summary`}>
+      <article><span>Staff records</span><strong>{summary.staffCount}</strong><small>{summary.counts.PENDING ?? 0} awaiting approval</small></article>
+      <article><span>Gross payroll</span><strong>NPR {summary.gross.toLocaleString('en-NP')}</strong><small>Base salary plus bonuses</small></article>
+      <article><span>Deductions</span><strong>NPR {summary.deductions.toLocaleString('en-NP')}</strong><small>Recorded for this view</small></article>
+      <article><span>Net payable</span><strong>NPR {summary.netPayable.toLocaleString('en-NP')}</strong><small>{summary.counts.MANUALLY_PAID ?? 0} payments reconciled</small></article>
+    </section>
+    {preview ? <section className="payroll-preview"><header><div><span>Calculation preview</span><h3>{periodLabel} · {preview.length} staff members</h3><p>Review the exact calculation before writing payroll records.</p></div><div><Button variant="secondary" onClick={() => setPreview(null)}>Close</Button><Button disabled={Boolean(busy) || preview.some((item) => item.existingPayroll)} aria-busy={busy === 'calculate'} onClick={() => void calculate()}>{busy === 'calculate' ? 'Creating…' : 'Create payroll records'}</Button></div></header><div className="payroll-table-scroll"><table className="payroll-table"><thead><tr><th>Staff member</th><th>Contract</th><th>Base</th><th>Bonus</th><th>Deductions</th><th>Net payable</th><th>Availability</th></tr></thead><tbody>{preview.map((item) => <tr key={item.staffRecordId}><td><strong>{item.staffRecord.user.firstName} {item.staffRecord.user.lastName}</strong><small>{item.staffRecord.designation}</small></td><td>{String(item.breakdown.contractType).replace('_', ' ')}</td><td>NPR {item.baseSalary.toLocaleString('en-NP')}</td><td>NPR {item.bonuses.toLocaleString('en-NP')}</td><td>NPR {item.deductions.toLocaleString('en-NP')}</td><td className="payroll-net">NPR {item.netPayable.toLocaleString('en-NP')}</td><td><StatusBadge variant={item.existingPayroll ? 'warning' : 'success'}>{item.existingPayroll ? 'Already created' : 'Ready'}</StatusBadge></td></tr>)}</tbody></table></div></section> : null}
+    {loading ? <div className="payroll-list-skeleton" aria-label="Loading payroll records" aria-busy="true">{Array.from({ length: 4 }, (_, index) => <span key={index} />)}</div> : error ? <RemoteState kind="error" message={errorMessage(error)} onRetry={() => void reload()}/> : !data?.payrolls.length ? <div className="payroll-empty"><span className="material-symbols-outlined" aria-hidden="true">account_balance_wallet</span><strong>No payroll found for {periodLabel}</strong><p>{search || status ? 'Clear the search or status filter, or choose another period.' : 'Preview this period to review salary obligations for active staff.'}</p>{search || status ? <Button variant="secondary" onClick={() => { setSearch(''); setSearchDraft(''); setStatus(''); }}>Clear filters</Button> : <Button disabled={Boolean(busy)} onClick={() => void loadPreview()}>Preview payroll</Button>}</div> :
+    <Card hoverable={false}><div className="payroll-table-scroll"><table className="payroll-table"><thead><tr><th>Staff member</th><th>Period</th><th>Base salary</th><th>Deductions</th><th>Bonuses</th><th>Net payable</th><th>Status</th><th>Action</th></tr></thead><tbody>{data.payrolls.map((record) => <tr key={record.id}><td><strong>{record.staffRecord.user.firstName} {record.staffRecord.user.lastName}</strong><small>{record.staffRecord.designation} · {record.staffRecord.user.email}</small></td><td>{new Date(record.year, record.month - 1).toLocaleDateString('en-NP', { month: 'short', year: 'numeric' })}</td><td>NPR {Number(record.baseSalary).toLocaleString('en-NP')}</td><td>NPR {Number(record.attendanceDeductions).toLocaleString('en-NP')}</td><td>NPR {Number(record.bonuses).toLocaleString('en-NP')}</td><td className="payroll-net">NPR {Number(record.netPayable).toLocaleString('en-NP')}</td><td><StatusBadge variant={statusVariant(record.status)}>{statusLabel(record.status)}</StatusBadge></td><td>{record.status === 'PENDING' ? <Button disabled={busy === record.id} aria-busy={busy === record.id} onClick={() => void mutate(record, 'APPROVE')}>{busy === record.id ? 'Approving…' : 'Approve'}</Button> : record.status === 'APPROVED_FOR_MANUAL_PAYMENT' ? <div className="payroll-reconcile"><label htmlFor={`payroll-reference-${record.id}`}>Payment reference</label><input id={`payroll-reference-${record.id}`} autoComplete="off" maxLength={160} placeholder="e.g. BANK-12345" value={references[record.id] ?? ''} onChange={(event) => setReferences((old) => ({ ...old, [record.id]: event.target.value }))}/><Button disabled={busy === record.id || !references[record.id]?.trim()} aria-busy={busy === record.id} onClick={() => void mutate(record, 'RECONCILE')}>{busy === record.id ? 'Saving…' : 'Mark paid'}</Button></div> : <span className="payroll-complete"><span className="material-symbols-outlined" aria-hidden="true">check_circle</span>Complete</span>}</td></tr>)}</tbody></table></div></Card>}
+  </div>;
 }
 
 interface Branch { id: string; name: string; admissionFee?: number; }

@@ -585,7 +585,7 @@ export function SharedBillingWorkspace({ heading = "Billing & payroll" }: { head
                   <select id="invoice-type" value={invoiceType} onChange={(event) => setInvoiceType(event.target.value as typeof invoiceType)}>
                     <option value="TUITION">Tuition</option>
                     <option value="SUBJECT">Subject</option>
-                    <option value="ACTIVITY">Activity / one-time</option>
+                    <option value="ACTIVITY">Monthly activity</option>
                   </select>
                 </label>
                 <label htmlFor="invoice-discount">

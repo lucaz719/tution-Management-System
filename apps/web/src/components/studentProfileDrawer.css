@@ -36,6 +36,7 @@
 .student-money-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .student-money-grid > div { display: grid; gap: 5px; min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--color-bg); }
 .student-money-grid strong { overflow-wrap: anywhere; font-size: 15px; }
+.student-money-grid small { color: var(--text-muted); font-size: 10px; line-height: 1.35; }
 .student-money-grid .is-paid strong { color: var(--color-success); }
 .student-money-grid .is-due strong { color: var(--color-error); }
 .student-state-banner { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 12px; border-radius: var(--radius-md); }

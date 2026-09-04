@@ -6,6 +6,7 @@ import { StatusBadge } from '../ui/StatusBadge';
 import { useToast } from '../ui/Toast';
 import { TimetableSlotEditor } from './TimetableSlotEditor';
 import './timetableWorkspace.css';
+import { toBsLabel, toBsParts } from '../../utils/nepaliDate';
 
 interface TimetableClass {
   id: string;
@@ -21,6 +22,9 @@ interface TimetableClass {
   teacherId: string | null;
   teacherName: string | null;
   enrollmentCount: number;
+  academicYear: string;
+  effectiveFrom: string | null;
+  effectiveUntil: string | null;
   enrollments: Array<{ studentId: string }>;
 }
 
@@ -36,9 +40,10 @@ interface TimetableCourse {
 
 interface TimetableTeacher { id: string; name: string; branchIds: string[] }
 interface BranchOption { id: string; name: string }
-interface TimetableForm { branchId: string; gradeId: string; courseId: string; name: string; teacherId: string; schedule: ScheduleSlot[] }
+interface TimetableForm { branchId: string; gradeId: string; courseId: string; name: string; teacherId: string; schedule: ScheduleSlot[]; academicYear: string; effectiveFrom: string; effectiveUntil: string }
 
-const EMPTY_FORM: TimetableForm = { branchId: '', gradeId: '', courseId: '', name: '', teacherId: '', schedule: [] };
+const currentBsYear = toBsParts(new Date())?.year;
+const EMPTY_FORM: TimetableForm = { branchId: '', gradeId: '', courseId: '', name: '', teacherId: '', schedule: [], academicYear: currentBsYear ? `${currentBsYear}/${currentBsYear + 1} BS` : '', effectiveFrom: '', effectiveUntil: '' };
 const UNGRADED = '__UNGRADED__';
 
 function gradeKey(course: TimetableCourse) { return course.gradeId || UNGRADED; }
@@ -144,7 +149,7 @@ export function TimetableWorkspace() {
   const openEdit = (item: TimetableClass, event: React.MouseEvent<HTMLButtonElement>) => {
     triggerRef.current = event.currentTarget;
     setEditingId(item.id);
-    setForm({ branchId: item.branchId, gradeId: item.gradeId || UNGRADED, courseId: item.courseId, name: item.name, teacherId: item.teacherId || '', schedule: item.schedule });
+    setForm({ branchId: item.branchId, gradeId: item.gradeId || UNGRADED, courseId: item.courseId, name: item.name, teacherId: item.teacherId || '', schedule: item.schedule, academicYear: item.academicYear || '', effectiveFrom: item.effectiveFrom?.slice(0, 10) || '', effectiveUntil: item.effectiveUntil?.slice(0, 10) || '' });
     setFormError('');
     setDrawerOpen(true);
   };
@@ -178,8 +183,9 @@ export function TimetableWorkspace() {
     setSaving(true);
     setFormError('');
     try {
-      if (editingId) await api.academics.updateClass(editingId, { name: form.name.trim(), schedule: form.schedule, teacherId: form.teacherId || null });
-      else await api.academics.createClass({ courseId: form.courseId, name: form.name.trim(), schedule: form.schedule, teacherId: form.teacherId || null });
+      const period = { academicYear: form.academicYear.trim(), effectiveFrom: form.effectiveFrom || null, effectiveUntil: form.effectiveUntil || null };
+      if (editingId) await api.academics.updateClass(editingId, { name: form.name.trim(), schedule: form.schedule, teacherId: form.teacherId || null, ...period });
+      else await api.academics.createClass({ courseId: form.courseId, name: form.name.trim(), schedule: form.schedule, teacherId: form.teacherId || null, ...period });
       showToast(editingId ? 'Timetable updated.' : 'Class and timetable created.', 'success');
       closeDrawer();
       await load();
@@ -232,6 +238,7 @@ export function TimetableWorkspace() {
           <article className="timetable-class-card" key={item.id}>
             <header><div><h2>{item.name}</h2><p>{item.branchName} · {item.gradeName || 'Extra / ungraded'} · {item.courseName}</p></div><StatusBadge variant={item.teacherId ? 'success' : 'warning'}>{item.teacherId ? 'Ready' : 'Teacher needed'}</StatusBadge></header>
             <div className="timetable-card-schedule"><span className="material-symbols-outlined" aria-hidden="true">schedule</span><span>{formatSchedule(item.schedule)}</span></div>
+            <p className="timetable-card-period">{item.academicYear || 'Academic year not set'}{item.effectiveFrom ? ` · ${toBsLabel(item.effectiveFrom)}` : ''}{item.effectiveUntil ? ` – ${toBsLabel(item.effectiveUntil)}` : ''}</p>
             <dl><div><dt>Teacher</dt><dd>{item.teacherName || 'Not assigned'}</dd></div><div><dt>Students</dt><dd>{item.enrollmentCount}</dd></div></dl>
             {deleteCandidate === item.id ? <div className="timetable-delete-confirm" role="alert"><p><strong>Delete this class?</strong> This is available only when no students are enrolled.</p><div><Button variant="danger" disabled={deleting} onClick={() => void removeClass(item)}>{deleting ? 'Deleting…' : 'Confirm delete'}</Button><Button variant="outline" disabled={deleting} onClick={() => setDeleteCandidate('')}>Cancel</Button></div></div> : <footer><Button variant="outline" onClick={(event) => openEdit(item, event)}><span className="material-symbols-outlined" aria-hidden="true">edit</span>Manage</Button><Button variant="ghost" onClick={() => setDeleteCandidate(item.id)} disabled={item.enrollmentCount > 0} aria-label={item.enrollmentCount ? `Cannot delete ${item.name} while students are enrolled` : `Delete ${item.name}`}><span className="material-symbols-outlined" aria-hidden="true">delete</span></Button></footer>}
           </article>
@@ -253,6 +260,8 @@ export function TimetableWorkspace() {
               <fieldset className="timetable-details"><legend>2. Name and teacher</legend>
                 {editingId || !selectedCourse?.gradeId ? <label htmlFor="class-name">Class name <span>*</span><input id="class-name" autoFocus={Boolean(editingId)} autoComplete="off" required maxLength={160} value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} placeholder="Morning class" /></label> : <label htmlFor="class-name">Section <span>*</span><select id="class-name" required value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}>{['A', 'B', 'C', 'D'].map((section) => <option key={section} value={`${selectedCourse.gradeName} - Section ${section}`}>Section {section}</option>)}</select><small>The class name is linked to {selectedCourse.gradeName}.</small></label>}
                 <label htmlFor="class-teacher">Teacher <span>(optional)</span><select id="class-teacher" disabled={!form.branchId} value={form.teacherId} onChange={(event) => setForm((current) => ({ ...current, teacherId: event.target.value }))}><option value="">Unassigned</option>{eligibleTeachers.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.name}</option>)}</select><small>{eligibleTeachers.length ? 'Only teachers assigned to this branch are shown.' : 'No teachers are assigned to this branch yet.'}</small></label>
+                <label htmlFor="class-academic-year">Academic year <span>*</span><input id="class-academic-year" required maxLength={40} value={form.academicYear} onChange={(event) => setForm((current) => ({ ...current, academicYear: event.target.value }))} placeholder="2083/2084 BS" /></label>
+                <div className="timetable-effective-dates"><label htmlFor="class-effective-from">Effective from<input id="class-effective-from" type="date" value={form.effectiveFrom} onChange={(event) => setForm((current) => ({ ...current, effectiveFrom: event.target.value }))} /></label><label htmlFor="class-effective-until">Effective until<input id="class-effective-until" type="date" min={form.effectiveFrom || undefined} value={form.effectiveUntil} onChange={(event) => setForm((current) => ({ ...current, effectiveUntil: event.target.value }))} /></label></div>
               </fieldset>
 
               <div className="timetable-step"><h3>3. Build the weekly schedule</h3><TimetableSlotEditor value={form.schedule} onChange={(schedule) => { setForm((current) => ({ ...current, schedule })); setFormError(''); }} disabled={saving} /></div>
