@@ -19,7 +19,7 @@ export interface BillingLedger {
   students: Array<{
     studentId: string; studentName: string; email: string; grade: string; branchId: string | null; branchName: string;
     admissionDate: string; courseEnd: string; monthlyAmount: number; invoices: BillingInvoice[];
-    projections: Array<{ cycleStart: string; cycleEnd: string; dueDate: string; amount: number }>;
+    projections: Array<{ cycleStart: string; cycleEnd: string; dueDate: string; amount: number; billingPeriod: string }>;
   }>;
   teachers: Array<{
     teacherId: string; userId: string; teacherName: string; email: string; designation: string; contractType: string;

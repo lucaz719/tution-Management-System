@@ -422,7 +422,7 @@ router.get('/billing-ledger', authMiddleware, async (req: TenantRequest, res: Re
     ]);
 
     const now = new Date();
-    const studentRows = students.map((student) => {
+    const studentRows = await Promise.all(students.map(async (student) => {
       const assignment = student.user.userRoles.find((role) => role.branchId && (access.isTenantAdmin || access.scopes.includes(role.branchId)));
       const gradeFee = student.grade?.billingMode === 'GRADE' ? num(student.grade.monthlyFee) : 0;
       const courseFee = student.enrollments.reduce((sum, enrollment) => {
@@ -435,11 +435,23 @@ router.get('/billing-ledger', authMiddleware, async (req: TenantRequest, res: Re
       const courseStart = student.admissionDate;
       const courseEnd = addMonths(courseStart, 12);
       const forecastStart = now > courseStart ? now : courseStart;
-      const projections = Array.from({ length: 12 }, (_, index) => {
-        const cycleStart = new Date(forecastStart.getFullYear(), forecastStart.getMonth() + index + 1, 1);
-        const cycleEnd = new Date(cycleStart.getFullYear(), cycleStart.getMonth() + 1, 0);
-        return { cycleStart, cycleEnd, dueDate: new Date(cycleStart.getFullYear(), cycleStart.getMonth(), 10), amount: monthlyAmount };
-      }).filter((item) => item.cycleStart <= courseEnd);
+      const containingPeriod = await getBillingPeriod(forecastStart, 10);
+      let cycleCursor = forecastStart > now
+        ? containingPeriod.cycleStart
+        : new Date(containingPeriod.cycleEnd.getTime() + 86_400_000);
+      const projections: Array<{ cycleStart: Date; cycleEnd: Date; dueDate: Date; amount: number; billingPeriod: string }> = [];
+      while (projections.length < 12) {
+        const period = await getBillingPeriod(cycleCursor, 10);
+        if (period.cycleStart > courseEnd) break;
+        projections.push({
+          cycleStart: period.cycleStart,
+          cycleEnd: period.cycleEnd,
+          dueDate: period.dueDate,
+          amount: monthlyAmount,
+          billingPeriod: period.label,
+        });
+        cycleCursor = new Date(period.cycleEnd.getTime() + 86_400_000);
+      }
       return {
         studentId: student.id,
         studentName: `${student.user.firstName} ${student.user.lastName}`.trim(),
@@ -459,7 +471,7 @@ router.get('/billing-ledger', authMiddleware, async (req: TenantRequest, res: Re
         })),
         projections,
       };
-    });
+    }));
 
     const teacherRows = staff.map((record) => {
       const assignment = record.user.userRoles.find((role) => role.branchId && (access.isTenantAdmin || access.scopes.includes(role.branchId)));
@@ -514,15 +526,23 @@ router.post('/billing-ledger/invoices', authMiddleware, async (req: TenantReques
   const student = await loadStudentBillingAccess(req, studentId.data);
   if (!student) return res.status(404).json({ error: 'Student not found or outside your billing scope.' });
   const tenant = await prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { panNumber: true, vatRate: true } });
+  const billingPeriod = await getBillingPeriod(cycleStart, 10);
   const netPayable = Math.round((amount.data - discount.data + fine.data) * 100) / 100;
   if (netPayable < 0) return res.status(400).json({ error: 'Discount cannot exceed the invoice total.' });
-  const invoice = await prisma.invoice.create({ data: {
-    tenantId: req.tenantId!, studentId: student.id, invoiceType: invoiceType.data as 'TUITION' | 'SUBJECT' | 'ACTIVITY',
-    amount: amount.data, discount: discount.data, fine: fine.data, netPayable, billingCycleStart: cycleStart,
-    billingCycleEnd: cycleEnd, dueDate, status: 'UNPAID', panNumberSnapshot: tenant?.panNumber ?? '', vatRateSnapshot: tenant?.vatRate ?? 0,
-    lineItemsSnapshot: [{ label: invoiceTypeLabel(invoiceType.data), amount: amount.data }],
-  } });
-  return res.status(201).json({ message: 'Invoice created in the shared ledger.', invoice });
+  try {
+    const invoice = await prisma.invoice.create({ data: {
+      tenantId: req.tenantId!, studentId: student.id, invoiceType: invoiceType.data as 'TUITION' | 'SUBJECT' | 'ACTIVITY',
+      amount: amount.data, discount: discount.data, fine: fine.data, netPayable, billingCycleStart: billingPeriod.cycleStart,
+      billingCycleEnd: billingPeriod.cycleEnd, dueDate: billingPeriod.dueDate, status: 'UNPAID', panNumberSnapshot: tenant?.panNumber ?? '', vatRateSnapshot: tenant?.vatRate ?? 0,
+      lineItemsSnapshot: [{ label: invoiceTypeLabel(invoiceType.data), amount: amount.data }],
+    } });
+    return res.status(201).json({ message: 'Invoice created in the shared ledger.', invoice });
+  } catch (error: any) {
+    if (error?.code === 'P2002') {
+      return res.status(409).json({ error: 'This student already has an invoice of this type for the selected BS billing cycle.' });
+    }
+    return res.status(500).json({ error: 'Failed to create the invoice.' });
+  }
 });
 
 router.post('/billing-ledger/payrolls', authMiddleware, async (req: TenantRequest, res: Response) => {
@@ -1019,8 +1039,8 @@ router.post(
       for (const [key, charge] of fees) {
         if (alreadyBilled.has(key) || charge.amount <= 0) continue;
         const net = charge.amount;
-        await prisma.invoice.create({
-          data: {
+        try {
+          await prisma.invoice.create({ data: {
             tenantId: req.tenantId!,
             studentId: charge.studentId,
             invoiceType: charge.invoiceType,
@@ -1035,9 +1055,13 @@ router.post(
             billingCycleEnd: period.cycleEnd,
             dueDate: period.dueDate,
             status: 'UNPAID',
-          },
-        });
-        created += 1;
+          } });
+          created += 1;
+        } catch (error: any) {
+          // The database constraint is the final guard when two billing runs
+          // overlap after both have read the same pre-existing invoice set.
+          if (error?.code !== 'P2002') throw error;
+        }
       }
 
       return res.json({ message: `Generated ${created} invoice(s) for ${period.label}.`, created, billingPeriod: period.label, skipped: fees.size - created });

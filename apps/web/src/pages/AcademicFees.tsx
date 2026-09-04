@@ -4,7 +4,7 @@ import { KPICard } from '../components/ui/KPICard';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { useToast } from '../components/ui/Toast';
 import { api, type BillingLedger } from '../services/api';
-import { toDualDateLabel } from '../utils/nepaliDate';
+import { toBsLabel, toBsMonthLabel, toDualDateLabel } from '../utils/nepaliDate';
 import QRCode from 'qrcode';
 
 interface StudentFee {
@@ -55,6 +55,10 @@ function money(n: number): string {
   return `NPR ${n.toLocaleString()}`;
 }
 
+function adDate(input: string | Date): string {
+  return new Date(input).toLocaleDateString('en-NP', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kathmandu' });
+}
+
 export function AcademicFees() {
   const { showToast } = useToast();
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -82,6 +86,7 @@ export function AcademicFees() {
   const [qrModal, setQrModal] = useState<{ id: string; studentName: string; amount: number; month: string; qrString: string; dataUrl: string } | null>(null);
   const [qrLoadingId, setQrLoadingId] = useState('');
   const drawerRef = useRef<HTMLElement>(null);
+  const drawerBodyRef = useRef<HTMLDivElement>(null);
   const paymentDialogRef = useRef<HTMLDialogElement>(null);
   const drawerTriggerRef = useRef<HTMLElement | null>(null);
 
@@ -215,6 +220,7 @@ export function AcademicFees() {
   useEffect(() => {
     if (!payStudent || paymentInvoice || qrModal) return;
     const drawer = drawerRef.current;
+    drawerBodyRef.current?.scrollTo({ top: 0 });
     drawer?.focus();
     const keyboard = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setPayStudent(null);
@@ -392,7 +398,7 @@ export function AcademicFees() {
                 <span className="material-symbols-outlined">close</span>
               </button>
             </div>
-            <div className="people-drawer-body">
+            <div ref={drawerBodyRef} className="people-drawer-body">
               {paymentNotice ? (
                 <div
                   role={paymentNotice.delivered === false ? 'alert' : 'status'}
@@ -485,23 +491,25 @@ export function AcademicFees() {
                       <div className="people-empty" role="status"><span className="material-symbols-outlined" aria-hidden="true">receipt_long</span>No invoices have been posted for this student yet.</div>
                     ) : <div className="fee-invoice-list">{invoices.map((inv) => (
                       <article key={inv.id} className="fee-invoice-row">
+                        <header>
+                          <div><span>{inv.invoiceType.toLowerCase().replaceAll('_', ' ')}</span><strong>{toBsMonthLabel(inv.billingCycleStart)}</strong></div>
+                          {inv.status === 'PAID' ? <StatusBadge variant="success">Paid</StatusBadge> : inv.overdue ? <StatusBadge variant="error">Overdue</StatusBadge> : <StatusBadge variant="warning">Unpaid</StatusBadge>}
+                        </header>
                         <div className="fee-invoice-copy">
-                          <span>{inv.invoiceType.toLowerCase().replaceAll('_', ' ')}</span>
                           <strong>{money(inv.netPayable)}</strong>
-                          <small>Due {toDualDateLabel(inv.dueDate)}{inv.paymentDate ? ` · paid ${toDualDateLabel(inv.paymentDate)}` : ''}</small>
+                          <span><b>Due {toBsLabel(inv.dueDate)}</b><small>{adDate(inv.dueDate)} AD{inv.paymentDate ? ` · paid ${adDate(inv.paymentDate)} AD` : ''}</small></span>
                         </div>
-                        {inv.status === 'PAID' ? <StatusBadge variant="success">Paid</StatusBadge> : (
-                          <div className="fee-invoice-actions">
-                            {inv.overdue ? <StatusBadge variant="error">Overdue</StatusBadge> : <StatusBadge variant="warning">Unpaid</StatusBadge>}
+                        {inv.status !== 'PAID' ? (
+                          <footer className="fee-invoice-actions">
                             <Button variant="outline" onClick={() => void openQr(inv)} disabled={qrLoadingId === inv.id}>
                               <span className="material-symbols-outlined" aria-hidden="true">qr_code_scanner</span>
-                              {qrLoadingId === inv.id ? 'Generating…' : 'QR'}
+                              {qrLoadingId === inv.id ? 'Generating…' : 'Payment QR'}
                             </Button>
                             <Button onClick={() => openPaymentConfirmation(inv)} disabled={Boolean(payingId)}>
                               Record payment
                             </Button>
-                          </div>
-                        )}
+                          </footer>
+                        ) : null}
                       </article>
                     ))}</div>}
                   </section>
@@ -509,7 +517,7 @@ export function AcademicFees() {
                   {billingProfile ? (
                     <section className="fee-drawer-section fee-billing-plan" aria-labelledby="billing-plan-title">
                       <div className="fee-section-title">
-                        <div><h3 id="billing-plan-title">Billing plan</h3><p>{billingProfile.grade} · active through {new Date(billingProfile.courseEnd).toLocaleDateString('en-NP')}</p></div>
+                        <div><h3 id="billing-plan-title">Billing plan</h3><p>{billingProfile.grade} · active through {toBsLabel(billingProfile.courseEnd)} <small>({adDate(billingProfile.courseEnd)} AD)</small></p></div>
                         <strong>{money(billingProfile.monthlyAmount)}<small>/month</small></strong>
                       </div>
                       {billingProfile.projections.length ? (
@@ -517,7 +525,7 @@ export function AcademicFees() {
                           <summary><span>Future schedule</span><strong>{billingProfile.projections.length} cycle{billingProfile.projections.length === 1 ? '' : 's'}</strong></summary>
                           <div>{billingProfile.projections.map((projection) => (
                             <div key={projection.cycleStart}>
-                              <span>{toDualDateLabel(projection.cycleStart)}<small>Due {toDualDateLabel(projection.dueDate)}</small></span>
+                              <span><b>{projection.billingPeriod} BS</b><small>Due {toBsLabel(projection.dueDate)} · {adDate(projection.dueDate)} AD</small></span>
                               <strong>{money(projection.amount)}</strong>
                             </div>
                           ))}</div>
@@ -527,9 +535,6 @@ export function AcademicFees() {
                   ) : null}
                 </>
               )}
-            </div>
-            <div className="people-drawer-foot">
-              <Button variant="outline" onClick={() => setPayStudent(null)} style={{ flex: 1 }}>Done</Button>
             </div>
           </aside>
         </>

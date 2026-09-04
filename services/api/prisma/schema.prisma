@@ -686,6 +686,9 @@ model Invoice {
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
   paymentAttempts   PaymentAttempt[]
+
+  // A student can receive only one recurring invoice of each type per BS cycle.
+  @@unique([studentId, invoiceType, billingCycleStart])
 }
 
 model PaymentAttempt {
