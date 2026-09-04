@@ -366,8 +366,8 @@ async function main(): Promise<void> {
       'non-admin roles must not receive the branch-management projection or geofence configuration');
 
     response = await request('GET', '/api/finances/overview', branchAdminCookie);
-    assert.equal(response.status, 403,
-      'Branch Admin must not receive institution-wide finance totals');
+    assert.equal(response.status, 200,
+      'Branch Admin should receive finance totals scoped to the assigned branch');
     response = await request('GET', '/api/finances/overview', accountantCookie);
     assert.equal(response.status, 403,
       'branch-scoped finance roles must use their scoped workspace, not tenant-wide totals');

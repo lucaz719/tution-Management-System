@@ -709,16 +709,28 @@ router.get('/accountant-workspace', authMiddleware, async (req: TenantRequest, r
   }
 });
 
-// Tenant-wide fee overview: collected, outstanding, overdue, current BS period.
+// Fee overview scoped to the caller's authorized billing branches. Tenant Admins
+// receive the institution-wide aggregate; branch roles only receive their branch.
 router.get(
   '/overview',
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
-    if (!isTenantAdmin(req.user!)) {
-      return res.status(403).json({ error: 'Only the Tenant Admin may view institution-wide fee totals.' });
+    const isTenantAdmin = billingBranchScopes(req.user).isTenantAdmin;
+    const scopes: string[] = [...new Set<string>((req.user?.roles ?? [])
+      .filter((role: any) => role?.roleName === 'Branch Admin' && role?.branchId)
+      .map((role: any) => String(role.branchId)))];
+    if (!isTenantAdmin && scopes.length === 0) {
+      return res.status(403).json({ error: 'You do not have access to fee totals.' });
     }
     try {
-      const invoices = await prisma.invoice.findMany({ where: { tenantId: req.tenantId! } });
+      const invoices = await prisma.invoice.findMany({
+        where: {
+          tenantId: req.tenantId!,
+          ...(!isTenantAdmin
+            ? { student: { user: { userRoles: { some: { branchId: { in: scopes } } } } } }
+            : {}),
+        },
+      });
       const summary = summarizeInvoices(invoices);
       const overdueStudentIds = new Set(invoices.filter(invoiceOverdue).map((i) => i.studentId));
       const period = await getBillingPeriod(new Date(), 10);
@@ -926,8 +938,12 @@ router.post(
 router.post(
   '/generate-invoices',
   authMiddleware,
-  hasPermission('manage_billing'),
   async (req: TenantRequest, res: Response) => {
+    const { isTenantAdmin, scopes } = billingBranchScopes(req.user);
+    if (!isTenantAdmin && scopes.length === 0) {
+      return res.status(403).json({ error: 'You do not have access to generate invoices.' });
+    }
+    const scopedUserRoles = isTenantAdmin ? {} : { userRoles: { some: { branchId: { in: scopes } } } };
     try {
       const period = await getBillingPeriod(new Date(), 10);
       const tenantConfig = await prisma.tenant.findUnique({ where: { id: req.tenantId! } });
@@ -950,7 +966,7 @@ router.post(
       // 1. Grade base tuition for every student who has a graded level.
       const students = await prisma.student.findMany({
         where: {
-          user: { tenantId: req.tenantId!, status: 'ACTIVE' },
+          user: { tenantId: req.tenantId!, status: 'ACTIVE', ...scopedUserRoles },
           admissionStatus: 'ACTIVE',
           gradeId: { not: null },
           enrollments: { some: { status: 'ACTIVE', OR: [{ validUntil: null }, { validUntil: { gt: new Date() } }] } },
@@ -968,7 +984,10 @@ router.post(
         where: {
           status: 'ACTIVE',
           OR: [{ validUntil: null }, { validUntil: { gt: new Date() } }],
-          student: { admissionStatus: 'ACTIVE', user: { status: 'ACTIVE' } },
+          student: {
+            admissionStatus: 'ACTIVE',
+            user: { status: 'ACTIVE', ...scopedUserRoles },
+          },
           course: { tenantId: req.tenantId! },
         },
         include: { course: true, student: { include: { grade: true } } },
