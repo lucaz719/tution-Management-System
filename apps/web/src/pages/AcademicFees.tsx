@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../components/ui/Button';
 import { KPICard } from '../components/ui/KPICard';
 import { StatusBadge } from '../components/ui/StatusBadge';
@@ -69,13 +69,21 @@ export function AcademicFees() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [billingProfile, setBillingProfile] = useState<BillingLedger['students'][number] | null>(null);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
+  const [drawerLoadError, setDrawerLoadError] = useState('');
   const [payingId, setPayingId] = useState('');
+  const [paymentInvoice, setPaymentInvoice] = useState<Invoice | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'BANK'>('CASH');
+  const [paymentReference, setPaymentReference] = useState('');
+  const [paymentError, setPaymentError] = useState('');
   const [paymentNotice, setPaymentNotice] = useState<{ message: string; delivered: boolean | null } | null>(null);
   const [admissionStatus, setAdmissionStatus] = useState<'PENDING_PAYMENT' | 'READY_FOR_LOGIN' | 'ACTIVE' | null>(null);
   const [loginDeliveries, setLoginDeliveries] = useState<LoginDelivery[]>([]);
   const [isRetryingDelivery, setIsRetryingDelivery] = useState(false);
   const [qrModal, setQrModal] = useState<{ id: string; studentName: string; amount: number; month: string; qrString: string; dataUrl: string } | null>(null);
   const [qrLoadingId, setQrLoadingId] = useState('');
+  const drawerRef = useRef<HTMLElement>(null);
+  const paymentDialogRef = useRef<HTMLDialogElement>(null);
+  const drawerTriggerRef = useRef<HTMLElement | null>(null);
 
   const openQr = async (invoice: Invoice) => {
     if (!payStudent) return;
@@ -118,8 +126,10 @@ export function AcademicFees() {
   }, [students, search, filter]);
 
   const openPayments = async (student: StudentFee) => {
+    if (!payStudent) drawerTriggerRef.current = document.activeElement as HTMLElement | null;
     setPayStudent(student);
     setInvoicesLoading(true);
+    setDrawerLoadError('');
     setInvoices([]);
     setBillingProfile(null);
     setPaymentNotice(null);
@@ -146,16 +156,23 @@ export function AcademicFees() {
       }
       setBillingProfile(ledger.students.find((item) => item.studentId === student.studentId) ?? null);
     } catch (error: unknown) {
-      showToast(error instanceof Error ? error.message : 'Failed to load invoices.', 'error');
+      setDrawerLoadError(error instanceof Error ? error.message : 'Failed to load invoices.');
     } finally {
       setInvoicesLoading(false);
     }
   };
 
-  const recordPayment = async (invoiceId: string) => {
-    setPayingId(invoiceId);
+  const recordPayment = async () => {
+    if (!paymentInvoice) return;
+    const reference = paymentMethod === 'BANK' ? paymentReference.trim() : 'CASH';
+    if (paymentMethod === 'BANK' && !reference) {
+      setPaymentError('Enter the bank transaction or deposit reference.');
+      return;
+    }
+    setPayingId(paymentInvoice.id);
+    setPaymentError('');
     try {
-      const result = await api.finances.payInvoice(invoiceId, 'CASH');
+      const result = await api.finances.payInvoice(paymentInvoice.id, reference);
       const delivered = result.loginDelivery?.delivered ?? null;
       setPaymentNotice({ message: result.message, delivered });
       showToast(result.message, delivered === false ? 'error' : 'success');
@@ -166,12 +183,57 @@ export function AcademicFees() {
         setLoginDeliveries(invoiceData.loginDeliveries);
       }
       await loadData();
+      setPaymentInvoice(null);
+      setPaymentReference('');
+      paymentDialogRef.current?.close();
     } catch (error: unknown) {
-      showToast(error instanceof Error ? error.message : 'Failed to record payment.', 'error');
+      setPaymentError(error instanceof Error ? error.message : 'Failed to record payment. Try again.');
     } finally {
       setPayingId('');
     }
   };
+
+  const openPaymentConfirmation = (invoice: Invoice) => {
+    setPaymentInvoice(invoice);
+    setPaymentMethod('CASH');
+    setPaymentReference('');
+    setPaymentError('');
+  };
+
+  const closePaymentConfirmation = () => {
+    if (payingId) return;
+    paymentDialogRef.current?.close();
+    setPaymentInvoice(null);
+    setPaymentError('');
+  };
+
+  useEffect(() => {
+    if (!paymentInvoice) return;
+    paymentDialogRef.current?.showModal();
+  }, [paymentInvoice]);
+
+  useEffect(() => {
+    if (!payStudent || paymentInvoice || qrModal) return;
+    const drawer = drawerRef.current;
+    drawer?.focus();
+    const keyboard = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPayStudent(null);
+      if (event.key !== 'Tab' || !drawer) return;
+      const focusable = [...drawer.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])')];
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', keyboard);
+    return () => document.removeEventListener('keydown', keyboard);
+  }, [payStudent, paymentInvoice, qrModal]);
+
+  useEffect(() => {
+    if (payStudent) return;
+    drawerTriggerRef.current?.focus();
+  }, [payStudent]);
 
   const retryLoginDelivery = async () => {
     if (!payStudent) return;
@@ -320,7 +382,7 @@ export function AcademicFees() {
       {payStudent ? (
         <>
           <button type="button" className="people-drawer-overlay" onClick={() => setPayStudent(null)} aria-label="Close student billing details" />
-          <aside className="people-drawer fee-drawer" role="dialog" aria-modal="true" aria-labelledby="fee-drawer-title">
+          <aside ref={drawerRef} tabIndex={-1} className="people-drawer fee-drawer" role="dialog" aria-modal="true" aria-labelledby="fee-drawer-title">
             <div className="people-drawer-head">
               <div>
                 <h2 id="fee-drawer-title">{payStudent.name}</h2>
@@ -385,7 +447,16 @@ export function AcademicFees() {
                 </div>
               ) : null}
               {invoicesLoading ? (
-                <p style={{ color: 'var(--text-muted)', fontSize: '14px', textAlign: 'center', padding: '24px 0' }}>Loading invoices…</p>
+                <div className="fee-drawer-skeleton" aria-busy="true" aria-label="Loading student billing details">
+                  <div /><div /><div />
+                </div>
+              ) : drawerLoadError ? (
+                <div className="fee-drawer-error" role="alert">
+                  <span className="material-symbols-outlined" aria-hidden="true">error</span>
+                  <strong>Billing details could not be loaded</strong>
+                  <p>{drawerLoadError}</p>
+                  <Button variant="outline" onClick={() => void openPayments(payStudent)}>Try again</Button>
+                </div>
               ) : (
                 <>
                   <section className="fee-student-summary" aria-labelledby="fee-balance-title">
@@ -426,8 +497,8 @@ export function AcademicFees() {
                               <span className="material-symbols-outlined" aria-hidden="true">qr_code_scanner</span>
                               {qrLoadingId === inv.id ? 'Generating…' : 'QR'}
                             </Button>
-                            <Button onClick={() => void recordPayment(inv.id)} disabled={payingId === inv.id}>
-                              {payingId === inv.id ? 'Saving…' : 'Mark paid'}
+                            <Button onClick={() => openPaymentConfirmation(inv)} disabled={Boolean(payingId)}>
+                              Record payment
                             </Button>
                           </div>
                         )}
@@ -462,6 +533,43 @@ export function AcademicFees() {
             </div>
           </aside>
         </>
+      ) : null}
+
+      {paymentInvoice && payStudent ? (
+        <dialog
+          ref={paymentDialogRef}
+          className="fee-payment-dialog"
+          aria-labelledby="fee-payment-title"
+          onCancel={(event) => { event.preventDefault(); closePaymentConfirmation(); }}
+          onClose={() => { if (!payingId) setPaymentInvoice(null); }}
+        >
+          <form onSubmit={(event) => { event.preventDefault(); void recordPayment(); }}>
+            <div className="fee-payment-dialog-head">
+              <div><span>Confirm collection</span><h2 id="fee-payment-title">Record payment</h2></div>
+              <button type="button" onClick={closePaymentConfirmation} disabled={Boolean(payingId)} aria-label="Close payment confirmation"><span className="material-symbols-outlined" aria-hidden="true">close</span></button>
+            </div>
+            <p>Verify the student, amount, and payment method before updating the ledger.</p>
+            <dl className="fee-payment-facts">
+              <div><dt>Student</dt><dd>{payStudent.name}</dd></div>
+              <div><dt>Invoice</dt><dd>{paymentInvoice.invoiceType.toLowerCase().replaceAll('_', ' ')}</dd></div>
+              <div><dt>Amount received</dt><dd>{money(paymentInvoice.netPayable)}</dd></div>
+              <div><dt>Due date</dt><dd>{toDualDateLabel(paymentInvoice.dueDate)}</dd></div>
+            </dl>
+            <fieldset className="fee-payment-methods">
+              <legend>Payment method</legend>
+              <label><input type="radio" name="payment-method" value="CASH" checked={paymentMethod === 'CASH'} onChange={() => setPaymentMethod('CASH')} />Cash</label>
+              <label><input type="radio" name="payment-method" value="BANK" checked={paymentMethod === 'BANK'} onChange={() => setPaymentMethod('BANK')} />Bank transfer</label>
+            </fieldset>
+            {paymentMethod === 'BANK' ? <label className="fee-payment-reference" htmlFor="fee-payment-reference">Transaction reference<input id="fee-payment-reference" type="text" autoComplete="off" maxLength={128} required value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} placeholder="Bank transaction or deposit ID" /></label> : null}
+            {paymentError ? <div className="fee-payment-error" role="alert"><span className="material-symbols-outlined" aria-hidden="true">error</span>{paymentError}</div> : null}
+            <div className="fee-payment-actions">
+              <Button type="button" variant="outline" onClick={closePaymentConfirmation} disabled={Boolean(payingId)}>Cancel</Button>
+              <Button type="submit" disabled={Boolean(payingId) || (paymentMethod === 'BANK' && !paymentReference.trim())} aria-busy={Boolean(payingId)}>
+                {payingId ? 'Recording payment…' : `Record ${money(paymentInvoice.netPayable)}`}
+              </Button>
+            </div>
+          </form>
+        </dialog>
       ) : null}
 
       {/* NepalPay QR Modal */}

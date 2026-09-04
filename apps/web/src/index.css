@@ -2663,6 +2663,42 @@ h1, h2, h3, h4 {
 .fee-projections > div span { display: grid; gap: 2px; color: var(--text); font-size: 12px; }
 .fee-projections > div small { color: var(--text-muted); font-size: 11px; }
 .fee-projections > div strong { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fee-drawer-skeleton { display: grid; gap: 18px; }
+.fee-drawer-skeleton > div { min-height: 128px; border-radius: var(--radius-md); background: linear-gradient(90deg, var(--bg-subtle) 25%, var(--color-surface) 50%, var(--bg-subtle) 75%); background-size: 200% 100%; animation: feeSkeleton 1.4s linear infinite; }
+.fee-drawer-skeleton > div:nth-child(2) { min-height: 190px; }
+.fee-drawer-skeleton > div:nth-child(3) { min-height: 92px; }
+@keyframes feeSkeleton { to { background-position-x: -200%; } }
+.fee-drawer-error { display: grid; min-height: 260px; place-items: center; align-content: center; gap: 8px; padding: 28px; border: 1px dashed var(--border); border-radius: var(--radius-md); background: var(--color-bg); text-align: center; }
+.fee-drawer-error > .material-symbols-outlined { color: var(--color-error); font-size: 34px; }
+.fee-drawer-error p { max-width: 36ch; margin: 0 0 6px; color: var(--text-muted); font-size: 13px; }
+.fee-payment-dialog { width: min(520px, calc(100% - 32px)); max-height: calc(100vh - 32px); padding: 0; border: 0; border-radius: var(--radius-lg); background: var(--color-surface); color: var(--text); box-shadow: var(--shadow-modal); }
+.fee-payment-dialog::backdrop { background: rgba(10, 24, 44, .56); backdrop-filter: blur(3px); }
+.fee-payment-dialog form { display: grid; gap: 18px; padding: 24px; }
+.fee-payment-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.fee-payment-dialog-head > div { display: grid; gap: 4px; }
+.fee-payment-dialog-head > div > span { color: var(--color-primary); font-size: 11px; font-weight: 750; text-transform: uppercase; letter-spacing: .07em; }
+.fee-payment-dialog-head h2 { margin: 0; font-size: 21px; }
+.fee-payment-dialog-head button { display: grid; width: 40px; height: 40px; flex: 0 0 auto; place-items: center; border: 0; border-radius: var(--radius-sm); background: var(--bg-subtle); color: var(--text-muted); cursor: pointer; }
+.fee-payment-dialog > form > p { margin: -8px 0 0; color: var(--text-muted); font-size: 13px; }
+.fee-payment-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: hidden; margin: 0; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.fee-payment-facts > div { padding: 12px 14px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.fee-payment-facts > div:nth-child(2n) { border-right: 0; }
+.fee-payment-facts > div:nth-last-child(-n + 2) { border-bottom: 0; }
+.fee-payment-facts dt { color: var(--text-muted); font-size: 11px; }
+.fee-payment-facts dd { margin: 4px 0 0; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; text-transform: capitalize; }
+.fee-payment-methods { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 0; border: 0; }
+.fee-payment-methods legend, .fee-payment-reference { grid-column: 1 / -1; margin-bottom: 7px; font-size: 12px; font-weight: 700; }
+.fee-payment-methods label { display: flex; min-height: 44px; align-items: center; gap: 9px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
+.fee-payment-methods label:has(input:checked) { border-color: var(--color-primary); background: var(--color-primary-soft); color: var(--color-primary); }
+.fee-payment-methods input { accent-color: var(--color-primary); }
+.fee-payment-reference { display: grid; gap: 7px; margin: 0; }
+.fee-payment-reference input { min-height: 44px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-background); color: var(--text); font: inherit; }
+.fee-payment-error { display: flex; align-items: flex-start; gap: 8px; padding: 11px 12px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--color-error) 9%, transparent); color: var(--color-error); font-size: 12px; font-weight: 650; }
+.fee-payment-actions { display: flex; justify-content: flex-end; gap: 10px; padding-top: 4px; }
+.fee-payment-dialog button:focus-visible, .fee-payment-dialog input:focus-visible, .fee-drawer:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .people-drawer-overlay, .people-drawer, .fee-drawer-skeleton > div { animation: none; }
+}
 .people-drawer-foot {
   padding: 18px 24px;
   border-top: 1px solid var(--border);
@@ -2787,6 +2823,12 @@ h1, h2, h3, h4 {
   .fee-summary-grid > div:last-child { border-bottom: 0; }
   .fee-invoice-row { grid-template-columns: 1fr; }
   .fee-invoice-actions { justify-content: flex-start; flex-wrap: wrap; }
+  .fee-payment-dialog { width: 100%; max-height: 100vh; margin: auto 0 0; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+  .fee-payment-facts, .fee-payment-methods { grid-template-columns: 1fr; }
+  .fee-payment-facts > div { border-right: 0; border-bottom: 1px solid var(--border); }
+  .fee-payment-facts > div:nth-last-child(2) { border-bottom: 1px solid var(--border); }
+  .fee-payment-actions { display: grid; grid-template-columns: 1fr; }
+  .fee-payment-actions button:last-child { grid-row: 1; }
 }
 
 /* Visibility helpers */
