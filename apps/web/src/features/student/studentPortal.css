@@ -518,6 +518,7 @@
 .student-certificate-list button,
 .student-download-link { display: inline-flex; align-items: center; gap: 7px; padding: 8px 12px; border: 1px solid var(--student-border); border-radius: 7px; background: transparent; color: var(--student-blue); font-weight: 700; text-decoration: none; cursor: pointer; }
 .student-certificate-list button:disabled { color: var(--student-muted); cursor: not-allowed; opacity: .65; }
+.student-certificate-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 
 .student-calendar-list { display: flex; flex-direction: column; }
 .student-calendar-list article, .student-calendar-list > button { gap: 16px; padding: 17px 4px; border: 0; border-bottom: 1px solid var(--student-border); background: transparent; color: var(--student-text); display: flex; align-items: center; text-align: left; }
@@ -652,6 +653,7 @@
   .student-session { align-items: flex-start; }
   .student-session .student-status { display: none; }
   .student-assignment-list article, .student-certificate-list article { align-items: flex-start; flex-wrap: wrap; }
+  .student-certificate-actions { flex: 1 0 100%; padding-left: 56px; justify-content: flex-start; }
   .student-assignment__due { flex: 1 0 100% !important; padding-left: 56px; text-align: left; }
   .student-assignment__due .student-status { margin-left: 0; }
   .student-attendance-summary { grid-template-columns: 82px 1fr; gap: 16px; padding: 20px; }

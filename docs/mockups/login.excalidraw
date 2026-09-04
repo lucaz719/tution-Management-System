@@ -1,0 +1,112 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "hermes-agent",
+  "elements": [
+    {
+      "type": "rectangle",
+      "id": "r1",
+      "x": 100,
+      "y": 100,
+      "width": 300,
+      "height": 250,
+      "roundness": { "type": 3 },
+      "backgroundColor": "#a5d8ff",
+      "fillStyle": "solid",
+      "boundElements": [
+        {
+          "id": "t_r1",
+          "type": "text",
+          "x": 105,
+          "y": 110,
+          "width": 290,
+          "height": 25,
+          "text": "Login Screen",
+          "fontSize": 20,
+          "fontFamily": 1,
+          "strokeColor": "#1e1e1e",
+          "textAlign": "center",
+          "verticalAlign": "middle",
+          "containerId": "r1",
+          "originalText": "Login Screen",
+          "autoResize": true
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "id": "t1",
+      "x": 100,
+      "y": 400,
+      "text": "Mobile App Login",
+      "fontSize": 16,
+      "fontFamily": 1,
+      "strokeColor": "#1e1e1e",
+      "originalText": "Mobile App Login",
+      "autoResize": true
+    },
+    {
+      "type": "text",
+      "id": "t2",
+      "x": 100,
+      "y": 430,
+      "text": "Email/Phone Input",
+      "fontSize": 14,
+      "fontFamily": 1,
+      "strokeColor": "#1e1e1e",
+      "originalText": "Email/Phone Input",
+      "autoResize": true
+    },
+    {
+      "type": "text",
+      "id": "t3",
+      "x": 100,
+      "y": 460,
+      "text": "Password Input",
+      "fontSize": 14,
+      "fontFamily": 1,
+      "strokeColor": "#1e1e1e",
+      "originalText": "Password Input",
+      "autoResize": true
+    },
+    {
+      "type": "text",
+      "id": "t4",
+      "x": 100,
+      "y": 490,
+      "text": "Forgot Password? (link)",
+      "fontSize": 12,
+      "fontFamily": 1,
+      "strokeColor": "#1e1e1e",
+      "originalText": "Forgot Password? (link)",
+      "autoResize": true
+    },
+    {
+      "type": "text",
+      "id": "t5",
+      "x": 100,
+      "y": 520,
+      "text": "Sign In Button",
+      "fontSize": 16,
+      "fontFamily": 1,
+      "strokeColor": "#1e1e1e",
+      "originalText": "Sign In Button",
+      "autoResize": true
+    },
+    {
+      "type": "text",
+      "id": "t6",
+      "x": 100,
+      "y": 550,
+      "text": "Create Account (link)",
+      "fontSize": 12,
+      "fontFamily": 1,
+      "strokeColor": "#1e1e1e",
+      "originalText": "Create Account (link)",
+      "autoResize": true
+    }
+  ],
+  "appState": {
+    "viewBackgroundColor": "#ffffff"
+  }
+}

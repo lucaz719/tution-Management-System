@@ -111,6 +111,7 @@ export const DASHBOARD_NAVIGATION: Record<DashboardRole, DashboardNavItem[]> = {
     { section: 'Records', label: 'Fees & Payment', icon: 'payments', path: '/parent/fees' },
     { section: 'Records', label: 'Certificates', icon: 'workspace_premium', path: '/parent/certificates' },
     { section: 'Calendar', label: 'Academic Calendar', icon: 'date_range', path: '/parent/calendar' },
+    { section: 'Settings', label: 'Profile', icon: 'person', path: '/parent/profile' },
     { section: 'Settings', label: 'Security', icon: 'security', path: '/parent/security' },
   ],
   receptionist: [

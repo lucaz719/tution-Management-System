@@ -814,6 +814,7 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
       issuedDate: formatDate(certificate.issuedDate),
       fileName: certificate.pdfUrl.split('/').pop() || `${certificate.certificateId}.pdf`,
       pdfUrl: `/certificates/${encodeURIComponent(certificate.certificateId)}/download`,
+      htmlUrl: (certificate.template.layoutConfig as { renderMode?: string }).renderMode === 'HTML' ? `/certificates/${encodeURIComponent(certificate.certificateId)}/html` : undefined,
     }));
 
     const notifications = [

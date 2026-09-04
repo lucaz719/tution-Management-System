@@ -1,24 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:tms_mobile/core/providers/child_selection_provider.dart';
 import 'package:tms_mobile/core/theme/app_theme.dart';
 
-class ChildSwitcherBar extends StatelessWidget {
-  const ChildSwitcherBar({
-    super.key,
-    required this.childrenNames,
-    required this.selectedChild,
-    required this.onChanged,
-  });
-
-  final List<String> childrenNames;
-  final String selectedChild;
-  final ValueChanged<String> onChanged;
+class ChildSwitcherBar extends ConsumerWidget {
+  const ChildSwitcherBar({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final selectedChild = ref.watch(childSelectionProvider);
+    final children = ref.watch(availableChildrenProvider);
+
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
-        children: childrenNames.map((child) {
+        children: children.map((child) {
           final selected = child == selectedChild;
           return Padding(
             padding: const EdgeInsets.only(right: 10),
@@ -27,7 +23,7 @@ class ChildSwitcherBar extends StatelessWidget {
               borderRadius: BorderRadius.circular(999),
               child: InkWell(
                 borderRadius: BorderRadius.circular(999),
-                onTap: () => onChanged(child),
+                onTap: () => ref.read(childSelectionProvider.notifier).selectChild(child),
                 child: Padding(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 18, vertical: 14),

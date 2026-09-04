@@ -1,0 +1,112 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "hermes-agent",
+  "elements": [
+    {
+      "type": "rectangle",
+      "id": "r1",
+      "x": 100,
+      "y": 100,
+      "width": 300,
+      "height": 200,
+      "roundness": { "type": 3 },
+      "backgroundColor": "#a5d8ff",
+      "fillStyle": "solid",
+      "boundElements": [
+        {
+          "id": "t_r1",
+          "type": "text",
+          "x": 105,
+          "y": 110,
+          "width": 290,
+          "height": 25,
+          "text": "Login Screen",
+          "fontSize": 20,
+          "fontFamily": 1,
+          "strokeColor": "#1e1e1e",
+          "textAlign": "center",
+          "verticalAlign": "middle",
+          "containerId": "r1",
+          "originalText": "Login Screen",
+          "autoResize": true
+        }
+      ]
+    },
+    {
+      "type": "rectangle",
+      "id": "r2",
+      "x": 100,
+      "y": 350,
+      "width": 300,
+      "height": 150,
+      "roundness": { "type": 3 },
+      "backgroundColor": "#b2f2bb",
+      "fillStyle": "solid",
+      "boundElements": [
+        {
+          "id": "t_r2",
+          "type": "text",
+          "x": 105,
+          "y": 360,
+          "width": 290,
+          "height": 25,
+          "text": "Teacher Home",
+          "fontSize": 20,
+          "fontFamily": 1,
+          "strokeColor": "#1e1e1e",
+          "textAlign": "center",
+          "verticalAlign": "middle",
+          "containerId": "r2",
+          "originalText": "Teacher Home",
+          "autoResize": true
+        }
+      ]
+    },
+    {
+      "type": "rectangle",
+      "id": "r3",
+      "x": 100,
+      "y": 500,
+      "width": 300,
+      "height": 150,
+      "roundness": { "type": 3 },
+      "backgroundColor": "#d0bfff",
+      "fillStyle": "solid",
+      "boundElements": [
+        {
+          "id": "t_r3",
+          "type": "text",
+          "x": 105,
+          "y": 510,
+          "width": 290,
+          "height": 25,
+          "text": "Student Home",
+          "fontSize": 20,
+          "fontFamily": 1,
+          "strokeColor": "#1e1e1e",
+          "textAlign": "center",
+          "verticalAlign": "middle",
+          "containerId": "r3",
+          "originalText": "Student Home",
+          "autoResize": true
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "id": "t1",
+      "x": 100,
+      "y": 650,
+      "text": "Home Screen (Adaptive Layout)",
+      "fontSize": 16,
+      "fontFamily": 1,
+      "strokeColor": "#1e1e1e",
+      "originalText": "Home Screen (Adaptive Layout)",
+      "autoResize": true
+    }
+  ],
+  "appState": {
+    "viewBackgroundColor": "#ffffff"
+  }
+}

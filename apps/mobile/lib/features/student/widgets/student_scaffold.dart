@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:tms_mobile/core/providers/auth_provider.dart';
 
 import '../student_design.dart';
 
-class StudentScaffold extends StatelessWidget {
+class StudentScaffold extends ConsumerWidget {
   const StudentScaffold({
     super.key,
     required this.title,
@@ -28,12 +30,27 @@ class StudentScaffold extends StatelessWidget {
   ];
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Theme(
       data: buildStudentTheme(Theme.of(context)),
       child: Builder(
         builder: (context) => Scaffold(
-          appBar: AppBar(title: Text(title), actions: actions),
+          appBar: AppBar(
+            title: Text(title),
+            actions: [
+              ...?actions,
+              IconButton(
+                tooltip: 'Change password',
+                icon: const Icon(Icons.key_rounded),
+                onPressed: () => context.push('/student/change-password'),
+              ),
+              IconButton(
+                tooltip: 'Log out',
+                icon: const Icon(Icons.logout_rounded),
+                onPressed: () => ref.read(authProvider.notifier).logout(),
+              ),
+            ],
+          ),
           body: SafeArea(child: body),
           floatingActionButton: floatingActionButton,
           bottomNavigationBar: selectedIndex == null

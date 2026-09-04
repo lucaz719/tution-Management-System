@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from './ui/Button';
-import { toBsLabel } from '../utils/nepaliDate';
+import { toDualDateLabel } from '../utils/nepaliDate';
 
 export interface InvoiceDocumentData {
   id: string;
@@ -31,7 +31,7 @@ const invoiceTitle = (type: InvoiceDocumentData['invoiceType']) => type === 'ADM
   : type === 'SUBJECT' ? 'Monthly subject tuition'
     : type === 'ACTIVITY' ? 'Monthly activity fee' : 'Monthly grade tuition';
 const money = (value: number) => `NPR ${value.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const date = (value?: string | null) => toBsLabel(value);
+const date = (value?: string | null) => toDualDateLabel(value);
 const shortId = (id: string) => id.slice(0, 8).toUpperCase();
 const documentHeading = (status: string) => status === 'PAID' ? 'Receipt' : 'Invoice';
 const invoiceFacts = (data: InvoiceDocumentData) => [

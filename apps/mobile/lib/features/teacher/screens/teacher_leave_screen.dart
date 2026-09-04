@@ -52,7 +52,7 @@ class _TeacherLeaveScreenState extends State<TeacherLeaveScreen> {
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.go('/teacher/home'),
+          onPressed: () => context.pop(),
         ),
       ),
       body: SafeArea(
@@ -62,12 +62,12 @@ class _TeacherLeaveScreenState extends State<TeacherLeaveScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.event_available_rounded,
-                        size: 48, color: kColorText.withOpacity(0.35)),
+                        size: 48, color: kColorText.withValues(alpha: 0.35)),
                     const SizedBox(height: 12),
                     Text(
                       'No leave requests yet',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: kColorText.withOpacity(0.55),
+                            color: kColorText.withValues(alpha: 0.55),
                           ),
                     ),
                   ],
@@ -234,7 +234,7 @@ class _LeaveCard extends StatelessWidget {
             Text(
               dateRange,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: kColorText.withOpacity(0.65),
+                    color: kColorText.withValues(alpha: 0.65),
                   ),
             ),
             const SizedBox(height: 4),

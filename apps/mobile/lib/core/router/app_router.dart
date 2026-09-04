@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:tms_mobile/core/auth/role_codes.dart';
 import 'package:tms_mobile/core/providers/auth_provider.dart';
 import 'package:tms_mobile/features/auth/screens/login_screen.dart';
 import 'package:tms_mobile/features/auth/screens/forgot_password_screen.dart';
 import 'package:tms_mobile/features/auth/screens/reset_password_screen.dart';
 import 'package:tms_mobile/features/auth/screens/two_factor_screen.dart';
+<<<<<<< HEAD
 import 'package:tms_mobile/features/admin/screens/branch_admin_home_screen.dart';
+=======
+import 'package:tms_mobile/features/auth/screens/change_password_screen.dart';
+>>>>>>> 3995412de992acdfbb82d49ddddf9c807882fc1b
 import 'package:tms_mobile/features/teacher/screens/teacher_home_screen.dart';
 import 'package:tms_mobile/features/teacher/screens/teacher_timetable_screen.dart';
 import 'package:tms_mobile/features/teacher/screens/teacher_leave_screen.dart';
@@ -15,6 +20,7 @@ import 'package:tms_mobile/features/teacher/models/teacher_models.dart';
 import 'package:tms_mobile/features/parent/screens/parent_home_screen.dart';
 import 'package:tms_mobile/features/parent/screens/parent_attendance_screen.dart';
 import 'package:tms_mobile/features/parent/screens/parent_fees_screen.dart';
+import 'package:tms_mobile/features/parent/screens/parent_academics_screen.dart';
 import 'package:tms_mobile/features/student/screens/student_home_screen.dart';
 import 'package:tms_mobile/features/student/screens/student_timetable_screen.dart';
 import 'package:tms_mobile/features/student/screens/student_fees_screen.dart';
@@ -24,6 +30,11 @@ import 'package:tms_mobile/features/student/screens/student_attendance_screen.da
 import 'package:tms_mobile/features/student/screens/student_calendar_screen.dart';
 import 'package:tms_mobile/features/student/screens/student_certificates_screen.dart';
 import 'package:tms_mobile/features/student/screens/student_notifications_screen.dart';
+import 'package:tms_mobile/features/branch_manager/screens/branch_home_screen.dart';
+import 'package:tms_mobile/features/janitor/screens/janitor_home_screen.dart';
+import 'package:tms_mobile/features/janitor/screens/janitor_task_detail_screen.dart';
+import 'package:tms_mobile/features/janitor/models/janitor_task.dart';
+import 'package:tms_mobile/features/tenant_admin/screens/tenant_admin_home_screen.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authProvider);
@@ -72,10 +83,19 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // prevents an invalid deep link from rendering an unrelated UI first.
       if (isLoggedIn) {
         final allowedPrefix = switch (authState.user?.role) {
+<<<<<<< HEAD
           'TEACHER' => '/teacher/',
           'STUDENT' => '/student/',
           'PARENT' => '/parent/',
           'BRANCH_ADMIN' || 'TENANT_ADMIN' || 'SUPER_ADMIN' || 'STAFF' => '/admin/',
+=======
+          RoleCodes.tenantAdmin => '/tenant/',
+          RoleCodes.branchAdmin => '/branch/',
+          RoleCodes.janitor => '/janitor/',
+          RoleCodes.teacher => '/teacher/',
+          RoleCodes.student => '/student/',
+          RoleCodes.parent => '/parent/',
+>>>>>>> 3995412de992acdfbb82d49ddddf9c807882fc1b
           _ => null,
         };
         if (allowedPrefix == null || !location.startsWith(allowedPrefix)) {
@@ -118,11 +138,60 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         },
       ),
 
+<<<<<<< HEAD
       // ── Admin routes ──
       GoRoute(
         path: '/admin/home',
         builder: (BuildContext context, GoRouterState state) =>
             const BranchAdminHomeScreen(),
+=======
+      // ── Branch Manager routes (canonical role: BRANCH_ADMIN) ──
+      GoRoute(
+        path: '/branch/home',
+        builder: (BuildContext context, GoRouterState state) =>
+            const BranchHomeScreen(),
+      ),
+      GoRoute(
+        path: '/branch/change-password',
+        builder: (BuildContext context, GoRouterState state) =>
+            const ChangePasswordScreen(),
+      ),
+
+      // ── Tenant Admin routes ──
+      GoRoute(
+        path: '/tenant/home',
+        builder: (BuildContext context, GoRouterState state) =>
+            const TenantAdminHomeScreen(),
+      ),
+      GoRoute(
+        path: '/tenant/change-password',
+        builder: (BuildContext context, GoRouterState state) =>
+            const ChangePasswordScreen(),
+      ),
+
+      // ── Janitor routes ──
+      GoRoute(
+        path: '/janitor/home',
+        builder: (BuildContext context, GoRouterState state) =>
+            const JanitorHomeScreen(),
+      ),
+      GoRoute(
+        path: '/janitor/change-password',
+        builder: (BuildContext context, GoRouterState state) =>
+            const ChangePasswordScreen(),
+      ),
+      GoRoute(
+        path: '/janitor/task',
+        builder: (BuildContext context, GoRouterState state) {
+          final task = state.extra as JanitorTask?;
+          if (task == null) {
+            return const Scaffold(
+              body: Center(child: Text('Task details are unavailable.')),
+            );
+          }
+          return JanitorTaskDetailScreen(task: task);
+        },
+>>>>>>> 3995412de992acdfbb82d49ddddf9c807882fc1b
       ),
 
       // ── Teacher routes ──
@@ -130,6 +199,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/teacher/home',
         builder: (BuildContext context, GoRouterState state) =>
             const TeacherHomeScreen(),
+      ),
+      GoRoute(
+        path: '/teacher/change-password',
+        builder: (BuildContext context, GoRouterState state) =>
+            const ChangePasswordScreen(),
       ),
       GoRoute(
         path: '/teacher/timetable',
@@ -163,6 +237,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             const ParentHomeScreen(),
       ),
       GoRoute(
+        path: '/parent/change-password',
+        builder: (BuildContext context, GoRouterState state) =>
+            const ChangePasswordScreen(),
+      ),
+      GoRoute(
         path: '/parent/attendance',
         builder: (BuildContext context, GoRouterState state) =>
             const ParentAttendanceScreen(),
@@ -172,12 +251,22 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (BuildContext context, GoRouterState state) =>
             const ParentFeesScreen(),
       ),
+      GoRoute(
+        path: '/parent/academics',
+        builder: (BuildContext context, GoRouterState state) =>
+            const ParentAcademicsScreen(),
+      ),
 
       // ── Student routes ──
       GoRoute(
         path: '/student/home',
         builder: (BuildContext context, GoRouterState state) =>
             const StudentHomeScreen(),
+      ),
+      GoRoute(
+        path: '/student/change-password',
+        builder: (BuildContext context, GoRouterState state) =>
+            const ChangePasswordScreen(),
       ),
       GoRoute(
         path: '/student/timetable',

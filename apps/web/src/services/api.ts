@@ -616,7 +616,7 @@ export const api = {
       request<{ message: string; event: any }>('/academic-events', { method: 'POST', body: JSON.stringify(payload) }),
     issueCertificate: async (payload: { studentId: string; templateId: string; branchId: string }) =>
       request<{ message: string; certificate: any }>('/certificates/issue', { method: 'POST', body: JSON.stringify(payload) }),
-    getCertificateOptions: async () => request<{ templates: Array<{ id: string; name: string; type: string }>; students: Array<{ studentId: string; studentName: string; gradeName: string; branchId: string; branchName: string }> }>('/certificates/options'),
+    getCertificateOptions: async () => request<{ templates: Array<{ id: string; name: string; type: string; layoutConfig: { renderMode?: string; html?: string; sourceFile?: { name: string; mimeType: string } } }>; students: Array<{ studentId: string; studentName: string; gradeName: string; branchId: string; branchName: string }> }>('/certificates/options'),
     completeMaintenanceTask: async (taskId: string) =>
       request<{ message: string; task: any }>(`/resources/tasks/complete/${taskId}`, { method: 'POST' }),
     grantFeeOverride: async (payload: { studentId: string; branchId: string; scope: 'ONE_SESSION' | 'ONE_DAY'; reason: string }) =>

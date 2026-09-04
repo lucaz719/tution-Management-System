@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:tms_mobile/core/auth/role_codes.dart';
 import 'package:tms_mobile/core/network/api_client.dart';
 import 'package:tms_mobile/features/auth/data/mock_auth_service.dart';
 
@@ -40,11 +41,26 @@ class AuthUser {
         ? json['user'] as Map<String, dynamic>
         : json;
 
+<<<<<<< HEAD
     String role = 'TEACHER';
+=======
+    // API may return a direct role code/name or a roles entry with roleName.
+    String? rawRole;
+>>>>>>> 3995412de992acdfbb82d49ddddf9c807882fc1b
     if (user['role'] is String) {
-      role = user['role'] as String;
+      rawRole = user['role'] as String;
     } else if (user['roles'] is List && (user['roles'] as List).isNotEmpty) {
-      role = (user['roles'] as List).first['roleName'] as String? ?? 'TEACHER';
+      final firstRole = (user['roles'] as List).first;
+      if (firstRole is Map) {
+        rawRole = firstRole['roleName'] as String?;
+      }
+    }
+
+    final role = normalizeRoleCode(rawRole);
+    if (role == null) {
+      throw const AuthFailure(
+        'Your account role is not supported by this mobile app.',
+      );
     }
 
     return AuthUser(
@@ -206,6 +222,24 @@ class AuthService {
       );
     } on DioException catch (e) {
       throw AuthFailure(_extractMessage(e, 'Failed to reset password.'));
+    }
+  }
+
+  /// Change password for authenticated user (requires current password).
+  static Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    try {
+      await _dio.post(
+        '/api/auth/change-password',
+        data: {
+          'currentPassword': currentPassword,
+          'newPassword': newPassword,
+        },
+      );
+    } on DioException catch (e) {
+      throw AuthFailure(_extractMessage(e, 'Failed to change password.'));
     }
   }
 

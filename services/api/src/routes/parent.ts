@@ -36,6 +36,18 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
     const parent = await prisma.parent.findFirst({
       where: { userId: req.user!.id, user: { tenantId: req.tenantId! } },
       include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            phone: true,
+            status: true,
+            emailVerified: true,
+            createdAt: true,
+          },
+        },
         studentParents: {
           include: {
             student: {
@@ -263,6 +275,7 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
       id: certificate.certificateId, childId: student.id, title: certificate.template.name,
       course: student.grade?.name ?? 'Student record', issuedDate: formatDate(certificate.issuedDate),
       fileName: `${certificate.certificateId}.pdf`, pdfUrl: `/certificates/${encodeURIComponent(certificate.certificateId)}/download`,
+      htmlUrl: (certificate.template.layoutConfig as { renderMode?: string }).renderMode === 'HTML' ? `/certificates/${encodeURIComponent(certificate.certificateId)}/html` : undefined,
     }));
     const mappedMessages = messages.map((message) => ({
       id: message.id, childId: student.id,
@@ -303,6 +316,16 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
     return res.json({
       generatedAt: new Date().toISOString(),
       bookingWindowHours: tenant?.appointmentWindowHours ?? 24,
+      profile: {
+        id: parent.user.id,
+        name: `${parent.user.firstName} ${parent.user.lastName}`.trim(),
+        initials: `${parent.user.firstName[0] ?? ''}${parent.user.lastName[0] ?? ''}`.toUpperCase(),
+        email: parent.user.email,
+        phone: parent.user.phone,
+        status: parent.user.status,
+        emailVerified: parent.user.emailVerified,
+        memberSince: formatDate(parent.user.createdAt),
+      },
       children,
       selected: child,
       billing,

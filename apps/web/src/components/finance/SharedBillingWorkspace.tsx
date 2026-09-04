@@ -3,14 +3,17 @@ import { api, type BillingInvoice, type BillingLedger, type BillingPayroll } fro
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { StatusBadge } from "../ui/StatusBadge";
-import { toBsLabel } from "../../utils/nepaliDate";
+import { toBsMonthRangeLabel, toDualDateLabel } from "../../utils/nepaliDate";
 
 type BillingTarget = { kind: "student"; id: string } | { kind: "teacher"; id: string } | null;
 type CreateMode = "student" | "teacher" | null;
 
 const money = (value: number) => `NPR ${Number(value || 0).toLocaleString("en-NP", { maximumFractionDigits: 2 })}`;
-const dateLabel = (value: string) => toBsLabel(value);
-const monthLabel = (month: number, year: number) => new Intl.DateTimeFormat("en", { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1));
+const dateLabel = (value: string) => toDualDateLabel(value);
+const monthLabel = (month: number, year: number) => {
+  const date = new Date(year, month - 1, 1);
+  return `${new Intl.DateTimeFormat("en", { month: "long", year: "numeric" }).format(date)} AD · ${toBsMonthRangeLabel(date)}`;
+};
 const isoDate = (date: Date) => date.toISOString().slice(0, 10);
 
 function invoiceLabel(invoice: BillingInvoice) {
@@ -549,7 +552,7 @@ export function SharedBillingWorkspace({ heading = "Billing & payroll" }: { head
                 <select id="billing-month" value={month} onChange={(event) => setMonth(Number(event.target.value))}>
                   {Array.from({ length: 12 }, (_, index) => (
                     <option key={index + 1} value={index + 1}>
-                      {monthLabel(index + 1, 2020).replace(" 2020", "")}
+                      {new Intl.DateTimeFormat("en", { month: "long" }).format(new Date(2020, index, 1))}
                     </option>
                   ))}
                 </select>

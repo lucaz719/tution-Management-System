@@ -1,17 +1,83 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../data/student_demo_data.dart';
 import '../models/student_portal_models.dart';
 import '../student_design.dart';
 import '../widgets/student_scaffold.dart';
+import 'package:tms_mobile/core/providers/feature_flags_provider.dart';
 
-class StudentFeesScreen extends StatelessWidget {
+class StudentFeesScreen extends ConsumerWidget {
   const StudentFeesScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final billingEnabled =
+        ref.watch(featureFlagsProvider).isEnabled(FeatureFlags.studentBilling);
+
+    if (!billingEnabled) {
+      return StudentScaffold(
+        title: 'Fees & Payment',
+        selectedIndex: 2,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(
+                  Icons.lock_outline_rounded,
+                  size: 64,
+                  color: StudentColors.mutedText,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Billing Access Restricted',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        color: StudentColors.text,
+                      ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Fee management is handled by parents. Please contact your parent/guardian for payment information.',
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: StudentColors.mutedText,
+                      ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  onPressed: () => context.go('/student/home'),
+                  icon: const Icon(Icons.home_outlined),
+                  label: const Text('Back to Dashboard'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Original billing screen content
     final invoices = StudentDemoData.invoices;
     final current = invoices.first;
+    return _StudentFeesContent(invoices: invoices, current: current);
+  }
+}
+
+class _StudentFeesContent extends StatelessWidget {
+  const _StudentFeesContent({
+    required this.invoices,
+    required this.current,
+  });
+
+  final List<StudentInvoice> invoices;
+  final StudentInvoice current;
+
+  @override
+  Widget build(BuildContext context) {
     return StudentScaffold(
       title: 'Fees & payment',
       selectedIndex: 2,
