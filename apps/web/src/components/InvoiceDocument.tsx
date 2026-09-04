@@ -29,7 +29,7 @@ export interface InvoiceDocumentData {
 const invoiceTitle = (type: InvoiceDocumentData['invoiceType']) => type === 'ADMISSION'
   ? 'One-time admission fee'
   : type === 'SUBJECT' ? 'Monthly subject tuition'
-    : type === 'ACTIVITY' ? 'Optional activity fee' : 'Monthly grade tuition';
+    : type === 'ACTIVITY' ? 'Monthly activity fee' : 'Monthly grade tuition';
 const money = (value: number) => `NPR ${value.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const date = (value?: string | null) => toDualDateLabel(value);
 const shortId = (id: string) => id.slice(0, 8).toUpperCase();

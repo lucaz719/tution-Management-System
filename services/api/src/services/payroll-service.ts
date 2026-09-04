@@ -1,155 +1,87 @@
 import { Prisma } from '@prisma/client';
+import crypto from 'node:crypto';
 import prisma from '../utils/db';
 
 export type SupportedContractType = 'FIXED' | 'HOUR_RATE';
-
-export type CompensationStructure = Record<string, number> & {
-  baseMonthlySalary?: number;
-  hourlyRate?: number;
-};
+export type CompensationStructure = Record<string, number> & { baseMonthlySalary?: number; hourlyRate?: number };
+export type PayrollAdjustment = { staffRecordId: string; bonuses: number; deductions: number; remarks?: string };
 
 export class PayrollConfigurationError extends Error {
-  constructor(public readonly staff: Array<{ staffRecordId: string; name: string; reason: string }>) {
-    super('Payroll cannot be calculated until every staff member has a valid compensation setup.');
-  }
+  constructor(public readonly staff: Array<{ staffRecordId: string; name: string; reason: string }>) { super('Payroll cannot be calculated until every staff member has a valid compensation setup.'); }
 }
-
 export class PayrollPeriodConflictError extends Error {
-  constructor(public readonly staff: Array<{ staffRecordId: string; name: string }>) {
-    super('Payroll already exists for one or more staff members in this period.');
-  }
+  constructor(public readonly staff: Array<{ staffRecordId: string; name: string }>) { super('Payroll already exists for one or more staff members in this period.'); }
 }
 
-export function compensationStructure(
-  contractType: string,
-  raw: Prisma.JsonValue,
-): { success: true; value: CompensationStructure } | { success: false; reason: string } {
-  const structure = raw && typeof raw === 'object' && !Array.isArray(raw)
-    ? raw as Record<string, unknown>
-    : {};
+export function money(value: number) { return Math.round((value + Number.EPSILON) * 100) / 100; }
+export function calculateNetPayable(baseSalary: number, bonuses: number, deductions: number) {
+  const total = money(money(baseSalary) + money(bonuses) - money(deductions));
+  if (total < 0) throw new Error('Deductions cannot exceed salary plus bonuses.');
+  return total;
+}
 
+export function compensationStructure(contractType: string, raw: Prisma.JsonValue): { success: true; value: CompensationStructure } | { success: false; reason: string } {
+  const structure = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
   if (contractType === 'FIXED') {
     const baseMonthlySalary = Number(structure.baseMonthlySalary);
-    return Number.isFinite(baseMonthlySalary) && baseMonthlySalary > 0
-      ? { success: true, value: { baseMonthlySalary } }
-      : { success: false, reason: 'Base monthly salary is missing or invalid.' };
+    return Number.isFinite(baseMonthlySalary) && baseMonthlySalary > 0 ? { success: true, value: { baseMonthlySalary } } : { success: false, reason: 'Base monthly salary is missing or invalid.' };
   }
   if (contractType === 'HOUR_RATE') {
     const hourlyRate = Number(structure.hourlyRate);
-    return Number.isFinite(hourlyRate) && hourlyRate > 0
-      ? { success: true, value: { hourlyRate } }
-      : { success: false, reason: 'Hourly rate is missing or invalid.' };
+    return Number.isFinite(hourlyRate) && hourlyRate > 0 ? { success: true, value: { hourlyRate } } : { success: false, reason: 'Hourly rate is missing or invalid.' };
   }
   return { success: false, reason: `Unsupported contract type: ${contractType || 'not set'}.` };
 }
+export function salaryStructureFor(contractType: SupportedContractType, amount: number): CompensationStructure { return contractType === 'FIXED' ? { baseMonthlySalary: amount } : { hourlyRate: amount }; }
 
-export function salaryStructureFor(contractType: SupportedContractType, amount: number): CompensationStructure {
-  return contractType === 'FIXED' ? { baseMonthlySalary: amount } : { hourlyRate: amount };
-}
+interface PayrollInput { tenantId: string; month: number; year: number; staffRecordIds?: string[]; adjustments?: PayrollAdjustment[]; bonuses?: number; deductions?: number; calculatedBy?: string }
 
-interface CreatePayrollInput {
-  tenantId: string;
-  month: number;
-  year: number;
-  staffRecordIds?: string[];
-  bonuses?: number;
-  deductions?: number;
-}
-
-export async function createPayrollRecords(input: CreatePayrollInput) {
-  const staffRecords = await prisma.staffRecord.findMany({
-    where: {
-      ...(input.staffRecordIds ? { id: { in: input.staffRecordIds } } : {}),
-      user: { tenantId: input.tenantId, status: 'ACTIVE' },
-    },
-    include: { user: true },
-    orderBy: { user: { firstName: 'asc' } },
-  });
-  if (staffRecords.length === 0) return [];
-
-  const configured = staffRecords.map((record) => ({
-    record,
-    compensation: compensationStructure(record.contractType, record.salaryStructure),
-  }));
-  const incomplete = configured
-    .filter((item) => !item.compensation.success)
-    .map((item) => ({
-      staffRecordId: item.record.id,
-      name: `${item.record.user.firstName} ${item.record.user.lastName}`.trim(),
-      reason: item.compensation.success ? '' : item.compensation.reason,
-    }));
+async function buildPayrollRows(input: PayrollInput) {
+  const staffRecords = await prisma.staffRecord.findMany({ where: { ...(input.staffRecordIds ? { id: { in: input.staffRecordIds } } : {}), user: { tenantId: input.tenantId, status: 'ACTIVE' } }, include: { user: true }, orderBy: [{ user: { firstName: 'asc' } }, { user: { lastName: 'asc' } }, { id: 'asc' }] });
+  const configured = staffRecords.map((record) => ({ record, compensation: compensationStructure(record.contractType, record.salaryStructure) }));
+  const incomplete = configured.filter((item) => !item.compensation.success).map((item) => ({ staffRecordId: item.record.id, name: `${item.record.user.firstName} ${item.record.user.lastName}`.trim(), reason: item.compensation.success ? '' : item.compensation.reason }));
   if (incomplete.length) throw new PayrollConfigurationError(incomplete);
-
-  const existing = await prisma.payroll.findMany({
-    where: {
-      tenantId: input.tenantId,
-      month: input.month,
-      year: input.year,
-      staffRecordId: { in: staffRecords.map((record) => record.id) },
-    },
-    select: { staffRecordId: true },
-  });
-  if (existing.length) {
-    const ids = new Set(existing.map((record) => record.staffRecordId));
-    throw new PayrollPeriodConflictError(staffRecords
-      .filter((record) => ids.has(record.id))
-      .map((record) => ({ staffRecordId: record.id, name: `${record.user.firstName} ${record.user.lastName}`.trim() })));
-  }
-
-  const periodStart = new Date(input.year, input.month - 1, 1);
-  const periodEnd = new Date(input.year, input.month, 1);
-  const rows: Prisma.PayrollCreateManyInput[] = [];
+  const adjustmentMap = new Map((input.adjustments ?? []).map((item) => [item.staffRecordId, item]));
+  const periodStart = new Date(input.year, input.month - 1, 1), periodEnd = new Date(input.year, input.month, 1);
+  const rows = [];
   for (const item of configured) {
     const compensation = item.compensation.success ? item.compensation.value : {};
+    let workedMinutes = 0;
     let baseSalary = compensation.baseMonthlySalary ?? 0;
     if (item.record.contractType === 'HOUR_RATE') {
-      const worked = await prisma.teacherSession.aggregate({
-        where: {
-          teacherId: item.record.userId,
-          status: 'PRESENT_CONFIRMED',
-          date: { gte: periodStart, lt: periodEnd },
-        },
-        _sum: { totalMinutes: true },
-      });
-      baseSalary = Math.round((((worked._sum.totalMinutes ?? 0) / 60) * (compensation.hourlyRate ?? 0)) * 100) / 100;
+      const worked = await prisma.teacherSession.aggregate({ where: { teacherId: item.record.userId, status: 'PRESENT_CONFIRMED', date: { gte: periodStart, lt: periodEnd } }, _sum: { totalMinutes: true } });
+      workedMinutes = worked._sum.totalMinutes ?? 0;
+      baseSalary = money((workedMinutes / 60) * (compensation.hourlyRate ?? 0));
     }
-    const bonuses = input.bonuses ?? 0;
-    const deductions = input.deductions ?? 0;
-    const netPayable = Math.round((baseSalary + bonuses - deductions) * 100) / 100;
-    if (netPayable < 0) throw new Error('Deductions cannot exceed salary plus bonuses.');
-    rows.push({
-      tenantId: input.tenantId,
-      staffRecordId: item.record.id,
-      month: input.month,
-      year: input.year,
-      baseSalary,
-      attendanceDeductions: deductions,
-      bonuses,
-      netPayable,
-      status: 'PENDING',
-    });
+    const adjustment = adjustmentMap.get(item.record.id);
+    const bonuses = money(adjustment?.bonuses ?? input.bonuses ?? 0), deductions = money(adjustment?.deductions ?? input.deductions ?? 0);
+    const netPayable = calculateNetPayable(baseSalary, bonuses, deductions);
+    const breakdown = { contractType: item.record.contractType, baseSalary: money(baseSalary), hourlyRate: compensation.hourlyRate ?? null, workedMinutes, bonuses, deductions, netPayable, periodStart: periodStart.toISOString(), periodEnd: periodEnd.toISOString() };
+    rows.push({ staffRecord: item.record, staffRecordId: item.record.id, baseSalary: money(baseSalary), bonuses, deductions, netPayable, adjustmentRemarks: adjustment?.remarks?.trim() || null, breakdown });
   }
+  return rows;
+}
 
+export async function previewPayrollRecords(input: PayrollInput) {
+  const rows = await buildPayrollRows(input);
+  const existing = await prisma.payroll.findMany({ where: { tenantId: input.tenantId, month: input.month, year: input.year, staffRecordId: { in: rows.map((row) => row.staffRecordId) } }, select: { staffRecordId: true, id: true, status: true } });
+  const existingMap = new Map(existing.map((record) => [record.staffRecordId, record]));
+  return rows.map((row) => ({ ...row, existingPayroll: existingMap.get(row.staffRecordId) ?? null }));
+}
+
+export async function createPayrollRecords(input: PayrollInput) {
+  const rows = await buildPayrollRows(input);
+  if (!rows.length) return [];
+  const existing = await prisma.payroll.findMany({ where: { tenantId: input.tenantId, month: input.month, year: input.year, staffRecordId: { in: rows.map((row) => row.staffRecordId) } }, select: { staffRecordId: true } });
+  if (existing.length) {
+    const ids = new Set(existing.map((record) => record.staffRecordId));
+    throw new PayrollPeriodConflictError(rows.filter((row) => ids.has(row.staffRecordId)).map((row) => ({ staffRecordId: row.staffRecordId, name: `${row.staffRecord.user.firstName} ${row.staffRecord.user.lastName}`.trim() })));
+  }
   try {
-    await prisma.payroll.createMany({ data: rows });
+    await prisma.payroll.createMany({ data: rows.map((row) => ({ tenantId: input.tenantId, staffRecordId: row.staffRecordId, month: input.month, year: input.year, payslipNumber: `PS-${input.year}${String(input.month).padStart(2, '0')}-${crypto.randomBytes(5).toString('hex').toUpperCase()}`, baseSalary: row.baseSalary, attendanceDeductions: row.deductions, bonuses: row.bonuses, netPayable: row.netPayable, calculationBreakdown: row.breakdown, adjustmentRemarks: row.adjustmentRemarks, calculatedBy: input.calculatedBy, status: 'PENDING' })) });
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      throw new PayrollPeriodConflictError(staffRecords.map((record) => ({
-        staffRecordId: record.id,
-        name: `${record.user.firstName} ${record.user.lastName}`.trim(),
-      })));
-    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new PayrollPeriodConflictError(rows.map((row) => ({ staffRecordId: row.staffRecordId, name: `${row.staffRecord.user.firstName} ${row.staffRecord.user.lastName}`.trim() })));
     throw error;
   }
-
-  return prisma.payroll.findMany({
-    where: {
-      tenantId: input.tenantId,
-      month: input.month,
-      year: input.year,
-      staffRecordId: { in: staffRecords.map((record) => record.id) },
-    },
-    include: { staffRecord: { include: { user: true } } },
-    orderBy: { staffRecord: { user: { firstName: 'asc' } } },
-  });
+  return prisma.payroll.findMany({ where: { tenantId: input.tenantId, month: input.month, year: input.year, staffRecordId: { in: rows.map((row) => row.staffRecordId) } }, include: { staffRecord: { include: { user: true } } }, orderBy: [{ staffRecord: { user: { firstName: 'asc' } } }, { staffRecord: { user: { lastName: 'asc' } } }, { id: 'asc' }] });
 }

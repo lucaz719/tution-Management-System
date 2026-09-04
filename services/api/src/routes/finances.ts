@@ -32,49 +32,20 @@ type PaymentSettings = {
   instructions: string;
 };
 
-const defaultPaymentSettings: PaymentSettings = {
-  connectIpsEnabled: false, staticQrEnabled: false,
-  staticQrImageUrl: '', accountName: '', accountNumber: '', bankName: '', instructions: '',
-};
-
-function paymentSettings(value: Prisma.JsonValue | null | undefined): PaymentSettings {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return defaultPaymentSettings;
-  return { ...defaultPaymentSettings, ...(value as Partial<PaymentSettings>) };
+function paymentSettings(): PaymentSettings {
+  return {
+    connectIpsEnabled: process.env.CONNECTIPS_ENABLED === 'true',
+    staticQrEnabled: process.env.STATIC_PAYMENT_QR_ENABLED === 'true',
+    staticQrImageUrl: process.env.STATIC_PAYMENT_QR_IMAGE_URL || '',
+    accountName: process.env.STATIC_PAYMENT_ACCOUNT_NAME || '',
+    accountNumber: process.env.STATIC_PAYMENT_ACCOUNT_NUMBER || '',
+    bankName: process.env.STATIC_PAYMENT_BANK_NAME || '',
+    instructions: process.env.STATIC_PAYMENT_INSTRUCTIONS || '',
+  };
 }
 
-router.get('/payment-settings', authMiddleware, async (req: TenantRequest, res: Response) => {
-  const tenant = await prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { paymentSettings: true } });
-  if (!tenant) return res.status(404).json({ error: 'Tenant not found.' });
-  const settings = paymentSettings(tenant.paymentSettings);
-  const publicApiBaseUrl = (process.env.CONNECTIPS_PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
-  return res.json({
-    ...settings,
-    connectIpsServerReady: process.env.CONNECTIPS_ENABLED === 'true',
-    connectIpsServerEnvironment: (process.env.CONNECTIPS_ENVIRONMENT || 'STAGING').toUpperCase(),
-    successReturnUrl: `${publicApiBaseUrl}/api/finances/connectips/return/success`,
-    failureReturnUrl: `${publicApiBaseUrl}/api/finances/connectips/return/failure`,
-  });
-});
-
-router.put('/payment-settings', authMiddleware, async (req: TenantRequest, res: Response) => {
-  if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may change payment settings.' });
-  const shape = parseStrictKeys(req.body, ['connectIpsEnabled', 'staticQrEnabled', 'staticQrImageUrl', 'accountName', 'accountNumber', 'bankName', 'instructions']);
-  if (!shape.success) return res.status(400).json({ error: shape.error });
-  const connectIpsEnabled = readBoolean(shape.data, 'connectIpsEnabled', 'connectIpsEnabled must be a boolean.');
-  const staticQrEnabled = readBoolean(shape.data, 'staticQrEnabled', 'staticQrEnabled must be a boolean.');
-  if (!connectIpsEnabled.success) return res.status(400).json({ error: connectIpsEnabled.error });
-  if (!staticQrEnabled.success) return res.status(400).json({ error: staticQrEnabled.error });
-  const text = (key: string, maxLength: number) => readTrimmedString(shape.data, key, { required: false, maxLength, message: `${key} is too long.` });
-  const staticQrImageUrl = text('staticQrImageUrl', 2000), accountName = text('accountName', 160), accountNumber = text('accountNumber', 80), bankName = text('bankName', 160), instructions = text('instructions', 500);
-  if (!staticQrImageUrl.success) return res.status(400).json({ error: staticQrImageUrl.error });
-  if (!accountName.success) return res.status(400).json({ error: accountName.error });
-  if (!accountNumber.success) return res.status(400).json({ error: accountNumber.error });
-  if (!bankName.success) return res.status(400).json({ error: bankName.error });
-  if (!instructions.success) return res.status(400).json({ error: instructions.error });
-  if (staticQrEnabled.data && !/^https:\/\//i.test(staticQrImageUrl.data)) return res.status(400).json({ error: 'An HTTPS static QR image URL is required.' });
-  const settings: PaymentSettings = { connectIpsEnabled: connectIpsEnabled.data, staticQrEnabled: staticQrEnabled.data, staticQrImageUrl: staticQrImageUrl.data, accountName: accountName.data, accountNumber: accountNumber.data, bankName: bankName.data, instructions: instructions.data };
-  await prisma.tenant.update({ where: { id: req.tenantId! }, data: { paymentSettings: settings } });
-  return res.json({ ...settings, message: 'Payment settings saved.' });
+router.get('/payment-settings', authMiddleware, (_req: TenantRequest, res: Response) => {
+  return res.json(paymentSettings());
 });
 
 type PettyCashRequestItem = { name: string; quantity: number; unitAmount: number; totalAmount: number };
@@ -172,8 +143,7 @@ async function loadStudentBillingAccess(req: TenantRequest, studentId: string) {
 
 router.post('/connectips/initiate/:invoiceId', authMiddleware, async (req: TenantRequest, res: Response) => {
   try {
-    const tenant = await prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { paymentSettings: true } });
-    const settings = paymentSettings(tenant?.paymentSettings);
+    const settings = paymentSettings();
     if (!settings.connectIpsEnabled) return res.status(503).json({ error: 'connectIPS is not enabled for this institution.' });
     const invoice = await loadInvoicePaymentAccess(req, req.params.invoiceId);
     if (!invoice) return res.status(404).json({ error: 'Invoice not found or unavailable to this account.' });
@@ -265,8 +235,7 @@ router.post('/manual-payment/:invoiceId', authMiddleware, async (req: TenantRequ
   const invoice = await loadInvoicePaymentAccess(req, req.params.invoiceId);
   if (!invoice) return res.status(404).json({ error: 'Invoice not found or unavailable to this account.' });
   if (invoice.status === 'PAID') return res.status(409).json({ error: 'Invoice is already paid.' });
-  const settingsTenant = await prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { paymentSettings: true } });
-  if (!paymentSettings(settingsTenant?.paymentSettings).staticQrEnabled) return res.status(503).json({ error: 'Manual QR payment is not enabled.' });
+  if (!paymentSettings().staticQrEnabled) return res.status(503).json({ error: 'Manual QR payment is not enabled.' });
   const shape = parseStrictKeys(req.body, ['referenceId', 'receiptProof']);
   if (!shape.success) return res.status(400).json({ error: shape.error });
   const referenceId = readTrimmedString(shape.data, 'referenceId', { required: true, maxLength: 80, pattern: /^[A-Za-z0-9._\/-]+$/, message: 'Enter a valid payment reference.' });
@@ -284,6 +253,35 @@ router.get('/manual-payments', authMiddleware, async (req: TenantRequest, res: R
   if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may review payment receipts.' });
   const attempts = await prisma.paymentAttempt.findMany({ where: { tenantId: req.tenantId!, provider: 'BANK', status: { in: ['PENDING', 'SUCCESS', 'FAILED'] } }, include: { invoice: { include: { student: { include: { user: true } } } } }, orderBy: { createdAt: 'desc' }, take: 100 });
   return res.json({ attempts: attempts.map((attempt) => ({ id: attempt.id, txnId: attempt.txnId, referenceId: attempt.referenceId, amount: Number(attempt.amountPaisa) / 100, status: attempt.status, receiptProof: attempt.receiptProof, createdAt: attempt.createdAt, reviewedAt: attempt.reviewedAt, reviewRemarks: attempt.reviewRemarks, invoiceId: attempt.invoiceId, studentName: `${attempt.invoice.student.user.firstName} ${attempt.invoice.student.user.lastName}`.trim() })) });
+});
+
+router.get('/payment-attempts', authMiddleware, async (req: TenantRequest, res: Response) => {
+  if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may view payment activity.' });
+  const attempts = await prisma.paymentAttempt.findMany({
+    where: { tenantId: req.tenantId!, provider: { in: ['CONNECTIPS', 'BANK'] } },
+    include: { invoice: { include: { student: { include: { user: true } } } } },
+    orderBy: { createdAt: 'desc' },
+    take: 200,
+  });
+  return res.json({ attempts: attempts.map((attempt) => ({
+    id: attempt.id,
+    txnId: attempt.txnId,
+    provider: attempt.provider,
+    referenceId: attempt.referenceId,
+    amount: Number(attempt.amountPaisa) / 100,
+    status: attempt.status,
+    gatewayStatus: attempt.gatewayStatus,
+    gatewayMessage: attempt.gatewayMessage,
+    receiptProof: attempt.receiptProof,
+    createdAt: attempt.createdAt,
+    confirmedAt: attempt.confirmedAt,
+    failedAt: attempt.failedAt,
+    reviewedAt: attempt.reviewedAt,
+    reviewRemarks: attempt.reviewRemarks,
+    invoiceId: attempt.invoiceId,
+    invoiceStatus: attempt.invoice.status,
+    studentName: `${attempt.invoice.student.user.firstName} ${attempt.invoice.student.user.lastName}`.trim(),
+  })) });
 });
 
 router.post('/manual-payments/:id/decision', authMiddleware, async (req: TenantRequest, res: Response) => {
@@ -1176,7 +1174,7 @@ router.get(
       return res.status(200).json(buildFinancialIntelligence({
         now,
         expenses,
-        payrolls,
+        payrolls: payrolls.map((item) => ({ ...item, netPayable: Number(item.netPayable) })),
         projectedIncomeNpr,
         activeEnrollments: enrollments.length,
       }));
@@ -1721,7 +1719,7 @@ router.get(
       const totalExpenses = expenses.reduce((sum: number, exp: any) => sum + Number(exp.amount), 0);
 
       const payrolls = await prisma.payroll.findMany({
-        where: { tenantId: req.tenantId!, status: 'PAID' },
+        where: { tenantId: req.tenantId!, status: 'MANUALLY_PAID' },
       });
       const totalPaidPayrolls = payrolls.reduce((sum: number, pay: any) => sum + Number(pay.netPayable), 0);
 

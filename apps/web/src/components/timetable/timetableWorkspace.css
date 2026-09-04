@@ -80,3 +80,6 @@
   .timetable-drawer { width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) { .timetable-skeleton i { animation: none; } }
+.timetable-effective-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.timetable-card-period { color: var(--text-muted); font-size: 12px; }
+@media (max-width: 560px) { .timetable-effective-dates { grid-template-columns: 1fr; } }
