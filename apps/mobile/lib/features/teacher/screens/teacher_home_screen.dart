@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
+<<<<<<< HEAD
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+=======
+import 'package:go_router/go_router.dart';
+>>>>>>> 3995412de992acdfbb82d49ddddf9c807882fc1b
 import 'package:tms_mobile/core/adaptive/breakpoints.dart';
 import 'package:tms_mobile/core/adaptive/capabilities.dart';
 import 'package:tms_mobile/core/adaptive/widgets/adaptive_layout.dart';
@@ -188,8 +192,28 @@ class _TeacherHomeScreenState extends ConsumerState<TeacherHomeScreen> {
           ),
           _SidebarAction(
             icon: Icons.assignment_outlined,
+<<<<<<< HEAD
             label: 'Pending Logs (${_pendingLogs.length - _submittedLogIds.length})',
             onTap: () => _onDestinationSelected(0),
+=======
+            label: 'Grade Submissions',
+            onTap: () {},
+          ),
+          _SidebarAction(
+            icon: Icons.people_outline,
+            label: 'Manage Students',
+            onTap: () {},
+          ),
+          _SidebarAction(
+            icon: Icons.event_note_outlined,
+            label: 'Leave Requests',
+            onTap: () => context.push('/teacher/leave'),
+          ),
+          _SidebarAction(
+            icon: Icons.settings_outlined,
+            label: 'Class Settings',
+            onTap: () {},
+>>>>>>> 3995412de992acdfbb82d49ddddf9c807882fc1b
           ),
           const SizedBox(height: 24),
           const Divider(),
@@ -776,6 +800,7 @@ class _ProfileTab extends StatelessWidget {
             Text(DemoTeacherData.teacherName,
                 style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 20)),
             const SizedBox(height: 6),
+<<<<<<< HEAD
             Text('${DemoTeacherData.branchName} • Senior Faculty',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: kColorText.withValues(alpha: 0.7),
@@ -808,6 +833,14 @@ class _ProfileTab extends StatelessWidget {
                 icon: const Icon(Icons.logout_rounded),
                 label: const Text('Log Out of Account'),
               ),
+=======
+            Text('${DemoTeacherData.branchName} • Senior Teacher'),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () => context.push('/teacher/change-password'),
+              icon: const Icon(Icons.key_rounded),
+              label: const Text('Change password'),
+>>>>>>> 3995412de992acdfbb82d49ddddf9c807882fc1b
             ),
           ],
         ),

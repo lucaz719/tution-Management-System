@@ -8,12 +8,28 @@ import PDFDocument from 'pdfkit';
 
 const router = Router();
 
+type HtmlCertificateLayout = { renderMode?: string; html?: string };
+
+const escapeHtml = (value: unknown) => String(value ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#039;');
+
+function renderCertificateHtml(template: string, values: Record<string, unknown>) {
+  const rendered = template.replace(/\{\{\s*([a-zA-Z][a-zA-Z0-9]*)\s*\}\}/g, (_match, key: string) => escapeHtml(values[key] ?? ''));
+  return /<html[\s>]/i.test(rendered)
+    ? rendered
+    : `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>${rendered}</body></html>`;
+}
+
 router.get('/options', authMiddleware, async (req: TenantRequest, res: Response) => {
   try {
     const [templates, students] = await Promise.all([
       prisma.certificateTemplate.findMany({
         where: { tenantId: req.tenantId! },
-        select: { id: true, name: true, type: true },
+        select: { id: true, name: true, type: true, layoutConfig: true },
         orderBy: { name: 'asc' },
       }),
       prisma.student.findMany({
@@ -45,11 +61,66 @@ router.get('/options', authMiddleware, async (req: TenantRequest, res: Response)
           branchName: branch.name,
         }));
     });
-    return res.json({ templates, students: options });
+    return res.json({
+      templates: templates.map((template) => {
+        const layout = template.layoutConfig as HtmlCertificateLayout & { sourceFile?: { name?: string; mimeType?: string } };
+        return {
+          id: template.id,
+          name: template.name,
+          type: template.type,
+          layoutConfig: {
+            renderMode: layout.renderMode === 'HTML' ? 'HTML' : 'FILE',
+            ...(layout.sourceFile ? { sourceFile: { name: layout.sourceFile.name ?? '', mimeType: layout.sourceFile.mimeType ?? '' } } : {}),
+          },
+        };
+      }),
+      students: options,
+    });
   } catch {
     return res.status(500).json({ error: 'Failed to load certificate options.' });
   }
 });
+
+router.get(
+  '/:certificateId/html',
+  authMiddleware,
+  async (req: TenantRequest, res: Response) => {
+    try {
+      const certificate = await prisma.certificate.findFirst({
+        where: { certificateId: req.params.certificateId, template: { tenantId: req.tenantId! } },
+        include: {
+          template: true,
+          branch: true,
+          student: { include: { grade: true, user: true, studentParents: { include: { parent: true } } } },
+        },
+      });
+      if (!certificate) return res.status(404).json({ error: 'Certificate not found.' });
+      const ownsCertificate = certificate.student.userId === req.user!.id;
+      const linkedParent = certificate.student.studentParents.some((link) => link.parent.userId === req.user!.id);
+      const staffAccess = isTenantAdmin(req.user!) || canAccessBranch(req.user!, certificate.branchId);
+      if (!ownsCertificate && !linkedParent && !staffAccess) return res.status(404).json({ error: 'Certificate not found.' });
+
+      const layout = certificate.template.layoutConfig as HtmlCertificateLayout;
+      if (layout.renderMode !== 'HTML' || !layout.html) return res.status(404).json({ error: 'This certificate template has no HTML rendering.' });
+      const studentName = `${certificate.student.user.firstName} ${certificate.student.user.lastName}`.trim();
+      const html = renderCertificateHtml(layout.html, {
+        studentName,
+        gradeName: certificate.student.grade?.name ?? 'Enrolled student',
+        branchName: certificate.branch.name,
+        templateName: certificate.template.name,
+        certificateType: certificate.template.type,
+        issuedDate: certificate.issuedDate.toLocaleDateString('en-GB'),
+        certificateId: certificate.certificateId,
+      });
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data: https:; font-src data: https:");
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.send(html);
+    } catch {
+      return res.status(500).json({ error: 'Failed to render certificate HTML.' });
+    }
+  },
+);
 
 router.get(
   '/:certificateId/download',
@@ -127,6 +198,13 @@ router.post(
 
     if (!name || !type || !layoutConfig) {
       return res.status(400).json({ error: 'Missing required parameters: name, type, layoutConfig.' });
+    }
+    const htmlLayout = layoutConfig as HtmlCertificateLayout;
+    if (htmlLayout.renderMode === 'HTML' && (typeof htmlLayout.html !== 'string' || !htmlLayout.html.trim())) {
+      return res.status(400).json({ error: 'HTML certificate templates require HTML content.' });
+    }
+    if (htmlLayout.renderMode === 'HTML' && htmlLayout.html!.length > 250_000) {
+      return res.status(413).json({ error: 'HTML certificate templates must be smaller than 250 KB.' });
     }
 
     try {

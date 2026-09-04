@@ -1,31 +1,26 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:tms_mobile/core/providers/child_selection_provider.dart';
 import 'package:tms_mobile/core/theme/app_colors.dart';
 import 'package:tms_mobile/features/parent/widgets/child_switcher_bar.dart';
 import 'package:tms_mobile/shared/models/app_models.dart';
 import 'package:tms_mobile/shared/widgets/nepal_pay_qr_sheet.dart';
 import 'package:tms_mobile/shared/widgets/status_chip.dart';
 
-class ParentFeesScreen extends StatefulWidget {
+class ParentFeesScreen extends ConsumerStatefulWidget {
   const ParentFeesScreen({super.key});
 
   @override
-  State<ParentFeesScreen> createState() => _ParentFeesScreenState();
+  ConsumerState<ParentFeesScreen> createState() => _ParentFeesScreenState();
 }
 
-class _ParentFeesScreenState extends State<ParentFeesScreen> {
-  final _children = const ['Aarav', 'Mira'];
-  late String _selectedChild;
-
-  @override
-  void initState() {
-    super.initState();
-    _selectedChild = _children.first;
-  }
-
+class _ParentFeesScreenState extends ConsumerState<ParentFeesScreen> {
   @override
   Widget build(BuildContext context) {
-    final isAarav = _selectedChild == 'Aarav';
+    final selectedChild = ref.watch(childSelectionProvider);
+    final isAarav = selectedChild == 'Aarav';
     final totalOutstanding = isAarav ? 'NPR 4,500' : 'NPR 0';
     final hasDue = isAarav;
 
@@ -78,6 +73,11 @@ class _ParentFeesScreenState extends State<ParentFeesScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => context.pop(),
+          tooltip: 'Back',
+        ),
         title: Text(
           'Child Fee Portal',
           style:
@@ -88,11 +88,7 @@ class _ParentFeesScreenState extends State<ParentFeesScreen> {
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            ChildSwitcherBar(
-              childrenNames: _children,
-              selectedChild: _selectedChild,
-              onChanged: (child) => setState(() => _selectedChild = child),
-            ),
+            const ChildSwitcherBar(),
             const SizedBox(height: 20),
 
             // Outstanding Balance Card
@@ -122,7 +118,7 @@ class _ParentFeesScreenState extends State<ParentFeesScreen> {
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Text(
-                            _selectedChild,
+                            selectedChild,
                             style: GoogleFonts.outfit(
                               color: Colors.white,
                               fontWeight: FontWeight.w700,
@@ -166,7 +162,7 @@ class _ParentFeesScreenState extends State<ParentFeesScreen> {
                               color: Colors.white, size: 20),
                           const SizedBox(width: 8),
                           Text(
-                            'All dues cleared for $_selectedChild!',
+                            'All dues cleared for $selectedChild!',
                             style: GoogleFonts.outfit(
                                 color: Colors.white,
                                 fontWeight: FontWeight.w600),

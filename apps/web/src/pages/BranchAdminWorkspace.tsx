@@ -8,7 +8,7 @@ import { api, type BranchAppointment } from '../services/api';
 import { resourcesApi, type MaintenanceTask } from '../services/api/resources';
 import { API_BASE_URL, request } from '../services/api/client';
 import { normalizeSchedule, type ScheduleSlot } from '../utils/schedule';
-import { calendarDateLabel, calendarDayNumber, calendarMonthCells, calendarMonthLabel, isInCalendarMonth, moveCalendarMonth, type CalendarSystem } from '../utils/nepaliDate';
+import { calendarDateLabel, calendarDayNumber, calendarMonthCells, calendarMonthLabel, isInCalendarMonth, moveCalendarMonth, toDualDateLabel, type CalendarSystem } from '../utils/nepaliDate';
 import { CalendarSystemToggle } from '../components/CalendarSystemToggle';
 
 function calendarDateKey(date: Date): string {
@@ -1444,7 +1444,7 @@ function BranchStudentsView() {
                       <td style={{ padding: '10px 8px' }}>NPR {b.amount.toLocaleString()}</td>
                       <td style={{ padding: '10px 8px', color: b.discount > 0 ? 'var(--color-success)' : 'var(--text-muted)' }}>{b.discount > 0 ? `−NPR ${b.discount.toLocaleString()}` : '—'}</td>
                       <td style={{ padding: '10px 8px', fontWeight: 600 }}>NPR {b.net.toLocaleString()}</td>
-                      <td style={{ padding: '10px 8px' }}>{b.dueDate}</td>
+                      <td style={{ padding: '10px 8px' }}>{toDualDateLabel(b.dueDate)}</td>
                       <td style={{ padding: '10px 8px' }}><StatusBadge variant={b.status === 'Paid' ? 'success' : b.status === 'Overdue' ? 'error' : 'warning'}>{b.status}</StatusBadge></td>
                     </tr>
                   ))}

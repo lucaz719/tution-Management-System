@@ -1,33 +1,28 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:tms_mobile/core/providers/child_selection_provider.dart';
 import 'package:tms_mobile/core/theme/app_colors.dart';
 import 'package:tms_mobile/features/parent/widgets/child_switcher_bar.dart';
 import 'package:tms_mobile/shared/models/app_models.dart';
 import 'package:tms_mobile/shared/widgets/progress_ring.dart';
 import 'package:tms_mobile/shared/widgets/status_chip.dart';
 
-class ParentAttendanceScreen extends StatefulWidget {
+class ParentAttendanceScreen extends ConsumerStatefulWidget {
   const ParentAttendanceScreen({super.key});
 
   @override
-  State<ParentAttendanceScreen> createState() => _ParentAttendanceScreenState();
+  ConsumerState<ParentAttendanceScreen> createState() => _ParentAttendanceScreenState();
 }
 
-class _ParentAttendanceScreenState extends State<ParentAttendanceScreen> {
-  final _children = const ['Aarav', 'Mira'];
-  late String _selectedChild;
+class _ParentAttendanceScreenState extends ConsumerState<ParentAttendanceScreen> {
   AttendanceViewMode _viewMode = AttendanceViewMode.list;
 
   @override
-  void initState() {
-    super.initState();
-    _selectedChild = _children.first;
-  }
-
-  @override
   Widget build(BuildContext context) {
-    // Child specific attendance stats
-    final isAarav = _selectedChild == 'Aarav';
+    final selectedChild = ref.watch(childSelectionProvider);
+    final isAarav = selectedChild == 'Aarav';
     final attendanceRate = isAarav ? 0.92 : 0.96;
     final presentDays = isAarav ? 23 : 24;
     final absentDays = isAarav ? 2 : 1;
@@ -107,6 +102,11 @@ class _ParentAttendanceScreenState extends State<ParentAttendanceScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => context.pop(),
+          tooltip: 'Back',
+        ),
         title: Text(
           'Child Attendance',
           style:
@@ -134,11 +134,7 @@ class _ParentAttendanceScreenState extends State<ParentAttendanceScreen> {
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            ChildSwitcherBar(
-              childrenNames: _children,
-              selectedChild: _selectedChild,
-              onChanged: (child) => setState(() => _selectedChild = child),
-            ),
+            const ChildSwitcherBar(),
             const SizedBox(height: 20),
 
             // Summary Card with ProgressRing
@@ -160,7 +156,7 @@ class _ParentAttendanceScreenState extends State<ParentAttendanceScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '$_selectedChild\'s Rate',
+                            '$selectedChild\'s Rate',
                             style: Theme.of(context).textTheme.titleMedium,
                           ),
                           const SizedBox(height: 4),

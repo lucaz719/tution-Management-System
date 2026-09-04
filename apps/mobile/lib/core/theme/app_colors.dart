@@ -10,3 +10,4 @@ const kColorText = Color(0xFF2C3E50);
 const kColorSuccess = Color(0xFF2E9E5B);
 const kColorWarning = Color(0xFFE08E00);
 const kColorError = Color(0xFFD64545);
+const kColorInfo = Color(0xFF1AA4A1);

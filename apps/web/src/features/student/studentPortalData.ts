@@ -114,6 +114,7 @@ export interface Certificate {
   issuedDate: string;
   fileName: string;
   pdfUrl?: string;
+  htmlUrl?: string;
 }
 
 export interface StudentNotification {

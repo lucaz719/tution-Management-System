@@ -4,7 +4,7 @@ import { KPICard } from '../components/ui/KPICard';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { useToast } from '../components/ui/Toast';
 import { api, type BillingLedger } from '../services/api';
-import { toBsLabel } from '../utils/nepaliDate';
+import { toDualDateLabel } from '../utils/nepaliDate';
 import QRCode from 'qrcode';
 
 interface StudentFee {
@@ -83,7 +83,7 @@ export function AcademicFees() {
     try {
       const payload = await api.finances.getNepalPayQr(invoice.id);
       const dataUrl = await QRCode.toDataURL(payload.qrString, { width: 360, margin: 2, errorCorrectionLevel: 'M' });
-      setQrModal({ id: invoice.id, studentName: payload.studentName, amount: payload.amount, month: toBsLabel(invoice.dueDate), qrString: payload.qrString, dataUrl });
+      setQrModal({ id: invoice.id, studentName: payload.studentName, amount: payload.amount, month: toDualDateLabel(invoice.dueDate), qrString: payload.qrString, dataUrl });
     } catch (cause) { showToast(cause instanceof Error ? cause.message : 'Unable to generate the payment QR.', 'error'); }
     finally { setQrLoadingId(''); }
   };
@@ -398,7 +398,7 @@ export function AcademicFees() {
                         <div style={{ display: 'grid', gap: '8px' }}>
                           {billingProfile.projections.map((projection) => (
                             <div key={projection.cycleStart} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', paddingTop: '8px', borderTop: '1px solid var(--border)' }}>
-                              <span style={{ fontSize: '12px' }}>{new Date(projection.cycleStart).toLocaleDateString('en-NP', { month: 'short', year: 'numeric' })} · due {new Date(projection.dueDate).toLocaleDateString('en-NP')}</span>
+                              <span style={{ fontSize: '12px' }}>{toDualDateLabel(projection.cycleStart)} · due {toDualDateLabel(projection.dueDate)}</span>
                               <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><strong style={{ fontSize: '13px' }}>{money(projection.amount)}</strong><StatusBadge variant="info">Projection</StatusBadge></span>
                             </div>
                           ))}
@@ -413,8 +413,8 @@ export function AcademicFees() {
                     <div>
                       <div style={{ fontSize: '15px', fontWeight: 700 }}>{money(inv.netPayable)}</div>
                       <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '3px' }}>
-                        Due {toBsLabel(inv.dueDate)} BS
-                        {inv.paymentDate ? ` · paid ${toBsLabel(inv.paymentDate)} BS` : ''}
+                        Due {toDualDateLabel(inv.dueDate)}
+                        {inv.paymentDate ? ` · paid ${toDualDateLabel(inv.paymentDate)}` : ''}
                       </div>
                     </div>
                     {inv.status === 'PAID' ? (
