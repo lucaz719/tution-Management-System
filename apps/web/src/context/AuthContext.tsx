@@ -11,6 +11,7 @@ interface AuthContextValue {
   isLoading: boolean;
   isAuthenticated: boolean;
   isTwoFactorPending: boolean;
+  sessionIssue: 'missing' | 'unavailable' | 'signed-out' | null;
   attemptCount: number;
   login: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
   logout: () => void;
@@ -52,21 +53,30 @@ function cacheUser(user: AuthUser | null): void {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [sessionIssue, setSessionIssue] = useState<AuthContextValue['sessionIssue']>(null);
   const [attemptCount, setAttemptCount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     void authClient.getSession()
-      .then(({ data }) => {
+      .then(({ data, error }) => {
         if (!cancelled) {
+          if (error) {
+            setUser(null);
+            setSessionIssue(Number((error as { status?: number }).status) === 401 ? 'missing' : 'unavailable');
+            cacheUser(null);
+            return;
+          }
           const nextUser = data?.user ? mapSessionUser(data.user) : null;
           setUser(nextUser);
+          setSessionIssue(nextUser ? null : 'missing');
           cacheUser(nextUser);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setUser(null);
+          setSessionIssue('unavailable');
           cacheUser(null);
         }
       })
@@ -126,6 +136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const nextUser = mapSessionUser(sessionData.user);
       cacheUser(nextUser);
       setUser(nextUser);
+      setSessionIssue(null);
       setAttemptCount(0);
 
     } catch (error) {
@@ -156,6 +167,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       removeAuthToken();
       cacheUser(null);
       setUser(null);
+      setSessionIssue('signed-out');
       setAttemptCount(0);
     }
   }, []);
@@ -178,6 +190,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const verifiedUser = mapSessionUser(sessionData.user);
     cacheUser(verifiedUser);
     setUser(verifiedUser);
+    setSessionIssue(null);
   }, []);
 
   const value = useMemo<AuthContextValue>(() => ({
@@ -186,13 +199,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isLoading,
     isAuthenticated: Boolean(user && !user.requiresTwoFactor && !user.requiresPasswordChange),
     isTwoFactorPending: Boolean(user?.requiresTwoFactor),
+    sessionIssue,
     attemptCount,
     login,
     logout,
     roleRedirectPath,
     verify2FA,
     resetAttemptCount,
-  }), [attemptCount, isLoading, login, logout, roleRedirectPath, user, verify2FA, resetAttemptCount]);
+  }), [attemptCount, isLoading, login, logout, roleRedirectPath, sessionIssue, user, verify2FA, resetAttemptCount]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
