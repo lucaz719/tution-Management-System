@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import { useLocation, useNavigate } from 'react-router-dom';
 import { PageShell } from '../components/patterns/PageShell';
 import { ChangePasswordForm } from '../components/ChangePasswordForm';
-import { SharedBillingWorkspace } from '../components/finance/SharedBillingWorkspace';
+import { AcademicFees } from './AcademicFees';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../context/AuthContext';
 import { api, type AccountantWorkspace } from '../services/api';
@@ -25,7 +25,7 @@ const createCashLine = (item?: PettyCash['items'][number]): CashLine => ({
 const accountantNavItems = [
   { section: 'FINANCE' as const, label: 'Overview', icon: 'space_dashboard', path: '/staff/finance#overview' },
   { section: 'FINANCE' as const, label: 'Petty cash', icon: 'account_balance_wallet', path: '/staff/finance#petty-cash' },
-  { section: 'FINANCE' as const, label: 'Billing & invoices', icon: 'receipt_long', path: '/staff/finance#billing' },
+  { section: 'FINANCE' as const, label: 'Fee & billing', icon: 'receipt_long', path: '/staff/finance#billing' },
   { section: 'FINANCE' as const, label: 'Reports', icon: 'analytics', path: '/staff/finance#reports' },
   { section: 'SETTINGS' as const, label: 'Security', icon: 'security', path: '/staff/finance#security' },
 ];
@@ -229,7 +229,7 @@ export function StaffFinancePage() {
 
       {tab === 'petty-cash' && <><section className="accountant-section-head"><div><span className="accountant-eyebrow">Controlled disbursements</span><h2>Petty cash requests</h2><p>Requests remain open until an administrator verifies the receipt and closes the record.</p></div><button type="button" className="accountant-primary-button" disabled={!workspace.branches.length} onClick={() => openCashDialog('new')}><Icon name="add" />New request</button></section><section className="accountant-cap-strip"><div><Icon name="policy" /><span>Monthly cap per branch</span><strong>{money(cap)}</strong></div><div><span>Committed in scope</span><strong>{money(committed)}</strong></div><div><span>Available in scope</span><strong>{money(remaining)}</strong></div><small>Rejected requests do not consume the monthly cap.</small></section><section className="accountant-panel">{renderCashTable(workspace.pettyCash)}</section></>}
 
-      {tab === 'billing' && <SharedBillingWorkspace heading="Accountant billing & payroll" />}
+      {tab === 'billing' && <AcademicFees canRetryAdmissionLogins={false} />}
       {tab === 'reports' && <><section className="accountant-section-head"><div><span className="accountant-eyebrow">Scoped reconciliation</span><h2>Finance report summary</h2><p>Figures include only records permitted by your signed branch assignments.</p></div></section><section className="accountant-grid"><article className="accountant-panel accountant-report-card"><span className="is-info"><Icon name="menu_book" /></span><div><h2>Ledger activity</h2><p>Persisted paid invoices, expenses, and settled payroll entries.</p><small>{workspace.reports.ledgerEntryCount} entries in scope</small></div></article><article className="accountant-panel accountant-report-card"><span className="is-warning"><Icon name="receipt_long" /></span><div><h2>Expense records</h2><p>Branch expense records included in the current report scope.</p><small>{workspace.reports.expenseCount} records</small></div></article></section><section className="accountant-panel accountant-readonly"><header><div><h2>Scoped P&amp;L</h2><p>Read-only summary calculated from live permitted records.</p></div><span className="accountant-locked"><Icon name="visibility" />Read only</span></header><dl><div><dt>Revenue</dt><dd>{money(workspace.reports.revenue)}</dd></div><div><dt>Operating costs</dt><dd>{money(workspace.reports.operatingCosts)}</dd></div><div><dt>Net margin</dt><dd className={workspace.reports.netMargin >= 0 ? 'is-positive' : ''}>{money(workspace.reports.netMargin)}</dd></div></dl></section></>}
       {tab === 'security' && <><section className="accountant-section-head"><div><span className="accountant-eyebrow">Account</span><h2>Security Settings</h2><p>Manage your account password and security settings.</p></div></section><ChangePasswordForm className="accountant-panel" /></>}
     </>;

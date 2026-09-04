@@ -59,7 +59,7 @@ function adDate(input: string | Date): string {
   return new Date(input).toLocaleDateString('en-NP', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kathmandu' });
 }
 
-export function AcademicFees() {
+export function AcademicFees({ canRetryAdmissionLogins = true }: { canRetryAdmissionLogins?: boolean }) {
   const { showToast } = useToast();
   const [overview, setOverview] = useState<Overview | null>(null);
   const [students, setStudents] = useState<StudentFee[]>([]);
@@ -434,7 +434,7 @@ export function AcademicFees() {
                       ))}
                     </div>
                   ) : null}
-                  {paymentNotice.delivered === false && admissionStatus === 'READY_FOR_LOGIN' ? (
+                  {canRetryAdmissionLogins && paymentNotice.delivered === false && admissionStatus === 'READY_FOR_LOGIN' ? (
                     <Button
                       type="button"
                       variant="outline"

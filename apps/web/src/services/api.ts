@@ -205,7 +205,7 @@ export const api = {
     decideManualPayment: async (id: string, decision: 'APPROVE' | 'REJECT', remarks: string) => request<{ message: string }>(`/finances/manual-payments/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify({ decision, remarks }) }),
     getAccountantWorkspace: async () => request<AccountantWorkspace>('/finances/accountant-workspace'),
     getBillingLedger: async () => request<BillingLedger>('/finances/billing-ledger'),
-    createInvoice: async (payload: { studentId: string; amount: number; discount: number; fine: number; invoiceType: 'TUITION' | 'SUBJECT' | 'ACTIVITY'; billingCycleStart: string; billingCycleEnd: string; dueDate: string }) =>
+    createInvoice: async (payload: { studentId: string; amount: number; discount: number; fine: number; invoiceType: 'TUITION' | 'SUBJECT' | 'ACTIVITY'; periodAnchor: string }) =>
       request<{ message: string; invoice: BillingInvoice }>('/finances/billing-ledger/invoices', { method: 'POST', body: JSON.stringify(payload) }),
     createPayroll: async (payload: { staffRecordId: string; month: number; year: number; bonuses: number; deductions: number }) =>
       request<{ message: string; payroll: BillingPayroll }>('/finances/billing-ledger/payrolls', { method: 'POST', body: JSON.stringify(payload) }),
@@ -285,8 +285,9 @@ export const api = {
     getForecast: async () => request<any>('/finances/forecast'),
     getSuggestions: async () => request<any>('/finances/suggestions'),
     exportLedger: async () => request<{ format: string; entries: any[] }>('/finances/ledger/export'),
-    getBillingPeriod: async () => {
-      return request<{ label: string; bsYear: number; bsMonthName: string; bsMonthNameNp: string; daysInMonth: number; cycleStart: string; cycleEnd: string; dueDate: string }>('/finances/billing-period');
+    getBillingPeriod: async (anchor?: string) => {
+      const query = anchor ? `?anchor=${encodeURIComponent(anchor)}` : '';
+      return request<{ label: string; bsYear: number; bsMonthName: string; bsMonthNameNp: string; daysInMonth: number; cycleStart: string; cycleEnd: string; dueDate: string }>(`/finances/billing-period${query}`);
     },
     getOverview: async () => {
       return request<{ collected: number; outstanding: number; overdueAmount: number; overdueStudents: number; invoiceCount: number; billingPeriod: string }>('/finances/overview');

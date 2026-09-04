@@ -509,7 +509,7 @@ router.post('/billing-ledger/invoices', authMiddleware, async (req: TenantReques
   if (!access.isTenantAdmin && access.scopes.length === 0) {
     return res.status(403).json({ error: 'You do not have access to create billing records.' });
   }
-  const shape = parseStrictKeys(req.body, ['studentId', 'amount', 'discount', 'fine', 'invoiceType', 'billingCycleStart', 'billingCycleEnd', 'dueDate']);
+  const shape = parseStrictKeys(req.body, ['studentId', 'amount', 'discount', 'fine', 'invoiceType', 'periodAnchor']);
   if (!shape.success) return res.status(400).json({ error: shape.error });
   const studentId = readTrimmedString(shape.data, 'studentId', { required: true, maxLength: 128, message: 'A valid student is required.' });
   const amount = readFiniteNumber(shape.data, 'amount', { min: 0.01, max: 100_000_000, message: 'Amount must be greater than zero.' });
@@ -519,16 +519,12 @@ router.post('/billing-ledger/invoices', authMiddleware, async (req: TenantReques
   if (!studentId.success || !amount.success || !discount.success || !fine.success || !invoiceType.success || !['TUITION', 'SUBJECT', 'ACTIVITY'].includes(invoiceType.data)) {
     return res.status(400).json({ error: 'Valid student, amounts and invoice type are required.' });
   }
-  const cycleStart = new Date(String(shape.data.billingCycleStart));
-  const cycleEnd = new Date(String(shape.data.billingCycleEnd));
-  const dueDate = new Date(String(shape.data.dueDate));
-  if ([cycleStart, cycleEnd, dueDate].some((date) => Number.isNaN(date.getTime())) || cycleEnd < cycleStart) {
-    return res.status(400).json({ error: 'Valid billing cycle and due dates are required.' });
-  }
+  const periodAnchor = new Date(String(shape.data.periodAnchor));
+  if (Number.isNaN(periodAnchor.getTime())) return res.status(400).json({ error: 'A valid billing period anchor is required.' });
   const student = await loadStudentBillingAccess(req, studentId.data);
   if (!student) return res.status(404).json({ error: 'Student not found or outside your billing scope.' });
   const tenant = await prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { panNumber: true, vatRate: true } });
-  const billingPeriod = await getBillingPeriod(cycleStart, 10);
+  const billingPeriod = await getBillingPeriod(periodAnchor, 10);
   const netPayable = Math.round((amount.data - discount.data + fine.data) * 100) / 100;
   if (netPayable < 0) return res.status(400).json({ error: 'Discount cannot exceed the invoice total.' });
   try {
@@ -737,10 +733,7 @@ router.get(
   '/overview',
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
-    const isTenantAdmin = billingBranchScopes(req.user).isTenantAdmin;
-    const scopes: string[] = [...new Set<string>((req.user?.roles ?? [])
-      .filter((role: any) => role?.roleName === 'Branch Admin' && role?.branchId)
-      .map((role: any) => String(role.branchId)))];
+    const { isTenantAdmin, scopes } = billingBranchScopes(req.user);
     if (!isTenantAdmin && scopes.length === 0) {
       return res.status(403).json({ error: 'You do not have access to fee totals.' });
     }
@@ -1117,9 +1110,12 @@ router.get(
 router.get(
   '/billing-period',
   authMiddleware,
-  async (_req: TenantRequest, res: Response) => {
+  async (req: TenantRequest, res: Response) => {
     try {
-      const period = await getBillingPeriod(new Date(), 10);
+      const anchorValue = typeof req.query.anchor === 'string' ? req.query.anchor : '';
+      const anchor = anchorValue ? new Date(anchorValue) : new Date();
+      if (Number.isNaN(anchor.getTime())) return res.status(400).json({ error: 'A valid billing period anchor is required.' });
+      const period = await getBillingPeriod(anchor, 10);
       return res.json({
         label: period.label,
         bsYear: period.bsYear,

@@ -200,8 +200,8 @@ h4 {
 .card,
 [data-slot="tms-card"] {
   background: var(--panel-bg);
-  backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-card);
   border-radius: 16px;
@@ -643,6 +643,7 @@ h1, h2, h3, h4 {
   width: 100%;
   max-width: 440px;
   background: var(--bg-card);
+  -webkit-backdrop-filter: blur(16px);
   backdrop-filter: blur(16px);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -721,6 +722,7 @@ h1, h2, h3, h4 {
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,0.5);
+  -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -939,6 +941,7 @@ h1, h2, h3, h4 {
   width: 100%;
   max-width: 760px;
   background: var(--bg-card);
+  -webkit-backdrop-filter: blur(16px);
   backdrop-filter: blur(16px);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -1228,6 +1231,7 @@ h1, h2, h3, h4 {
   padding: 0 24px;
   height: 64px;
   background: var(--bg-card);
+  -webkit-backdrop-filter: blur(16px);
   backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--border);
   position: sticky;
@@ -1417,6 +1421,7 @@ h1, h2, h3, h4 {
   right: 0;
   top: calc(100% + 8px);
   background: var(--bg-card);
+  -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
   border: 1px solid var(--border);
   box-shadow: 0 16px 40px rgba(0,0,0,0.12);
@@ -1672,6 +1677,7 @@ h1, h2, h3, h4 {
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,0.5);
+  -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
   z-index: 1001;
 }
@@ -2569,6 +2575,7 @@ h1, h2, h3, h4 {
   padding: 0;
   border: 0;
   background: rgba(10, 24, 44, 0.42);
+  -webkit-backdrop-filter: blur(3px);
   backdrop-filter: blur(3px);
   z-index: 1200;
   animation: fadeIn 0.2s ease forwards;
@@ -2692,7 +2699,7 @@ h1, h2, h3, h4 {
 .fee-sms-deliveries > div > span { min-width: 0; font-size: 12px; font-weight: 650; }
 .fee-sms-deliveries small { display: block; margin-top: 2px; color: var(--text-muted); font-size: 10.5px; font-weight: 500; }
 .fee-payment-dialog { position: fixed; inset: 0; width: min(520px, calc(100% - 32px)); max-height: calc(100vh - 32px); margin: auto; padding: 0; border: 0; border-radius: var(--radius-lg); background: var(--color-surface); color: var(--text); box-shadow: var(--shadow-modal); }
-.fee-payment-dialog::backdrop { background: rgba(10, 24, 44, .56); backdrop-filter: blur(3px); }
+.fee-payment-dialog::backdrop { background: rgba(10, 24, 44, .56); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
 .fee-payment-dialog form { display: grid; gap: 18px; padding: 24px; }
 .fee-payment-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .fee-payment-dialog-head > div { display: grid; gap: 4px; }
@@ -2777,6 +2784,7 @@ h1, h2, h3, h4 {
   position: fixed;
   inset: 0;
   background: rgba(10, 24, 44, 0.5);
+  -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
   z-index: 1300;
   display: grid;

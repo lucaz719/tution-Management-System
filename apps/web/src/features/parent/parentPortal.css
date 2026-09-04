@@ -423,7 +423,7 @@
 .parent-profile-children p,
 .parent-profile-children small { display: block; margin-top: 2px; color: var(--parent-muted); font-size: 11px; }
 
-.parent-modal-backdrop { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: var(--sp-5); background: rgba(0, 20, 52, .56); backdrop-filter: blur(4px); }
+.parent-modal-backdrop { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: var(--sp-5); background: rgba(0, 20, 52, .56); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
 .parent-modal { position: relative; width: min(100%, 430px); padding: 28px; border-radius: var(--radius-lg); background: var(--color-surface); color: var(--parent-text); text-align: center; box-shadow: var(--shadow-modal); animation: parent-modal-enter 220ms var(--ease-silk) both; }
 @keyframes parent-modal-enter { from { opacity: 0; transform: scale(.96) translateY(8px); } to { opacity: 1; transform: scale(1) translateY(0); } }
 .parent-modal h2 { margin-top: 6px; color: var(--parent-navy); font-family: var(--font-display); }
