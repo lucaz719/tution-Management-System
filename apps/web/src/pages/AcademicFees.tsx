@@ -319,12 +319,12 @@ export function AcademicFees() {
 
       {payStudent ? (
         <>
-          <div className="people-drawer-overlay" onClick={() => setPayStudent(null)} />
-          <aside className="people-drawer" role="dialog" aria-modal="true">
+          <button type="button" className="people-drawer-overlay" onClick={() => setPayStudent(null)} aria-label="Close student billing details" />
+          <aside className="people-drawer fee-drawer" role="dialog" aria-modal="true" aria-labelledby="fee-drawer-title">
             <div className="people-drawer-head">
               <div>
-                <h2>{payStudent.name}</h2>
-                <p>Invoices — record cash/bank payments here.</p>
+                <h2 id="fee-drawer-title">{payStudent.name}</h2>
+                <p>{payStudent.branchName ?? 'Branch not assigned'} · Student billing</p>
               </div>
               <button type="button" className="people-drawer-close" onClick={() => setPayStudent(null)} aria-label="Close">
                 <span className="material-symbols-outlined">close</span>
@@ -388,56 +388,72 @@ export function AcademicFees() {
                 <p style={{ color: 'var(--text-muted)', fontSize: '14px', textAlign: 'center', padding: '24px 0' }}>Loading invoices…</p>
               ) : (
                 <>
-                  {billingProfile ? (
-                    <section style={{ padding: '14px 16px', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--color-surface)', marginBottom: '14px' }}>
-                      <h3 style={{ fontSize: '15px', margin: 0 }}>Billing plan</h3>
-                      <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '4px 0 12px' }}>
-                        {billingProfile.grade} · estimated monthly billing {money(billingProfile.monthlyAmount)} · course through {new Date(billingProfile.courseEnd).toLocaleDateString('en-NP')}
-                      </p>
-                      {billingProfile.projections.length ? (
-                        <div style={{ display: 'grid', gap: '8px' }}>
-                          {billingProfile.projections.map((projection) => (
-                            <div key={projection.cycleStart} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', paddingTop: '8px', borderTop: '1px solid var(--border)' }}>
-                              <span style={{ fontSize: '12px' }}>{toDualDateLabel(projection.cycleStart)} · due {toDualDateLabel(projection.dueDate)}</span>
-                              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><strong style={{ fontSize: '13px' }}>{money(projection.amount)}</strong><StatusBadge variant="info">Projection</StatusBadge></span>
-                            </div>
-                          ))}
+                  <section className="fee-student-summary" aria-labelledby="fee-balance-title">
+                    <div className="fee-section-heading">
+                      <div>
+                        <span>Current balance</span>
+                        <h3 id="fee-balance-title">{money(payStudent.totalDue)}</h3>
+                      </div>
+                      <StatusBadge variant={payStudent.overdueAmount > 0 ? 'error' : payStudent.totalDue > 0 ? 'warning' : 'success'}>
+                        {payStudent.overdueAmount > 0 ? 'Overdue' : payStudent.totalDue > 0 ? 'Payment due' : 'Cleared'}
+                      </StatusBadge>
+                    </div>
+                    <dl className="fee-summary-grid">
+                      <div><dt>Outstanding</dt><dd>{money(payStudent.totalDue)}</dd></div>
+                      <div><dt>Overdue</dt><dd className={payStudent.overdueAmount > 0 ? 'is-overdue' : ''}>{money(payStudent.overdueAmount)}</dd></div>
+                      <div><dt>Paid to date</dt><dd className="is-paid">{money(payStudent.totalPaid)}</dd></div>
+                    </dl>
+                  </section>
+
+                  <section className="fee-drawer-section" aria-labelledby="posted-invoices-title">
+                    <div className="fee-section-title">
+                      <div><h3 id="posted-invoices-title">Posted invoices</h3><p>Recorded charges and payment status</p></div>
+                      <span>{invoices.length}</span>
+                    </div>
+                    {invoices.length === 0 ? (
+                      <div className="people-empty" role="status"><span className="material-symbols-outlined" aria-hidden="true">receipt_long</span>No invoices have been posted for this student yet.</div>
+                    ) : <div className="fee-invoice-list">{invoices.map((inv) => (
+                      <article key={inv.id} className="fee-invoice-row">
+                        <div className="fee-invoice-copy">
+                          <span>{inv.invoiceType.toLowerCase().replaceAll('_', ' ')}</span>
+                          <strong>{money(inv.netPayable)}</strong>
+                          <small>Due {toDualDateLabel(inv.dueDate)}{inv.paymentDate ? ` · paid ${toDualDateLabel(inv.paymentDate)}` : ''}</small>
                         </div>
+                        {inv.status === 'PAID' ? <StatusBadge variant="success">Paid</StatusBadge> : (
+                          <div className="fee-invoice-actions">
+                            {inv.overdue ? <StatusBadge variant="error">Overdue</StatusBadge> : <StatusBadge variant="warning">Unpaid</StatusBadge>}
+                            <Button variant="outline" onClick={() => void openQr(inv)} disabled={qrLoadingId === inv.id}>
+                              <span className="material-symbols-outlined" aria-hidden="true">qr_code_scanner</span>
+                              {qrLoadingId === inv.id ? 'Generating…' : 'QR'}
+                            </Button>
+                            <Button onClick={() => void recordPayment(inv.id)} disabled={payingId === inv.id}>
+                              {payingId === inv.id ? 'Saving…' : 'Mark paid'}
+                            </Button>
+                          </div>
+                        )}
+                      </article>
+                    ))}</div>}
+                  </section>
+
+                  {billingProfile ? (
+                    <section className="fee-drawer-section fee-billing-plan" aria-labelledby="billing-plan-title">
+                      <div className="fee-section-title">
+                        <div><h3 id="billing-plan-title">Billing plan</h3><p>{billingProfile.grade} · active through {new Date(billingProfile.courseEnd).toLocaleDateString('en-NP')}</p></div>
+                        <strong>{money(billingProfile.monthlyAmount)}<small>/month</small></strong>
+                      </div>
+                      {billingProfile.projections.length ? (
+                        <details className="fee-projections">
+                          <summary><span>Future schedule</span><strong>{billingProfile.projections.length} cycle{billingProfile.projections.length === 1 ? '' : 's'}</strong></summary>
+                          <div>{billingProfile.projections.map((projection) => (
+                            <div key={projection.cycleStart}>
+                              <span>{toDualDateLabel(projection.cycleStart)}<small>Due {toDualDateLabel(projection.dueDate)}</small></span>
+                              <strong>{money(projection.amount)}</strong>
+                            </div>
+                          ))}</div>
+                        </details>
                       ) : <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: 0 }}>No future billing cycles remain in the current course window.</p>}
                     </section>
                   ) : null}
-                  {invoices.length === 0 ? (
-                    <div className="people-empty" role="status"><span className="material-symbols-outlined" aria-hidden="true">receipt_long</span>No invoices have been posted for this student yet.</div>
-                  ) : invoices.map((inv) => (
-                  <div key={inv.id} style={{ padding: '14px 16px', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--color-bg)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
-                    <div>
-                      <div style={{ fontSize: '15px', fontWeight: 700 }}>{money(inv.netPayable)}</div>
-                      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '3px' }}>
-                        Due {toDualDateLabel(inv.dueDate)}
-                        {inv.paymentDate ? ` · paid ${toDualDateLabel(inv.paymentDate)}` : ''}
-                      </div>
-                    </div>
-                    {inv.status === 'PAID' ? (
-                      <StatusBadge variant="success">Paid</StatusBadge>
-                    ) : (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        {inv.overdue ? <StatusBadge variant="error">Overdue</StatusBadge> : <StatusBadge variant="warning">Unpaid</StatusBadge>}
-                        <Button
-                          variant="outline"
-                          onClick={() => void openQr(inv)}
-                          disabled={qrLoadingId === inv.id}
-                          style={{ minHeight: '34px', height: '34px', padding: '6px 12px', borderColor: 'var(--color-accent)', color: 'var(--color-accent-hover)' }}
-                        >
-                          <span className="material-symbols-outlined" style={{ fontSize: '16px', marginRight: '4px' }}>qr_code_scanner</span>
-                          {qrLoadingId === inv.id ? 'Generating…' : 'QR'}
-                        </Button>
-                        <Button onClick={() => void recordPayment(inv.id)} disabled={payingId === inv.id} style={{ minHeight: '34px', height: '34px', padding: '6px 14px' }}>
-                          {payingId === inv.id ? 'Saving…' : 'Mark Paid'}
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                  ))}
                 </>
               )}
             </div>
