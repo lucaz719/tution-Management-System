@@ -559,6 +559,8 @@ model Class {
   academicYear      String              @default("")
   effectiveFrom     DateTime?           @db.Date
   effectiveUntil    DateTime?           @db.Date
+  archivedAt        DateTime?
+  archivedBy        String?
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
   enrollments       Enrollment[]
@@ -570,7 +572,7 @@ model Class {
   resultDefinitions ResultDefinition[]
   timetableVersions TimetableVersion[]
 
-  @@index([branchId, academicYear, effectiveFrom, effectiveUntil])
+  @@index([branchId, archivedAt, academicYear, effectiveFrom, effectiveUntil])
 }
 
 model TimetableVersion {

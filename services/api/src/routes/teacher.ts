@@ -17,7 +17,7 @@ function dayBounds(date = new Date()) {
 
 async function ownedClass(classId: string, teacherId: string, tenantId: string) {
   return prisma.class.findFirst({
-    where: { id: classId, teacherId, course: { tenantId } },
+    where: { id: classId, teacherId, archivedAt: null, course: { tenantId } },
     include: {
       course: { include: { grade: true } },
       branch: true,
@@ -48,12 +48,12 @@ router.get('/workspace', authMiddleware, async (req: TenantRequest, res: Respons
   try {
     await generateDailyTeacherSessions({ tenantId: req.tenantId! });
     const assignedClassIds = await prisma.class.findMany({
-      where: { teacherId: user.id, course: { tenantId: req.tenantId! } },
+      where: { teacherId: user.id, archivedAt: null, course: { tenantId: req.tenantId! } },
       select: { id: true },
     }).then((rows) => rows.map((row) => row.id));
     const [classes, stamps, sessions, staff, leaves, scores, resultDefinitions] = await Promise.all([
       prisma.class.findMany({
-        where: { teacherId: user.id, course: { tenantId: req.tenantId! } },
+        where: { teacherId: user.id, archivedAt: null, course: { tenantId: req.tenantId! } },
         include: {
           course: { include: { grade: true } }, branch: true,
           enrollments: { where: { status: { in: ACTIVE_ENROLLMENTS } }, include: { student: { include: { user: true } } } },

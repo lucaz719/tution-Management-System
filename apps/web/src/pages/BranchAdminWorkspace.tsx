@@ -10,6 +10,7 @@ import { API_BASE_URL, request } from '../services/api/client';
 import { normalizeSchedule, type ScheduleSlot } from '../utils/schedule';
 import { calendarDateLabel, calendarDayNumber, calendarMonthCells, calendarMonthLabel, isInCalendarMonth, moveCalendarMonth, toDualDateLabel, type CalendarSystem } from '../utils/nepaliDate';
 import { CalendarSystemToggle } from '../components/CalendarSystemToggle';
+import { BranchClassesWorkspace as BranchClassesView } from '../features/classes/BranchClassesWorkspace';
 
 function calendarDateKey(date: Date): string {
   const year = date.getFullYear();
@@ -1011,7 +1012,8 @@ function CertificatesView() {
   );
 }
 
-function BranchClassesView() {
+/* Retained temporarily in source history only; the typed feature workspace is active.
+function LegacyBranchClassesView() {
   const [classes, setClasses] = useState<any[]>([]); const [branches, setBranches] = useState<any[]>([]); const [grades, setGrades] = useState<any[]>([]); const [people, setPeople] = useState<any[]>([]); const [selectedId, setSelectedId] = useState(''); const [creating, setCreating] = useState(false); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [extraSourceId, setExtraSourceId] = useState(''); const [eligibleStudents, setEligibleStudents] = useState<Array<{ studentId: string; studentName: string; studentEmail: string }>>([]); const [eligibleLoading, setEligibleLoading] = useState(false); const action = useAction();
   const [createForm, setCreateForm] = useState({ branchId: '', gradeId: '', name: 'A', subject: '', kind: 'REGULAR', monthlyFee: '0', teacherId: '', sourceClassId: '', studentIds: [] as string[] });
   const [editForm, setEditForm] = useState({ name: '', teacherId: '' });
@@ -1028,11 +1030,11 @@ function BranchClassesView() {
   const loadEligibleStudents = async (classId: string) => { setEligibleLoading(true); try { setEligibleStudents(await api.academics.listEligibleClassStudents(classId)); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Eligible students could not be loaded.'); setEligibleStudents([]); } finally { setEligibleLoading(false); } };
   const openDetails = (item: any) => { setSelectedId(item.id); setCreating(false); setEditForm({ name: item.name, teacherId: item.teacherId || '' }); const sources = classes.filter((candidate) => candidate.courseType === 'REGULAR' && candidate.branchId === item.branchId && (!item.gradeId || candidate.gradeId === item.gradeId)); setExtraSourceId(sources[0]?.id || ''); void loadEligibleStudents(item.id); };
   const toggleStudent = (studentId: string) => setCreateForm((current) => ({ ...current, studentIds: current.studentIds.includes(studentId) ? current.studentIds.filter((id) => id !== studentId) : [...current.studentIds, studentId] }));
-  const createClass = (event: FormEvent) => { event.preventDefault(); const selectedGrade = grades.find((grade) => grade.id === createForm.gradeId); const className = createForm.kind === 'REGULAR' ? `${selectedGrade?.name || 'Grade'} - Section ${createForm.name}` : createForm.name.trim(); void action.run(async () => { const courseResult = await api.academics.createCourse({ branchId: createForm.branchId, gradeId: createForm.gradeId || undefined, name: createForm.subject.trim(), type: createForm.kind === 'REGULAR' ? 'REGULAR' : 'SHORT_TERM', feeStructure: { monthlyBase: Number(createForm.monthlyFee || 0) }, isExtraActivity: createForm.kind === 'EXTRA', isTaxExempt: false }); const classResult = await api.academics.createClass({ courseId: courseResult.course.id, name: className, schedule: [] }); if (createForm.teacherId) await api.academics.updateClass(classResult.class.id, { teacherId: createForm.teacherId }); if (createForm.kind === 'EXTRA') for (const studentId of createForm.studentIds) await api.academics.enroll(studentId, courseResult.course.id, classResult.class.id); setCreating(false); setCreateForm((current) => ({ ...current, name: 'A', subject: '', monthlyFee: '0', teacherId: '', sourceClassId: '', studentIds: [] })); await load(); }, `${createForm.kind === 'REGULAR' ? 'Regular' : 'Extra'} class created.`); };
+  const createClass = (event: FormEvent) => { event.preventDefault(); const selectedGrade = grades.find((grade) => grade.id === createForm.gradeId); const className = createForm.kind === 'REGULAR' ? `${selectedGrade?.name || 'Grade'} - Section ${createForm.name}` : createForm.name.trim(); void action.run(async () => { await api.academics.setupClass({ branchId: createForm.branchId, gradeId: createForm.gradeId, courseName: createForm.subject.trim(), courseType: createForm.kind === 'REGULAR' ? 'REGULAR' : 'SHORT_TERM', className, monthlyBase: Number(createForm.monthlyFee || 0), teacherId: createForm.teacherId || null, studentIds: createForm.kind === 'EXTRA' ? createForm.studentIds : [] }); setCreating(false); setCreateForm((current) => ({ ...current, name: 'A', subject: '', monthlyFee: '0', teacherId: '', sourceClassId: '', studentIds: [] })); await load(); }, `${createForm.kind === 'REGULAR' ? 'Regular' : 'Extra'} class created.`); };
   const saveDetails = (event: FormEvent) => { event.preventDefault(); if (!selected) return; void action.run(async () => { await api.academics.updateClass(selected.id, { name: editForm.name.trim(), teacherId: editForm.teacherId || null }); await load(); }, 'Class details updated.'); };
   const addStudent = (studentId: string) => { if (!selected || !studentId) return; void action.run(async () => { await api.academics.enroll(studentId, selected.courseId, selected.id); await load(); await loadEligibleStudents(selected.id); }, 'Student enrolled in class.'); };
-  const removeStudent = (enrollmentId: string) => { if (!selected) return; void action.run(async () => { await api.academics.unenroll(enrollmentId); await load(); await loadEligibleStudents(selected.id); }, 'Student removed from class.'); };
-  const deleteClass = () => { if (!selected || selected.enrollments?.length) { setError('Remove all enrolled students before deleting this class.'); return; } void action.run(async () => { await api.academics.deleteClass(selected.id); setSelectedId(''); await load(); }, 'Class deleted.'); };
+  const removeStudent = (enrollmentId: string) => { if (!selected) return; void action.run(async () => { await api.academics.unenroll(enrollmentId); await load(); await loadEligibleStudents(selected.id); }, 'Student removed from class. Enrollment history was preserved.'); };
+  const deleteClass = () => { if (!selected) return; if (selected.hasEnrollmentHistory) { setError('This class has enrollment history and cannot be permanently deleted. Its records must be preserved.'); return; } void action.run(async () => { await api.academics.deleteClass(selected.id); setSelectedId(''); await load(); }, 'Class deleted.'); };
   const selectedTeachers = people.filter((person) => person.roles.some((role: any) => role.role === 'Teacher' && role.branchId === selected?.branchId));
 
   return <Page title="Branch classes" description="Create regular and extra classes, assign teachers, enroll multiple students, and manage every class through its full lifecycle.">
@@ -1071,6 +1073,7 @@ function BranchClassesView() {
     </div> : null}
   </Page>;
 }
+*/
 
 function LegacyTimetableView() {
   const [activeTab, setActiveTab] = useState<'view' | 'add'>('view');

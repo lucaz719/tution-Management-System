@@ -22,6 +22,7 @@ export async function generateDailyTeacherSessions(params: { tenantId: string; i
   const day = nepalWeekday(instant);
   const classes = await prisma.class.findMany({
     where: {
+      archivedAt: null,
       teacherId: { not: null },
       course: { tenantId: params.tenantId },
       AND: [
