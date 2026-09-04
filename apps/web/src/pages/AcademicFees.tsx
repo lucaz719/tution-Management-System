@@ -156,8 +156,6 @@ export function AcademicFees() {
           ...failed.map((item) => `${item.recipient.toLowerCase()} SMS failed${item.failureReason ? `: ${item.failureReason}` : '.'}`),
         ].join(' ');
         setPaymentNotice({ message: detail || 'Admission payment is recorded, but login SMS delivery is still pending.', delivered: false });
-      } else if (invoiceData.admissionStatus === 'ACTIVE' && invoiceData.loginDeliveries.some((item) => item.status === 'SENT')) {
-        setPaymentNotice({ message: 'Admission activated. Student and parent login SMS notifications are recorded as sent.', delivered: true });
       }
       setBillingProfile(ledger.students.find((item) => item.studentId === student.studentId) ?? null);
     } catch (error: unknown) {
@@ -216,6 +214,12 @@ export function AcademicFees() {
     if (!paymentInvoice) return;
     paymentDialogRef.current?.showModal();
   }, [paymentInvoice]);
+
+  useEffect(() => {
+    if (!paymentNotice || paymentNotice.delivered === false) return;
+    const timer = window.setTimeout(() => setPaymentNotice(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [paymentNotice]);
 
   useEffect(() => {
     if (!payStudent || paymentInvoice || qrModal) return;
@@ -402,34 +406,25 @@ export function AcademicFees() {
               {paymentNotice ? (
                 <div
                   role={paymentNotice.delivered === false ? 'alert' : 'status'}
-                  style={{
-                    padding: '12px 14px',
-                    borderRadius: '10px',
-                    border: `1px solid ${paymentNotice.delivered === false ? 'var(--color-error)' : 'var(--color-success)'}`,
-                    background: paymentNotice.delivered === false
-                      ? 'color-mix(in srgb, var(--color-error) 8%, transparent)'
-                      : 'color-mix(in srgb, var(--color-success) 8%, transparent)',
-                    color: 'var(--color-text)',
-                    fontSize: '13px',
-                    fontWeight: 600,
-                  }}
+                  className={`fee-sms-notice${paymentNotice.delivered === false ? ' is-action-required' : ' is-success'}`}
                 >
-                  {paymentNotice.message}
+                  <span className="material-symbols-outlined" aria-hidden="true">{paymentNotice.delivered === false ? 'error' : 'check_circle'}</span>
+                  <div><strong>{paymentNotice.delivered === false ? 'SMS delivery needs attention' : 'Payment recorded successfully'}</strong><p>{paymentNotice.message}</p>
                   {paymentNotice.delivered === false ? (
-                    <p style={{ marginTop: '6px', color: 'var(--text-muted)', fontWeight: 500 }}>
+                    <p>
                       Payment is saved. Review each recipient below and retry any notification that failed.
                     </p>
                   ) : null}
-                  {loginDeliveries.length ? (
-                    <div style={{ display: 'grid', gap: '8px', marginTop: '10px' }} aria-label="Login SMS notification log">
+                  {paymentNotice.delivered === false && loginDeliveries.length ? (
+                    <div className="fee-sms-deliveries" aria-label="Login SMS notification log">
                       {loginDeliveries.map((delivery) => (
-                        <div key={delivery.recipient} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', paddingTop: '8px', borderTop: '1px solid var(--border)' }}>
-                          <span style={{ minWidth: 0, fontWeight: 600 }}>
+                        <div key={delivery.recipient}>
+                          <span>
                             {delivery.recipient === 'STUDENT' ? 'Student login SMS' : 'Parent login SMS'}
                             {delivery.status === 'FAILED' && delivery.failureReason ? (
-                              <small style={{ display: 'block', marginTop: '2px', color: 'var(--text-muted)', fontWeight: 500 }}>{delivery.failureReason}</small>
+                              <small>{delivery.failureReason}</small>
                             ) : delivery.sentAt ? (
-                              <small style={{ display: 'block', marginTop: '2px', color: 'var(--text-muted)', fontWeight: 500 }}>Sent {new Date(delivery.sentAt).toLocaleString('en-NP')}</small>
+                              <small>Sent {new Date(delivery.sentAt).toLocaleString('en-NP')}</small>
                             ) : null}
                           </span>
                           <StatusBadge variant={delivery.status === 'SENT' ? 'success' : delivery.status === 'FAILED' ? 'error' : 'warning'}>
@@ -450,6 +445,8 @@ export function AcademicFees() {
                       {isRetryingDelivery ? 'Retrying SMS…' : 'Retry login SMS'}
                     </Button>
                   ) : null}
+                  </div>
+                  <button type="button" onClick={() => setPaymentNotice(null)} aria-label="Dismiss notification"><span className="material-symbols-outlined" aria-hidden="true">close</span></button>
                 </div>
               ) : null}
               {invoicesLoading ? (
@@ -558,7 +555,7 @@ export function AcademicFees() {
               <div><dt>Student</dt><dd>{payStudent.name}</dd></div>
               <div><dt>Invoice</dt><dd>{paymentInvoice.invoiceType.toLowerCase().replaceAll('_', ' ')}</dd></div>
               <div><dt>Amount received</dt><dd>{money(paymentInvoice.netPayable)}</dd></div>
-              <div><dt>Due date</dt><dd>{toDualDateLabel(paymentInvoice.dueDate)}</dd></div>
+              <div><dt>Due date</dt><dd>{toBsLabel(paymentInvoice.dueDate)} · {adDate(paymentInvoice.dueDate)} AD</dd></div>
             </dl>
             <fieldset className="fee-payment-methods">
               <legend>Payment method</legend>

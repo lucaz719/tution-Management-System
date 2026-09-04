@@ -2677,7 +2677,21 @@ h1, h2, h3, h4 {
 .fee-drawer-error { display: grid; min-height: 260px; place-items: center; align-content: center; gap: 8px; padding: 28px; border: 1px dashed var(--border); border-radius: var(--radius-md); background: var(--color-bg); text-align: center; }
 .fee-drawer-error > .material-symbols-outlined { color: var(--color-error); font-size: 34px; }
 .fee-drawer-error p { max-width: 36ch; margin: 0 0 6px; color: var(--text-muted); font-size: 13px; }
-.fee-payment-dialog { width: min(520px, calc(100% - 32px)); max-height: calc(100vh - 32px); padding: 0; border: 0; border-radius: var(--radius-lg); background: var(--color-surface); color: var(--text); box-shadow: var(--shadow-modal); }
+.fee-sms-notice { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--text); }
+.fee-sms-notice.is-success { border-color: color-mix(in srgb, var(--color-success) 35%, var(--border)); background: color-mix(in srgb, var(--color-success) 7%, var(--color-surface)); }
+.fee-sms-notice.is-action-required { border-color: color-mix(in srgb, var(--color-error) 45%, var(--border)); background: color-mix(in srgb, var(--color-error) 7%, var(--color-surface)); }
+.fee-sms-notice > .material-symbols-outlined { color: var(--color-success); font-size: 20px; }
+.fee-sms-notice.is-action-required > .material-symbols-outlined { color: var(--color-error); }
+.fee-sms-notice > div { display: grid; gap: 4px; min-width: 0; }
+.fee-sms-notice > div > strong { font-size: 13px; }
+.fee-sms-notice p { margin: 0; color: var(--text-muted); font-size: 11.5px; font-weight: 500; line-height: 1.45; }
+.fee-sms-notice > button { display: grid; width: 32px; height: 32px; place-items: center; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-muted); cursor: pointer; }
+.fee-sms-notice > button .material-symbols-outlined { font-size: 18px; }
+.fee-sms-deliveries { display: grid; gap: 8px; margin-top: 6px; }
+.fee-sms-deliveries > div { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-top: 8px; border-top: 1px solid var(--border); }
+.fee-sms-deliveries > div > span { min-width: 0; font-size: 12px; font-weight: 650; }
+.fee-sms-deliveries small { display: block; margin-top: 2px; color: var(--text-muted); font-size: 10.5px; font-weight: 500; }
+.fee-payment-dialog { position: fixed; inset: 0; width: min(520px, calc(100% - 32px)); max-height: calc(100vh - 32px); margin: auto; padding: 0; border: 0; border-radius: var(--radius-lg); background: var(--color-surface); color: var(--text); box-shadow: var(--shadow-modal); }
 .fee-payment-dialog::backdrop { background: rgba(10, 24, 44, .56); backdrop-filter: blur(3px); }
 .fee-payment-dialog form { display: grid; gap: 18px; padding: 24px; }
 .fee-payment-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
@@ -2830,7 +2844,7 @@ h1, h2, h3, h4 {
   .fee-invoice-copy { align-items: flex-start; flex-direction: column; gap: 7px; }
   .fee-invoice-copy > span { text-align: left; }
   .fee-invoice-actions { grid-template-columns: 1fr; }
-  .fee-payment-dialog { width: 100%; max-height: 100vh; margin: auto 0 0; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+  .fee-payment-dialog { inset: auto 0 0; width: 100%; max-height: calc(100vh - 24px); margin: 0; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
   .fee-payment-facts, .fee-payment-methods { grid-template-columns: 1fr; }
   .fee-payment-facts > div { border-right: 0; border-bottom: 1px solid var(--border); }
   .fee-payment-facts > div:nth-last-child(2) { border-bottom: 1px solid var(--border); }
