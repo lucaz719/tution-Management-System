@@ -1,0 +1,10 @@
+﻿.nepal-date-time { display: grid; gap: var(--sp-1); min-width: 0; font-family: var(--font-ui); }
+.nepal-date-time__nepali { color: var(--color-primary); font-family: 'Nirmala UI', 'Mangal', var(--font-ui); font-size: clamp(20px, 2vw, 24px); font-weight: 700; line-height: 1.5; overflow-wrap: anywhere; }
+.nepal-date-time__meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.nepal-date-time__english { font-weight: 500; }
+.nepal-date-time__clock { display: inline-flex; align-items: baseline; gap: var(--sp-2); }
+.nepal-date-time__clock::before { content: ''; width: 3px; height: 3px; align-self: center; border-radius: 50%; background: currentColor; }
+.nepal-date-time__clock > time { color: var(--color-text); font-size: inherit; font-weight: 600; font-variant-numeric: tabular-nums; }
+.nepal-date-time__zone { font-size: inherit; white-space: nowrap; }
+.nepal-date-time[data-compact] .nepal-date-time__nepali { font-size: 18px; }
+[data-theme='dark'] .nepal-date-time__nepali { color: var(--brand); }

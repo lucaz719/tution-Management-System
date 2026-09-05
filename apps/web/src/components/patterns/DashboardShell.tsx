@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { NepalDateTime } from '../NepalDateTime';
 import {
   findNavigationItem,
   getDashboardNavigation,
@@ -432,7 +433,10 @@ export function DashboardShell({ role, children }: DashboardShellProps) {
           </div>
         </header>
 
-        <main style={{ padding: isCompactViewport ? '24px' : '28px', overflowX: 'hidden' }}>{children}</main>
+        <main style={{ padding: isCompactViewport ? '24px' : '28px', overflowX: 'hidden' }}>
+          {activeItem && ['dashboard', 'home'].includes(activeItem.icon) && <div style={{ marginBottom: 'var(--sp-5)' }}><NepalDateTime /></div>}
+          {children}
+        </main>
       </div>
     </div>
   );
