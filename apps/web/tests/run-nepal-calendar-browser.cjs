@@ -11,6 +11,7 @@ async function main() {
     mode: 'development', context: path.resolve(__dirname, '..'), entry: './tests/fixtures/nepal-calendar.tsx',
     output: { path: output, filename: 'preview.js' }, devtool: false,
     resolve: { extensions: ['.tsx', '.ts', '.js'] },
+    plugins: [new webpack.DefinePlugin({ __TMS_API_BASE_URL__: JSON.stringify('http://localhost:5187/api') })],
     module: { rules: [
       { test: /\.tsx?$/, exclude: /node_modules/, use: { loader: 'ts-loader', options: { transpileOnly: true, configFile: 'tsconfig.app.json' } } },
       { test: /\.css$/, use: ['style-loader', 'css-loader'] },
@@ -26,8 +27,9 @@ async function main() {
   let failures = 0;
   try {
     cafe = await createTestCafe('127.0.0.1', 5188, 5189);
-    console.log('Launching Edge headless.');
-    failures = await cafe.createRunner().src(path.join(__dirname, 'nepal-calendar-browser.js')).browsers('edge:headless').screenshots({ path: path.join(output, 'screenshots'), takeOnFails: true }).run();
+    const browser = process.argv[2] || 'edge:headless';
+    console.log(`Launching ${browser}.`);
+    failures = await cafe.createRunner().src(path.join(__dirname, 'nepal-calendar-browser.js')).browsers(browser).screenshots({ path: path.join(output, 'screenshots'), takeOnFails: true }).run();
   } finally { if (cafe) await cafe.close(); server.close(); }
   process.exitCode = failures ? 1 : 0;
 }

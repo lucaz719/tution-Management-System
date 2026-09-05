@@ -6,8 +6,14 @@ import type { CalendarSystem } from '../../utils/nepaliDate';
 import { addCalendarDays, BS_MONTHS, BS_YEARS, bsDate, calendarMonth, dateFromKey, englishDateLabel, eventOccursOn, monthAnchor, NEPAL_TIME_ZONE, NEPALI_WEEKDAYS, nepaliDateHeading, nepaliDigits, shiftCalendarMonth } from '../../utils/nepalCalendar';
 import './nepalCalendar.css';
 import { CalendarIcon } from './CalendarIcon';
+import { EventAudienceSelect } from './EventTargetFields';
+import type { EventAudience } from '../../services/api/academicEvents';
 
 export interface NepalCalendarEvent {
+  audience?: EventAudience;
+  branchId?: string | null;
+  branch?: { name: string } | null;
+  class?: { name: string } | null;
   id: string;
   title: string;
   description?: string | null;
@@ -27,6 +33,13 @@ export interface NepalCalendarProps {
   /** Opt in only when the host page does not already show NepalDateTime. */
   showClock?: boolean;
   onDateSelect?: (date: string) => void;
+  initialDate?: string;
+  showDetails?: boolean;
+  onDateActivate?: (date: string) => void;
+  onCreateEvent?: (date: string) => void;
+  onAudienceChange?: (event: NepalCalendarEvent, audience: EventAudience) => void;
+  canManageEvent?: (event: NepalCalendarEvent) => boolean;
+  savingAudience?: boolean;
 }
 const eventLabels = { HOLIDAY: 'Holiday', EXAM: 'Exam', EVENT: 'Event', FEE_DUE: 'Fee due' };
 const defaultDaysOff = [6];
@@ -36,13 +49,13 @@ function eventTime(value: string): string {
   return new Date(value).toLocaleString('en-US', { timeZone: NEPAL_TIME_ZONE, month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-export function NepalCalendar({ events, loading = false, error, onRetry, calendarSystem, onCalendarSystemChange, weeklyDaysOff = defaultDaysOff, showClock = false, onDateSelect }: NepalCalendarProps) {
+export function NepalCalendar({ events, loading = false, error, onRetry, calendarSystem, onCalendarSystemChange, weeklyDaysOff = defaultDaysOff, showClock = false, onDateSelect, initialDate, showDetails = true, onDateActivate, onCreateEvent, onAudienceChange, canManageEvent, savingAudience }: NepalCalendarProps) {
   const today = useNepalToday();
   const [internalSystem, setInternalSystem] = useState<CalendarSystem>('BS');
   const system = calendarSystem ?? internalSystem;
-  const [anchor, setAnchor] = useState(today);
-  const [selected, setSelected] = useState(today);
-  const [focused, setFocused] = useState(today);
+  const [anchor, setAnchor] = useState(initialDate || today);
+  const [selected, setSelected] = useState(initialDate || today);
+  const [focused, setFocused] = useState(initialDate || today);
   const [pickerOpen, setPickerOpen] = useState(false);
   const gridRef = useRef<HTMLDivElement>(null);
   const headingId = useId();
@@ -96,7 +109,7 @@ export function NepalCalendar({ events, loading = false, error, onRetry, calenda
           return <div role="gridcell" aria-selected={key === selected} key={key} className="nepal-calendar__cell">
             <button type="button" data-date={key} data-today={key === today || undefined} data-selected={key === selected || undefined} data-off={weeklyOff || holiday || undefined} data-outside={key < month.first || key > month.last || undefined} disabled={system === 'BS' && !bs} tabIndex={key === focused ? 0 : -1} aria-current={key === today ? 'date' : undefined}
               aria-label={`${nepaliDateHeading(key)}, ${englishDateLabel(key)}${weeklyOff ? ', Weekly off' : ''}${holiday ? ', Holiday' : ''}, ${error ? 'Events unavailable' : `${entries.length} events`}`}
-              onClick={() => select(key)} onKeyDown={(event) => keyboard(event, key)}>
+              onClick={() => { select(key); onDateActivate?.(key); }} onKeyDown={(event) => keyboard(event, key)}>
               <span className="nepal-calendar__secondary">{system === 'BS' ? dateFromKey(key).getUTCDate() : bs ? nepaliDigits(bs.day) : '—'}</span>
               <span className="nepal-calendar__annotations">{entries.slice(0, 2).map((entry) => <span key={entry.id} data-type={entry.eventType}>{entry.title}</span>)}</span>
               <span className="nepal-calendar__number" lang={system === 'BS' ? 'ne' : 'en'}>{system === 'BS' ? bs ? nepaliDigits(bs.day) : '—' : dateFromKey(key).getUTCDate()}</span>
@@ -106,10 +119,11 @@ export function NepalCalendar({ events, loading = false, error, onRetry, calenda
           </div>;
         })}</div>)}
       </div>
-      <div className="nepal-calendar__details" aria-live="polite">
+      {showDetails && <div className="nepal-calendar__details" aria-live="polite">
+        {onCreateEvent && <button type="button" className="nepal-calendar__create" onClick={() => onCreateEvent(selected)}>Add event on this day</button>}
         <div className="nepal-calendar__detail-heading"><div><p className="nepal-calendar__eyebrow">Selected day{offDay ? ' · Weekly off' : ''}</p><h4 lang="ne">{nepaliDateHeading(selected)}</h4><p>{englishDateLabel(selected, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p></div><span>{error ? 'Events unavailable' : `${dayEvents.length} event${dayEvents.length === 1 ? '' : 's'}`}</span></div>
-        {error ? <p className="nepal-calendar__empty">Retry loading events to see this day's schedule.</p> : dayEvents.length ? <div className="nepal-calendar__events">{dayEvents.map((event) => <article key={event.id} className="nepal-calendar__event"><span className="nepal-calendar__event-type">{eventLabels[event.eventType]}</span><h5>{event.title}</h5>{event.description && <p>{event.description}</p>}<p><time dateTime={event.startDate}>{eventTime(event.startDate)}</time> – <time dateTime={event.endDate}>{eventTime(event.endDate)}</time> NPT</p></article>)}</div> : <p className="nepal-calendar__empty">No events scheduled for this day. Select another date to review its schedule.</p>}
-      </div>
+        {error ? <p className="nepal-calendar__empty">Retry loading events to see this day's schedule.</p> : dayEvents.length ? <div className="nepal-calendar__events">{dayEvents.map((event) => <article key={event.id} className="nepal-calendar__event"><span className="nepal-calendar__event-type">{eventLabels[event.eventType]}</span><h5>{event.title}</h5><p>{event.branch?.name ?? 'Institution-wide'}{event.class ? ` / ${event.class.name}` : ''}</p>{onAudienceChange && (!canManageEvent || canManageEvent(event)) && <EventAudienceSelect value={event.audience ?? 'STAFF'} disabled={savingAudience} onChange={(audience) => onAudienceChange(event, audience)} />}{event.description && <p>{event.description}</p>}<p><time dateTime={event.startDate}>{eventTime(event.startDate)}</time> – <time dateTime={event.endDate}>{eventTime(event.endDate)}</time> NPT</p></article>)}</div> : <p className="nepal-calendar__empty">No events scheduled for this day. Select another date to review its schedule.</p>}
+      </div>}
     </> : <div className="nepal-calendar__message" role="status">BS conversion is unavailable for this date. Switch to AD or select Today.</div>}
   </section>;
 }

@@ -1,3 +1,4 @@
+import { calendarAccessWhere } from '../services/calendar-access';
 import { Router, Response } from 'express';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
@@ -126,7 +127,7 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
     const branchIds = [...new Set(currentEnrollments.map((enrollment) => enrollment.class.branchId))];
     const [events, leaves, appointments, messages, remarks, scores, tenant, branchAdmins] = await Promise.all([
       prisma.academicEvent.findMany({
-        where: { tenantId: req.tenantId!, OR: [{ branchId: null }, { branchId: { in: branchIds } }] },
+        where: await calendarAccessWhere(req.user!, req.tenantId!, { studentId: student.id, viewerRole: 'Parent' }),
         orderBy: { startDate: 'asc' },
         take: 100,
       }),

@@ -668,7 +668,7 @@ export const api = {
       request<{ message: string; remark: any }>('/performance/student/remarks', { method: 'POST', body: JSON.stringify(payload) }),
     createPersonalizedClass: async (payload: { branchId: string; name: string; courseId: string; schedule: unknown; feeStructure: unknown }) =>
       request<{ message: string; class: any }>('/classes/personalized', { method: 'POST', body: JSON.stringify(payload) }),
-    createCalendarEvent: async (payload: { branchId: string; title: string; description?: string; eventType: string; startDate: string; endDate: string }) =>
+    createCalendarEvent: async (payload: { audience?: string; classId?: string; branchId: string; title: string; description?: string; eventType: string; startDate: string; endDate: string }) =>
       request<{ message: string; event: any }>('/academic-events', { method: 'POST', body: JSON.stringify(payload) }),
     issueCertificate: async (payload: { studentId: string; templateId: string; branchId: string }) =>
       request<{ message: string; certificate: any }>('/certificates/issue', { method: 'POST', body: JSON.stringify(payload) }),

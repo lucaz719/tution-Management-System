@@ -13,6 +13,7 @@
     "prisma:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
     "test:access": "ts-node src/utils/access-control.test.ts",
+    "test:calendar": "ts-node src/services/calendar-access.test.ts",
     "test:billing": "ts-node src/utils/billing-rules.test.ts",
     "test:sms": "ts-node src/utils/sms.test.ts",
     "test:connectips": "ts-node src/utils/connectips.test.ts",

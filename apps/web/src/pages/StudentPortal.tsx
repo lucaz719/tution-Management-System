@@ -1,10 +1,10 @@
+import { AcademicCalendarView } from '../components/calendar/AcademicCalendarView';
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   invoiceTotal,
   resultPercentage,
   type AttendanceState,
-  type EventKind,
   type FeeState,
   type StudentPortalDataset,
   type SubjectInsight,
@@ -12,8 +12,7 @@ import {
 import { loadNepalPayPayload, loadStudentPortal, studentFileUrl } from '../features/student/studentPortalService';
 import { errorMessage } from '../services/api/client';
 import { ChangePasswordForm } from '../components/ChangePasswordForm';
-import { calendarDateLabel, calendarDayNumber, calendarMonthCells, calendarMonthLabel, isInCalendarMonth, moveCalendarMonth, toBsParts, toDualDateLabel, type CalendarSystem } from '../utils/nepaliDate';
-import { CalendarSystemToggle } from '../components/CalendarSystemToggle';
+import { toDualDateLabel } from '../utils/nepaliDate';
 import { InvoiceDocumentDialog } from '../components/InvoiceDocument';
 import { PaymentCheckoutDialog } from '../components/PaymentCheckoutDialog';
 import '../features/student/studentPortal.css';
@@ -159,12 +158,7 @@ function DashboardView({ go }: { go: (view: StudentView) => void }) {
         <button type="button" onClick={() => go('calendar')}>{icon('event')}<span><small>Next event</small><strong>{nextEvent ? `${nextEvent.day} ${nextEvent.month}` : 'None'}</strong></span>{icon('arrow_forward')}</button>
       </section>
 
-      <section className="student-card">
-        <SectionHeader title="Upcoming events" description="Your next academic and fee dates." action="Open calendar" onAction={() => go('calendar')} />
-        <div className="student-event-strip">
-          {events.slice(0, 3).map((event) => <article key={event.id}><div><strong>{event.day}</strong><span>{event.month}</span></div><span><b>{event.title}</b><small>{event.kind}</small></span></article>)}
-        </div>
-      </section>
+      <AcademicCalendarView viewerRole="Student" upcoming calendarPath="/student/calendar" />
     </div>
   );
 }
@@ -355,38 +349,7 @@ function CertificatesView() {
   );
 }
 
-function eventTone(kind: EventKind) {
-  return kind === 'Holiday' ? 'success' : kind === 'Exam' ? 'error' : kind === 'Fee due' ? 'warning' : 'info';
-}
-
-function CalendarView() {
-  const { events } = useStudentData();
-  const today = useMemo(() => { const date = new Date(); date.setHours(0, 0, 0, 0); return date; }, []);
-  const parseEventDate = (value: string) => { const date = new Date(value); date.setHours(0, 0, 0, 0); return date; };
-  const upcoming = useMemo(() => events.map((event) => ({ ...event, parsedDate: parseEventDate(event.date) })).filter((event) => !Number.isNaN(event.parsedDate.getTime()) && event.parsedDate >= today).sort((a, b) => a.parsedDate.getTime() - b.parsedDate.getTime()), [events, today]);
-  const [visibleMonth, setVisibleMonth] = useState(() => { const first = upcoming[0]?.parsedDate ?? today; return new Date(first.getFullYear(), first.getMonth(), 1); });
-  const [selectedDate, setSelectedDate] = useState(() => (upcoming[0]?.parsedDate ?? today).toDateString());
-  const [calendarSystem, setCalendarSystem] = useState<CalendarSystem>('AD');
-  const monthCells = useMemo(() => calendarMonthCells(visibleMonth, calendarSystem), [visibleMonth, calendarSystem]);
-  const eventsForDay = (date: Date) => upcoming.filter((event) => event.parsedDate.toDateString() === date.toDateString());
-  const selectedEvents = upcoming.filter((event) => event.parsedDate.toDateString() === selectedDate);
-  const moveMonth = (amount: number) => setVisibleMonth((month) => moveCalendarMonth(month, amount, calendarSystem));
-  return (
-    <div className="student-view">
-      <div className="student-calendar-legend">{(['Holiday', 'Exam', 'Ceremony', 'Fee due'] as EventKind[]).map((kind) => <StatusPill key={kind} label={kind} iconName={kind === 'Holiday' ? 'celebration' : kind === 'Exam' ? 'edit_note' : kind === 'Ceremony' ? 'emoji_events' : 'payments'} tone={eventTone(kind)} />)}</div>
-      <div className="student-calendar-layout">
-        <section className="student-card student-digital-calendar" aria-label="Academic month calendar">
-          <header><div><span className="student-eyebrow">ACADEMIC CALENDAR · {calendarSystem}</span><h2>{calendarMonthLabel(visibleMonth, calendarSystem)}</h2></div><div><CalendarSystemToggle value={calendarSystem} onChange={setCalendarSystem} /><button type="button" aria-label="Previous month" onClick={() => moveMonth(-1)}>{icon('chevron_left')}</button><button type="button" onClick={() => setVisibleMonth(today)}>Today</button><button type="button" aria-label="Next month" onClick={() => moveMonth(1)}>{icon('chevron_right')}</button></div></header>
-          <div className="student-calendar-weekdays" aria-hidden="true">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => <span key={day}>{day}</span>)}</div>
-          <div className="student-calendar-grid">{monthCells.map((date) => { const dayEvents = eventsForDay(date); const isOutside = !isInCalendarMonth(date, visibleMonth, calendarSystem); const isToday = date.toDateString() === today.toDateString(); const isSelected = date.toDateString() === selectedDate; return <button type="button" key={date.toISOString()} className={`${isOutside ? 'is-outside' : ''} ${isToday ? 'is-today' : ''} ${isSelected ? 'is-selected' : ''}`} aria-pressed={isSelected} aria-label={`${calendarDateLabel(date, calendarSystem)}${dayEvents.length ? `, ${dayEvents.length} event${dayEvents.length === 1 ? '' : 's'}` : ''}`} onClick={() => { setSelectedDate(date.toDateString()); if (isOutside) setVisibleMonth(date); }}><span>{calendarDayNumber(date, calendarSystem)}</span><i>{dayEvents.slice(0, 3).map((event) => <b key={event.id} className={`is-${eventTone(event.kind)}`} title={event.title} />)}</i></button>; })}</div>
-          <div className="student-selected-events"><h3>{calendarDateLabel(new Date(selectedDate), calendarSystem)}</h3>{selectedEvents.length ? selectedEvents.map((event) => <article key={event.id}><StatusPill label={event.kind} iconName="event" tone={eventTone(event.kind)} /><div><strong>{event.title}</strong><p>{event.details}</p></div></article>) : <p>No events scheduled for this date.</p>}</div>
-        </section>
-        <aside className="student-card student-upcoming-panel"><SectionHeader title="Upcoming events" description={`${upcoming.length} published ${calendarSystem} date${upcoming.length === 1 ? '' : 's'} ahead`} />{upcoming.length ? <div className="student-calendar-list">{upcoming.map((event) => { const bs = toBsParts(event.parsedDate); return <button type="button" key={event.id} onClick={() => { setVisibleMonth(event.parsedDate); setSelectedDate(event.parsedDate.toDateString()); }}><div className={`student-date-block is-${eventTone(event.kind)}`}><strong>{calendarDayNumber(event.parsedDate, calendarSystem)}</strong><span>{calendarSystem === 'AD' ? `${event.month} AD` : `${bs?.monthName} BS`}</span></div><div><StatusPill label={event.kind} iconName="event" tone={eventTone(event.kind)} /><h3>{event.title}</h3><p>{event.details}</p></div>{icon('chevron_right')}</button>; })}</div> : <EmptyState title="No upcoming events" message="Published academic and fee dates will appear here." iconName="date_range" />}</aside>
-      </div>
-    </div>
-  );
-}
-
+function CalendarView() { return <AcademicCalendarView viewerRole="Student" />; }
 function NotificationsView({ go, readIds, markAllRead, markRead }: { go: (view: StudentView) => void; readIds: Set<string>; markAllRead: () => void; markRead: (id: string) => void }) {
   const { notifications } = useStudentData();
   return (

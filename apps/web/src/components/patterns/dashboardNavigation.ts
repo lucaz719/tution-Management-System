@@ -75,6 +75,7 @@ export const DASHBOARD_NAVIGATION: Record<DashboardRole, DashboardNavItem[]> = {
     { section: 'Settings', label: 'Security', icon: 'security', path: '/branch/security' },
   ],
   teacher: [
+    { section: 'Overview', label: 'Academic Calendar', icon: 'date_range', path: '/teacher/calendar' },
     { section: 'Overview', label: 'Teacher Dashboard', icon: 'dashboard', path: '/teacher/dashboard' },
     { section: 'Overview', label: 'My Timetable', icon: 'calendar_view_week', path: '/teacher/timetable' },
     { section: 'Overview', label: 'Geo Attendance', icon: 'person_pin_circle', path: '/teacher/geo-attendance' },

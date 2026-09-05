@@ -1,3 +1,9 @@
+import { EventTargetFields } from '../components/calendar/EventTargetFields';
+import { academicEventsApi, type EventAudience } from '../services/api/academicEvents';
+import { NepalCalendar } from '../components/calendar/NepalCalendar';
+import { NepaliDatePicker } from '../components/calendar/NepaliDatePicker';
+import { nepalDateKey, nepalDateTimeInputToIso } from '../utils/nepalCalendar';
+import type { AcademicEvent, EventType } from '../services/api/academicEvents';
 import { useCallback, useEffect, useState, useMemo, useRef, type FormEvent, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
@@ -508,89 +514,59 @@ function FeeBillingView() {
 }
 function BranchCalendarView() {
   const action = useAction();
-  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [calendarSystem, setCalendarSystem] = useState<CalendarSystem>('AD');
-  const [showAddEvent, setShowAddEvent] = useState(false);
-  const [events, setEvents] = useState<Record<string, string>>({});
+  const [events, setEvents] = useState<AcademicEvent[]>([]);
   const [branchId, setBranchId] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-  
-  const [newEventDate, setNewEventDate] = useState('');
+  const [showAddEvent, setShowAddEvent] = useState(false);
+  const [newEventDate, setNewEventDate] = useState(nepalDateKey());
   const [newEventTitle, setNewEventTitle] = useState('');
-
+  const [eventType, setEventType] = useState<EventType>('EVENT');
+  const [audience, setAudience] = useState<EventAudience>('ALL');
+  const [classId, setClassId] = useState('');
+  const [description, setDescription] = useState('');
+  const formRef = useRef<HTMLDivElement>(null);
   const load = useCallback(async () => {
     setLoading(true); setLoadError('');
     try {
       const dashboard = await api.branchAdmin.getDashboard();
-      const response = await request<{ events: any[] }>(`/academic-events?branchId=${encodeURIComponent(dashboard.selectedBranch.id)}`);
-      setBranchId(dashboard.selectedBranch.id);
-      setEvents(Object.fromEntries(response.events
-        .filter((event: any) => !event.branchId || event.branchId === dashboard.selectedBranch.id)
-        .map((event: any) => [String(event.startDate).slice(0, 10), event.title])));
+      const id = dashboard.selectedBranch.id;
+      const response = await request<{ events: AcademicEvent[] }>(`/academic-events?branchId=${encodeURIComponent(id)}`);
+      setBranchId(id);
+      setEvents(response.events.filter((event) => !event.branchId || event.branchId === id));
     } catch (cause) { setLoadError(cause instanceof Error ? cause.message : 'Calendar events could not be loaded.'); }
     finally { setLoading(false); }
   }, []);
   useEffect(() => { void load(); }, [load]);
-
-  const submitEvent = (e: FormEvent) => {
-    e.preventDefault();
+  function openEvent(date: string) {
+    setNewEventDate(date); setShowAddEvent(true);
+    requestAnimationFrame(() => { formRef.current?.scrollIntoView({ block: 'center' }); formRef.current?.querySelector('input')?.focus({ preventScroll: true }); });
+  }
+  function submitEvent(event: FormEvent) {
+    event.preventDefault();
     void action.run(async () => {
-      await api.branchAdmin.createCalendarEvent({ branchId, title: newEventTitle, eventType: 'EVENT', startDate: newEventDate, endDate: newEventDate });
+      if (!newEventTitle.trim() || !newEventDate) throw new Error('Enter an event title and choose a date.');
+      await api.branchAdmin.createCalendarEvent({ branchId, title: newEventTitle.trim(), description, eventType, audience, classId: classId || undefined, startDate: nepalDateTimeInputToIso(`${newEventDate}T00:00`), endDate: nepalDateTimeInputToIso(`${newEventDate}T23:59`) });
+      setNewEventTitle(''); setDescription(''); setShowAddEvent(false);
       await load();
-      setShowAddEvent(false);
-      setNewEventDate('');
-      setNewEventTitle('');
-    }, 'Event added successfully.');
-  };
-  
-  return (
-    <Page title="Branch Academic Calendar" description="View and add upcoming events for this branch.">
-      <div style={{ display: 'flex', gap: '16px', flexDirection: 'column' }}>
-        <Card hoverable={false}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2 style={{ fontSize: '18px' }}>Calendar</h2>
-            <Button onClick={() => setShowAddEvent(!showAddEvent)}>
-              {showAddEvent ? 'Cancel' : 'Add Event'}
-            </Button>
-          </div>
-          
-          {showAddEvent && (
-            <div style={{ marginTop: '16px', padding: '16px', background: 'var(--color-surface)', border: '1px solid var(--border)', borderRadius: '8px' }}>
-              <h3 style={{ fontSize: '16px', marginBottom: '16px' }}>Add New Event</h3>
-              <form onSubmit={submitEvent} style={form} aria-busy={action.busy}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                  <label style={label}>Event Title<input required style={field} value={newEventTitle} onChange={e => setNewEventTitle(e.target.value)} placeholder="e.g. Science Fair" /></label>
-                  <label style={label}>Event Date<input type="date" required style={field} value={newEventDate} onChange={e => setNewEventDate(e.target.value)} /></label>
-                </div>
-                <Feedback message={action.message} error={loadError || action.error} />
-                <Button type="submit" disabled={action.busy || !branchId} style={{ width: 'fit-content' }}>
-                  {action.busy ? 'Saving...' : 'Save Event'}
-                </Button>
-              </form>
-            </div>
-          )}
-
-          {loading ? <p aria-busy="true" style={{ padding: 24, color: 'var(--text-muted)' }}>Loading academic calendar…</p> : loadError ? <div><Feedback message="" error={loadError} /><Button variant="outline" onClick={() => void load()}>Try again</Button></div> : <CalendarGrid onDateClick={setSelectedDate} events={events} calendarSystem={calendarSystem} onCalendarSystemChange={setCalendarSystem} />}
-        </Card>
-        {selectedDate && (
-          <Card hoverable={false}>
-            <h2 style={{ fontSize: '18px' }}>Events on {calendarDateLabel(selectedDate, calendarSystem)}</h2>
-            <div style={{ marginTop: '16px' }}>
-              {events[calendarDateKey(selectedDate)] ? (
-                <div style={{ padding: '12px', border: '1px solid var(--border)', borderRadius: '8px', borderLeft: '4px solid var(--color-primary)' }}>
-                  <div style={{ fontWeight: 600, fontSize: '14px' }}>{events[calendarDateKey(selectedDate)]}</div>
-                  <div style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '4px' }}>All Day Event</div>
-                </div>
-              ) : (
-                <p style={{ color: 'var(--text-muted)' }}>No events scheduled for this day.</p>
-              )}
-            </div>
-          </Card>
-        )}
-      </div>
-    </Page>
-  );
+    }, 'Branch event added successfully.');
+  }
+  return <Page title="Branch Academic Calendar" description="Select a day to review events or add a branch event. Dates use the Nepali calendar.">
+    <Feedback message={action.message} error={action.error} />
+    <NepalCalendar savingAudience={action.busy} canManageEvent={(event) => event.branchId === branchId} onAudienceChange={(event, audience) => { void action.run(async () => { await academicEventsApi.updateAudience(event.id, audience); await load(); }, 'Event audience updated.'); }} events={events} loading={loading} error={loadError || undefined} onRetry={() => void load()} onCreateEvent={branchId ? openEvent : undefined} />
+    {showAddEvent && <div ref={formRef} style={{ marginTop: 16 }}><Card hoverable={false}>
+      <h3>New branch event</h3>
+      <form onSubmit={submitEvent} style={{ ...form, marginTop: 16 }}>
+        <label style={label}>Event title<input style={field} value={newEventTitle} onChange={(event) => setNewEventTitle(event.target.value)} required /></label>
+        <EventTargetFields audience={audience} classId={classId} branchId={branchId} onAudienceChange={setAudience} onClassChange={setClassId} />
+        <NepaliDatePicker label="Event date (BS)" value={newEventDate} onChange={setNewEventDate} disabled={action.busy} />
+        <label style={label}>Event type<select style={field} value={eventType} onChange={(event) => setEventType(event.target.value as EventType)}><option value="EVENT">Event</option><option value="HOLIDAY">Holiday</option><option value="EXAM">Exam</option><option value="FEE_DUE">Fee due</option></select></label>
+        <label style={label}>Description<textarea style={field} value={description} onChange={(event) => setDescription(event.target.value)} /></label>
+        <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>This event covers the selected Nepal day and applies only to your branch.</p>
+        <div style={{ display: 'flex', gap: 8 }}><Button type="submit" disabled={action.busy || !branchId || !newEventDate}>{action.busy ? 'Saving...' : 'Save event'}</Button><Button type="button" variant="outline" disabled={action.busy} onClick={() => setShowAddEvent(false)}>Cancel</Button></div>
+      </form>
+    </Card></div>}
+  </Page>;
 }
 function ResourceTasks() {
   const action = useAction();

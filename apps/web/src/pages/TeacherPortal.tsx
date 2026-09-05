@@ -1,3 +1,4 @@
+import { AcademicCalendarView } from '../components/calendar/AcademicCalendarView';
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useToast } from '../components/ui/Toast';
@@ -9,6 +10,7 @@ import { toBsMonthRangeLabel, toDualDateLabel } from '../utils/nepaliDate';
 import '../features/teacher/teacherPortal.css';
 
 const VIEW_COPY: Record<TeacherView, [string, string]> = {
+  calendar: ['Academic calendar', 'Institution, branch, and assigned-class events in Nepal time.'],
   dashboard: ['Teacher dashboard', 'Your attendance, today’s timetable, and classroom priorities.'],
   timetable: ['My timetable', 'Every assigned class, branch, room, and teaching stream.'],
   'geo-attendance': ['Geo attendance', 'Location-verified Teacher attendance is planned for a future release.'],
@@ -259,6 +261,6 @@ export function TeacherPortal() {
   const load = async () => { setLoading(true); setError(''); try { setData(await api.teacher.getDashboard()); } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not load your teacher workspace.'); } finally { setLoading(false); } };
   useEffect(() => { void load(); }, []);
   const go = (next: TeacherView) => navigate(`/teacher/${next}`); const copy = VIEW_COPY[view];
-  const content = (() => { if (!data) return null; if (view === 'dashboard') return <Dashboard data={data} go={go} />; if (view === 'timetable') return <Timetable data={data} />; if (view === 'geo-attendance') return <GeoAttendance data={data} reload={load} />; if (view === 'attendance') return <Attendance data={data} reload={load} />; if (view === 'syllabus') return <TopicSyllabus data={data} reload={load} />; if (view === 'daily-update-log') return <TopicDailyUpdate data={data} reload={load} />; if (view === 'homework') return <Homework data={data} reload={load} />; if (view === 'results') return <AdminCreatedResults data={data} reload={load} />; if (view === 'profile') return <Profile data={data} />; if (view === 'leave-requests') return <Leave data={data} reload={load} />; if (view === 'security') return <SecurityView />; return <DetailedSalary data={data} />; })();
+  const content = (() => { if (!data) return null; if (view === 'calendar') return <AcademicCalendarView viewerRole="Teacher" />; if (view === 'dashboard') return <><Dashboard data={data} go={go} /><AcademicCalendarView viewerRole="Teacher" upcoming calendarPath="/teacher/calendar" /></>; if (view === 'timetable') return <Timetable data={data} />; if (view === 'geo-attendance') return <GeoAttendance data={data} reload={load} />; if (view === 'attendance') return <Attendance data={data} reload={load} />; if (view === 'syllabus') return <TopicSyllabus data={data} reload={load} />; if (view === 'daily-update-log') return <TopicDailyUpdate data={data} reload={load} />; if (view === 'homework') return <Homework data={data} reload={load} />; if (view === 'results') return <AdminCreatedResults data={data} reload={load} />; if (view === 'profile') return <Profile data={data} />; if (view === 'leave-requests') return <Leave data={data} reload={load} />; if (view === 'security') return <SecurityView />; return <DetailedSalary data={data} />; })();
   return <main className="teacher-portal"><header className="teacher-page-head"><div><span className="teacher-eyebrow">TEACHER WORKSPACE</span><h1>{copy[0]}</h1><p>{copy[1]}</p></div>{data ? <Status>Teacher portal</Status> : null}</header>{loading ? <div className="teacher-skeleton" aria-busy="true" aria-label="Loading teacher workspace"><i /><i /><i /></div> : error ? <div className="teacher-error" role="alert">{icon('cloud_off')}<div><strong>Couldn’t load the Teacher portal</strong><p>{error}</p></div><button type="button" onClick={() => void load()}>Try again</button></div> : content}</main>;
 }

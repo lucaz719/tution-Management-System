@@ -1,3 +1,4 @@
+import { AcademicCalendarView } from '../components/calendar/AcademicCalendarView';
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -26,8 +27,7 @@ import { api } from '../services/api';
 import { submitConnectIpsForm } from '../utils/connectips';
 import { ChangePasswordForm } from '../components/ChangePasswordForm';
 import { InvoiceDocumentDialog } from '../components/InvoiceDocument';
-import { calendarDateLabel, calendarDayNumber, calendarMonthCells, calendarMonthLabel, isInCalendarMonth, moveCalendarMonth, toBsParts, toDualDateLabel, type CalendarSystem } from '../utils/nepaliDate';
-import { CalendarSystemToggle } from '../components/CalendarSystemToggle';
+import { toDualDateLabel } from '../utils/nepaliDate';
 import { PaymentCheckoutDialog } from '../components/PaymentCheckoutDialog';
 import '../features/parent/parentPortal.css';
 
@@ -84,14 +84,14 @@ function SessionList({ compact = false }: { compact?: boolean }) {
 }
 
 function DashboardView({ child, go }: { child: ParentChild; go: (view: ParentView) => void }) {
-  const { appointments, events, leaves, remarks, sessions } = useParentData();
+  const { appointments, leaves, remarks, sessions } = useParentData();
   const today = new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date()).toUpperCase();
   return <div className="parent-view">
     {child.blocked ? <section className="parent-alert parent-alert--error">{icon('lock')}<div><strong>{child.name} is blocked due to fee dues</strong><p>{money(child.outstanding)} remains outstanding. Records remain visible.</p></div><button type="button" onClick={() => go('fees')}>View fees{icon('arrow_forward')}</button></section> : null}
     <section className="parent-hero"><div><span className="parent-eyebrow">{today}</span><h2>{child.name}’s day at a glance</h2><p>Timetable, attendance, fees, remarks, and events stay separate from every sibling.</p></div><div className="parent-hero__summary"><span>Attendance</span><strong>{child.attendanceRate}%</strong><small>{child.blocked ? `${money(child.outstanding)} due` : 'Fees up to date'}</small></div></section>
     <div className="parent-dashboard-grid"><section className="parent-card"><SectionHeader title="Today’s timetable" description={`${sessions.length} scheduled session${sessions.length === 1 ? '' : 's'}`} action="Full timetable" onAction={() => go('timetable')} /><SessionList compact /></section><aside className="parent-card"><SectionHeader title="Parent-visible remarks" description="Internal institution notes are excluded." action="View performance" onAction={() => go('performance')} />{remarks.length ? <div className="parent-remark-list">{remarks.slice(0, 2).map((remark) => <article key={remark.id}><ParentStatus label={remark.signal} tone={remark.signal === 'Improving' ? 'success' : remark.signal === 'Needs support' ? 'warning' : 'info'} iconName="insights" /><h3>{remark.subject}</h3><p>{remark.message}</p><small>{remark.author} · {remark.date}</small></article>)}</div> : <EmptyState title="No visible remarks" message="Published remarks and performance signals will appear here." iconName="visibility" />}</aside></div>
     <section className="parent-metrics" aria-label={`${child.name} summary`}><button type="button" onClick={() => go('attendance')}>{icon('fact_check')}<span><small>Attendance</small><strong>{child.attendanceRate}%</strong></span>{icon('arrow_forward')}</button><button type="button" onClick={() => go('fees')}>{icon('payments')}<span><small>Outstanding</small><strong>{money(child.outstanding)}</strong></span>{icon('arrow_forward')}</button><button type="button" onClick={() => go('appointments')}>{icon('event')}<span><small>Appointments</small><strong>{appointments.length}</strong></span>{icon('arrow_forward')}</button><button type="button" onClick={() => go('leave')}>{icon('event_available')}<span><small>Leave records</small><strong>{leaves.length}</strong></span>{icon('arrow_forward')}</button></section>
-    <section className="parent-card"><SectionHeader title="Upcoming events" description={`Dates relevant to ${child.name}.`} action="Open calendar" onAction={() => go('calendar')} />{events.length ? <div className="parent-event-strip">{events.slice(0, 3).map((event) => <article key={event.id}><div><strong>{event.day}</strong><span>{event.month}</span></div><span><b>{event.title}</b><small>{event.kind}</small></span></article>)}</div> : <EmptyState title="No upcoming events" message="Published dates will appear here." iconName="event" />}</section>
+    <AcademicCalendarView viewerRole="Parent" key={child.id} studentId={child.id} upcoming calendarPath={`/parent/calendar?child=${encodeURIComponent(child.id)}`} />
   </div>;
 }
 
@@ -222,30 +222,7 @@ function CertificatesView({ child }: { child: ParentChild }) {
   const { certificates } = useParentData();
   return <div className="parent-view"><div className="parent-privacy-note">{icon('verified')}<span><strong>Certificates remain available.</strong> Issued documents do not expire from {child.name}’s history.</span></div><section className="parent-card"><SectionHeader title="Certificate history" description={`${certificates.length} issued document${certificates.length === 1 ? '' : 's'} for ${child.name}`} />{certificates.length ? <div className="parent-certificate-list">{certificates.map((certificate) => <article key={certificate.id}><span className="parent-icon-box">{icon('workspace_premium')}</span><div><h3>{certificate.title}</h3><p>{certificate.course} · Issued {certificate.issuedDate}</p><small>{certificate.id}</small></div><span className="parent-certificate-actions">{certificate.htmlUrl ? <a className="parent-text-button" href={parentFileUrl(certificate.htmlUrl)} target="_blank" rel="noreferrer">{icon('code')}View HTML</a> : null}{certificate.pdfUrl ? <a className="parent-text-button" href={parentFileUrl(certificate.pdfUrl)}>{icon('download')}Download PDF</a> : <button type="button" disabled>PDF unavailable</button>}</span></article>)}</div> : <EmptyState title="No certificates issued" message="New documents remain here after issuance." iconName="workspace_premium" />}</section></div>;
 }
-function CalendarView({ child }: { child: ParentChild }) {
-  const { events } = useParentData();
-  const [calendarSystem, setCalendarSystem] = useState<CalendarSystem>('AD');
-  const today = useMemo(() => { const date = new Date(); date.setHours(0, 0, 0, 0); return date; }, []);
-  const datedEvents = useMemo(() => events.map((event) => { const date = new Date(event.date); date.setHours(0, 0, 0, 0); return { ...event, parsedDate: date }; }).filter((event) => !Number.isNaN(event.parsedDate.getTime())).sort((a, b) => a.parsedDate.getTime() - b.parsedDate.getTime()), [events]);
-  const firstEvent = datedEvents.find((event) => event.parsedDate >= today)?.parsedDate ?? today;
-  const [visibleMonth, setVisibleMonth] = useState(firstEvent);
-  const [selectedDate, setSelectedDate] = useState(firstEvent);
-  const cells = useMemo(() => calendarMonthCells(visibleMonth, calendarSystem), [visibleMonth, calendarSystem]);
-  const eventsForDate = (date: Date) => datedEvents.filter((event) => event.parsedDate.toDateString() === date.toDateString());
-  const selectedEvents = eventsForDate(selectedDate);
-  const selectDate = (date: Date) => { setSelectedDate(date); if (!isInCalendarMonth(date, visibleMonth, calendarSystem)) setVisibleMonth(date); };
-  const eventTone = (kind: string): ParentTone => kind === 'Holiday' ? 'success' : kind === 'Exam' ? 'error' : kind === 'Fee due' ? 'warning' : 'info';
-  return <div className="parent-view">
-    <section className="parent-card parent-academic-calendar">
-      <div className="parent-calendar-heading"><SectionHeader title={`${child.name}’s academic calendar`} description={`School events displayed in ${calendarSystem}. Switching calendars does not change the events.`} /><CalendarSystemToggle value={calendarSystem} onChange={setCalendarSystem} /></div>
-      <div className="parent-calendar-toolbar"><h3>{calendarMonthLabel(visibleMonth, calendarSystem)}</h3><div><button type="button" aria-label={`Previous ${calendarSystem} month`} onClick={() => setVisibleMonth((month) => moveCalendarMonth(month, -1, calendarSystem))}>{icon('chevron_left')}</button><button type="button" onClick={() => { setVisibleMonth(today); setSelectedDate(today); }}>Today</button><button type="button" aria-label={`Next ${calendarSystem} month`} onClick={() => setVisibleMonth((month) => moveCalendarMonth(month, 1, calendarSystem))}>{icon('chevron_right')}</button></div></div>
-      <div className="parent-calendar-layout"><div className="parent-calendar-grid-wrap"><div className="parent-calendar-weekdays" aria-hidden="true">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => <span key={day}>{day}</span>)}</div><div className="parent-calendar-grid" role="grid" aria-label={calendarMonthLabel(visibleMonth, calendarSystem)}>{cells.map((date) => { const dayEvents = eventsForDate(date); const outside = !isInCalendarMonth(date, visibleMonth, calendarSystem); const selected = date.toDateString() === selectedDate.toDateString(); const current = date.toDateString() === today.toDateString(); return <button type="button" role="gridcell" key={date.toISOString()} className={`${outside ? 'is-outside' : ''} ${selected ? 'is-selected' : ''} ${current ? 'is-today' : ''}`} aria-selected={selected} aria-label={`${calendarDateLabel(date, calendarSystem)}${dayEvents.length ? `, ${dayEvents.length} event${dayEvents.length === 1 ? '' : 's'}` : ''}`} onClick={() => selectDate(date)}><span>{calendarDayNumber(date, calendarSystem)}</span>{dayEvents.length ? <i aria-hidden="true">{dayEvents.slice(0, 3).map((event) => <b key={event.id} data-kind={event.kind} />)}</i> : null}</button>; })}</div></div>
-        <aside className="parent-calendar-selected" aria-live="polite"><span>Selected date</span><h3>{calendarDateLabel(selectedDate, calendarSystem)}</h3>{selectedEvents.length ? <div>{selectedEvents.map((event) => <article key={event.id}><ParentStatus label={event.kind} tone={eventTone(event.kind)} iconName="event" /><h4>{event.title}</h4><p>{event.details}</p></article>)}</div> : <EmptyState title="No events on this date" message="Choose a marked date to see its details." iconName="event_available" />}</aside>
-      </div>
-    </section>
-    <section className="parent-card"><SectionHeader title="Upcoming events" description={`${datedEvents.length} published event${datedEvents.length === 1 ? '' : 's'}`} />{datedEvents.length ? <div className="parent-calendar-list">{datedEvents.map((event) => { const bs = toBsParts(event.parsedDate); return <button type="button" key={event.id} onClick={() => selectDate(event.parsedDate)}><div><strong>{calendarDayNumber(event.parsedDate, calendarSystem)}</strong><span>{calendarSystem === 'AD' ? `${event.month} AD` : `${bs?.monthName} BS`}</span></div><div><ParentStatus label={event.kind} tone={eventTone(event.kind)} iconName="event" /><h3>{event.title}</h3><p>{event.details}</p></div><time dateTime={event.date}>{calendarDateLabel(event.parsedDate, calendarSystem, false)}</time>{icon('chevron_right')}</button>; })}</div> : <EmptyState title="No upcoming events" message="Published academic and fee dates will appear here." iconName="date_range" />}</section>
-  </div>;
-}
+function CalendarView({ child }: { child: ParentChild }) { return <div className="parent-view"><AcademicCalendarView viewerRole="Parent" studentId={child.id} /></div>; }
 function NotificationsView({ child, go, readIds, storeRead }: { child: ParentChild; go: (view: ParentView) => void; readIds: Set<string>; storeRead: (ids: Set<string>) => void }) {
   const { notifications } = useParentData();
   return <div className="parent-view"><div className="parent-notification-actions"><p>SMS is reserved for fee, appointment, attendance-summary, and urgent events.</p><button type="button" disabled={!notifications.length} onClick={() => storeRead(new Set(notifications.map((notice) => notice.id)))}>Mark all as read</button></div>{notifications.length ? <section className="parent-card parent-notification-list">{notifications.map((notice) => <button type="button" key={notice.id} className={`${readIds.has(notice.id) ? '' : 'is-unread'} ${notice.urgent ? 'is-urgent' : ''}`} onClick={() => { storeRead(new Set(readIds).add(notice.id)); go(notice.destination); }}><i aria-hidden="true" /><span className="parent-icon-box">{icon(notice.icon)}</span><span><strong>{notice.title}</strong><small>{notice.message}</small><time dateTime={notice.occurredAt}>{notice.time}</time><span className="parent-channel-row">{notice.channels.map((channel) => <b key={channel}>{channel}</b>)}</span></span>{icon('chevron_right')}</button>)}</section> : <EmptyState title="All caught up" message={`No notifications for ${child.name}.`} iconName="notifications" />}</div>;
@@ -276,7 +253,7 @@ export function ParentStudentPortal() {
     catch { setReadIds(new Set()); }
   }, [activeChildId]);
   if (loadError) return <div className="parent-portal"><div className="parent-unavailable" role="alert">{icon('cloud_off')}<div><strong>Couldn’t load the parent portal</strong><p>{loadError}</p><button type="button" onClick={() => setReloadKey((value) => value + 1)}>Try again</button></div></div></div>;
-  if (!data) return <div className="parent-portal parent-loading" aria-busy="true" aria-label="Loading parent portal"><div /><div /><div /></div>;
+  if (!data || (requestedChildId && data.selected?.id !== requestedChildId)) return <div className="parent-portal parent-loading" aria-busy="true" aria-label="Loading parent portal"><div /><div /><div /></div>;
   if (!data.selected) return <div className="parent-portal"><EmptyState title="No linked students" message="Ask the institution to link your child to this parent account." iconName="family_restroom" /></div>;
   const child = data.selected;
   const [title, subtitle] = VIEW_COPY[view];

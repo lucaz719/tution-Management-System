@@ -550,6 +550,7 @@ model Course {
 
 // 11. Class / Timetable Instance
 model Class {
+  academicEvents    AcademicEvent[]
   id                String              @id @default(uuid())
   courseId          String
   course            Course              @relation(fields: [courseId], references: [id])
@@ -955,6 +956,10 @@ enum EventType {
 }
 
 model AcademicEvent {
+  audience    String    @default("STAFF")
+  classId     String?
+  class       Class?    @relation(fields: [classId], references: [id], onDelete: Restrict)
+  @@index([tenantId, branchId, classId])
   id          String    @id @default(uuid())
   tenantId    String
   tenant      Tenant    @relation(fields: [tenantId], references: [id])

@@ -1,3 +1,4 @@
+import { calendarAccessWhere } from '../services/calendar-access';
 import { Router, Response } from 'express';
 import prisma from '../utils/db';
 import bcrypt from 'bcryptjs';
@@ -600,10 +601,7 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
     const branchIds = Array.from(new Set(student.enrollments.map((enrollment) => enrollment.class.branchId)));
     const [calendarRows, leaveRows, scoreRows] = await Promise.all([
       prisma.academicEvent.findMany({
-        where: {
-          tenantId: req.tenantId!,
-          OR: [{ branchId: null }, ...(branchIds.length ? [{ branchId: { in: branchIds } }] : [])],
-        },
+        where: await calendarAccessWhere(req.user!, req.tenantId!, { viewerRole: 'Student' }),
         orderBy: { startDate: 'asc' },
         take: 100,
       }),

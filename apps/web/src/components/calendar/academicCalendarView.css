@@ -1,0 +1,10 @@
+.academic-upcoming { margin-block: var(--sp-4); padding: var(--sp-4); background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); }
+.academic-upcoming header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-3); }
+.academic-upcoming h3 { font: 600 18px var(--font-ui); }
+.academic-upcoming a { color: var(--color-primary); display: inline-flex; align-items: center; min-height: 44px; }
+.academic-upcoming article { padding-block: var(--sp-3); border-top: 1px solid var(--border); }
+.academic-upcoming p, .academic-upcoming small { color: var(--text-muted); font-size: 13px; line-height: 1.6; }
+.event-target-field { display: grid; gap: var(--sp-2); font-size: 13px; font-weight: 600; }
+.event-target-field select { min-width: 0; min-height: 44px; padding: var(--sp-2); font: inherit; color: var(--color-text); background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.event-target-field select:focus-visible, .academic-upcoming a:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+[data-theme='dark'] .academic-upcoming a { color: var(--brand); }

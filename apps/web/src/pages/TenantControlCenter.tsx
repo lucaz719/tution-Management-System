@@ -1,10 +1,14 @@
+import { NepaliDateTimeField } from '../components/calendar/NepaliDateTimeField';
+import { EventTargetFields, AUDIENCE_LABELS } from '../components/calendar/EventTargetFields';
+import { academicEventsApi, type AcademicEvent, type EventAudience, type EventType } from '../services/api/academicEvents';
+import { englishDateLabel, nepalDateKey, nepalDateTimeInputToIso, nepaliDateHeading, NEPAL_TIME_ZONE } from '../utils/nepalCalendar';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { useToast } from '../components/ui/Toast';
 import { api } from '../services/api';
-import { calendarDateLabel, type CalendarSystem } from '../utils/nepaliDate';
+import { type CalendarSystem } from '../utils/nepaliDate';
 import { CalendarSystemToggle } from '../components/CalendarSystemToggle';
 
 type Tab = 'policies' | 'approvals' | 'finance' | 'calendar' | 'hr';
@@ -46,7 +50,7 @@ function downloadCsv(entries: any[]) {
 export function TenantControlCenter() {
   const { showToast } = useToast();
   const [tab, setTab] = useState<Tab>('policies');
-  const [calendarSystem, setCalendarSystem] = useState<CalendarSystem>('AD');
+  const [calendarSystem, setCalendarSystem] = useState<CalendarSystem>('BS');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [config, setConfig] = useState<any>(null);
@@ -55,9 +59,10 @@ export function TenantControlCenter() {
   const [remarks, setRemarks] = useState<Record<string, string>>({});
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [suggestions, setSuggestions] = useState<FinancialSuggestions | null>(null);
-  const [events, setEvents] = useState<any[]>([]);
+  const [events, setEvents] = useState<AcademicEvent[]>([]);
+  const [publishing, setPublishing] = useState(false);
   const [alerts, setAlerts] = useState<any[]>([]);
-  const [eventForm, setEventForm] = useState({ title: '', description: '', eventType: 'HOLIDAY', startDate: '', endDate: '' });
+  const [eventForm, setEventForm] = useState({ title: '', description: '', eventType: 'HOLIDAY' as EventType, audience: 'ALL' as EventAudience, classId: '', startDate: '', endDate: '' });
   const weightTotal = useMemo(() => Object.values(weights).reduce((sum, value) => sum + Number(value || 0), 0), [weights]);
 
   const load = async () => {
@@ -127,19 +132,28 @@ export function TenantControlCenter() {
 
   const publishEvent = async (event: FormEvent) => {
     event.preventDefault();
-    if (!eventForm.title || !eventForm.startDate || !eventForm.endDate) return;
+    if (publishing) return;
+    setPublishing(true);
     try {
-      await api.tenant.publishCalendarEvent({
+      if (!eventForm.title.trim() || !eventForm.startDate.split('T')[0] || !eventForm.endDate.split('T')[0]) throw new Error('Enter a title and choose both Nepali dates.');
+      const startDate = nepalDateTimeInputToIso(eventForm.startDate);
+      const endDate = nepalDateTimeInputToIso(eventForm.endDate);
+      if (endDate < startDate) throw new Error('End must be on or after the start date and time.');
+      await academicEventsApi.createTenantWide({
         ...eventForm,
-        startDate: new Date(eventForm.startDate).toISOString(),
-        endDate: new Date(eventForm.endDate).toISOString(),
+        title: eventForm.title.trim(),
+        classId: eventForm.classId || null,
+        startDate,
+        endDate,
       });
-      showToast('Institution event published read-only to every branch.', 'success');
-      setEventForm({ title: '', description: '', eventType: 'HOLIDAY', startDate: '', endDate: '' });
+      showToast('Event published to the selected audience.', 'success');
+      setEventForm({ title: '', description: '', eventType: 'HOLIDAY', audience: 'ALL', classId: '', startDate: '', endDate: '' });
       await load();
       setTab('calendar');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Event could not be published.', 'error');
+    } finally {
+      setPublishing(false);
     }
   };
 
@@ -264,13 +278,14 @@ export function TenantControlCenter() {
       {tab === 'calendar' ? <div style={grid}>
         <Card hoverable={false}><h3>Publish institution event</h3><form onSubmit={(e) => void publishEvent(e)} style={{ display: 'grid', gap: 12, marginTop: 14 }}>
           <label style={label}>Title<input style={input} value={eventForm.title} onChange={(e) => setEventForm((old) => ({ ...old, title: e.target.value }))} required /></label>
-          <label style={label}>Type<select style={input} value={eventForm.eventType} onChange={(e) => setEventForm((old) => ({ ...old, eventType: e.target.value }))}><option value="HOLIDAY">Holiday</option><option value="EXAM">Exam</option><option value="EVENT">Event</option><option value="FEE_DUE">Fee deadline</option></select></label>
-          <label style={label}>Starts<input style={input} type="datetime-local" value={eventForm.startDate} onChange={(e) => setEventForm((old) => ({ ...old, startDate: e.target.value }))} required /></label>
-          <label style={label}>Ends<input style={input} type="datetime-local" value={eventForm.endDate} onChange={(e) => setEventForm((old) => ({ ...old, endDate: e.target.value }))} required /></label>
+          <label style={label}>Type<select style={input} value={eventForm.eventType} onChange={(e) => setEventForm((old) => ({ ...old, eventType: e.target.value as EventType }))}><option value="HOLIDAY">Holiday</option><option value="EXAM">Exam</option><option value="EVENT">Event</option><option value="FEE_DUE">Fee deadline</option></select></label>
+          <EventTargetFields audience={eventForm.audience} classId={eventForm.classId} onAudienceChange={(audience) => setEventForm((old) => ({ ...old, audience }))} onClassChange={(classId) => setEventForm((old) => ({ ...old, classId }))} />
+          <NepaliDateTimeField label="Starts" value={eventForm.startDate} onChange={(startDate) => setEventForm((old) => ({ ...old, startDate }))} />
+          <NepaliDateTimeField label="Ends" value={eventForm.endDate} onChange={(endDate) => setEventForm((old) => ({ ...old, endDate }))} />
           <label style={label}>Description<textarea style={input} value={eventForm.description} onChange={(e) => setEventForm((old) => ({ ...old, description: e.target.value }))} /></label>
-          <Button type="submit">Publish to every branch</Button>
+          <Button type="submit" disabled={publishing} aria-busy={publishing}>{publishing ? 'Publishing...' : 'Publish event'}</Button>
         </form></Card>
-        <Card hoverable={false}><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}><h3>Institution calendar</h3><CalendarSystemToggle value={calendarSystem} onChange={setCalendarSystem} /></div>{events.map((item) => <div key={item.id} style={{ borderTop: '1px solid #E8EDF3', padding: '12px 0' }}><strong>{item.title}</strong><p style={{ fontSize: 12, color: 'var(--text-muted)' }}>{calendarDateLabel(new Date(item.startDate), calendarSystem, false)} · {new Date(item.startDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {item.eventType}</p>{!item.branchId ? <StatusBadge variant="info">Read-only institution event</StatusBadge> : null}</div>)}</Card>
+        <Card hoverable={false}><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}><h3>Institution calendar</h3><CalendarSystemToggle value={calendarSystem} onChange={setCalendarSystem} /></div>{events.map((item) => <div key={item.id} style={{ borderTop: '1px solid #E8EDF3', padding: '12px 0' }}><strong>{item.title}</strong><p style={{ fontSize: 12, color: 'var(--text-muted)' }}>{calendarSystem === 'BS' ? nepaliDateHeading(nepalDateKey(item.startDate)) : englishDateLabel(nepalDateKey(item.startDate))} · {new Date(item.startDate).toLocaleTimeString([], { timeZone: NEPAL_TIME_ZONE, hour: '2-digit', minute: '2-digit' }) + ' NPT'} · {item.eventType} / {AUDIENCE_LABELS[item.audience ?? 'STAFF']}</p>{!item.branchId ? <StatusBadge variant="info">Read-only institution event</StatusBadge> : null}</div>)}</Card>
       </div> : null}
 
       {tab === 'hr' ? <Card hoverable={false}><h3>Contracts & documents expiring within 30 days</h3>

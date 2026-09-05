@@ -62,6 +62,9 @@ jobs:
       - name: Authorization scope tests
         run: npm run test:access --workspace=@tms/api
 
+      - name: Academic calendar access tests
+        run: npm run test:calendar --workspace=@tms/api
+
       - name: API unit and configuration tests
         run: |
           npm run test:runtime-config --workspace=@tms/api

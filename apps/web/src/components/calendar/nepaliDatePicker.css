@@ -1,0 +1,17 @@
+.nepali-date-picker { min-width: 0; display: grid; gap: var(--sp-2); }
+.nepali-date-picker__label { font-size: 13px; font-weight: 700; color: var(--color-text); }
+.nepali-date-picker__trigger { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); width: 100%; min-height: 48px; padding: var(--sp-3); text-align: left; background: var(--bg-card); color: var(--color-text); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; font: inherit; font-size: 13px; }
+.nepali-date-picker__trigger strong, .nepali-date-picker__trigger small { display: block; }
+.nepali-date-picker__trigger small { color: var(--text-muted); margin-top: var(--sp-1); }
+.nepali-date-picker__dialog { margin: auto; padding: 0; width: min(560px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--color-bg); color: var(--color-text); }
+.nepali-date-picker__dialog::backdrop { background: rgb(0 0 0 / 45%); }
+.nepali-date-picker__header { display: flex; align-items: center; justify-content: space-between; padding: var(--sp-3) var(--sp-4); }
+.nepali-date-picker__header button, .nepal-calendar__create { min-height: 44px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); cursor: pointer; font: inherit; }
+.nepali-date-picker button:focus-visible, .nepal-calendar__create:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -3px; }
+.nepali-date-picker__dialog .nepal-calendar { border: 0; }
+.nepali-date-picker__dialog .nepal-calendar__legend, .nepali-date-picker__dialog .nepal-calendar__annotations, .nepali-date-picker__dialog .nepal-calendar__day-footer { display: none; }
+.nepali-date-picker__dialog .nepal-calendar__cell button { height: 64px; padding: 4px; }
+.nepali-date-picker__dialog .nepal-calendar__number { font-size: 22px; }
+.nepali-date-picker__dialog .nepal-calendar__grid { padding: 0 var(--sp-3) var(--sp-3); }
+.nepali-date-picker__dialog .nepal-calendar__toolbar { padding: var(--sp-3); }
+.nepal-calendar__create { margin-bottom: var(--sp-3); color: var(--color-primary); font-weight: 600; }
