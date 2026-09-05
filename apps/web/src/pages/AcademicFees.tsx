@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../components/ui/Button';
+import { InvoiceDocumentDialog, type InvoiceDocumentData } from '../components/InvoiceDocument';
 import { KPICard } from '../components/ui/KPICard';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { useToast } from '../components/ui/Toast';
@@ -32,7 +33,19 @@ interface Overview {
 
 interface Invoice {
   id: string;
-  invoiceType: string;
+  invoiceType: 'ADMISSION' | 'TUITION' | 'SUBJECT' | 'ACTIVITY';
+  institutionName: string;
+  panNumber: string;
+  vatRate: number;
+  studentName: string;
+  admissionNumber: string | null;
+  gradeName: string | null;
+  branchName: string | null;
+  issuedAt: string;
+  transactionId: string | null;
+  lines: Array<{ label: string; amount: number }>;
+  discount: number;
+  fine: number;
   netPayable: number;
   status: string;
   overdue: boolean;
@@ -85,6 +98,7 @@ export function AcademicFees({ canRetryAdmissionLogins = true }: { canRetryAdmis
   const [isRetryingDelivery, setIsRetryingDelivery] = useState(false);
   const [qrModal, setQrModal] = useState<{ id: string; studentName: string; amount: number; month: string; qrString: string; dataUrl: string } | null>(null);
   const [qrLoadingId, setQrLoadingId] = useState('');
+  const [invoiceDocument, setInvoiceDocument] = useState<InvoiceDocumentData | null>(null);
   const drawerRef = useRef<HTMLElement>(null);
   const drawerBodyRef = useRef<HTMLDivElement>(null);
   const paymentDialogRef = useRef<HTMLDialogElement>(null);
@@ -104,19 +118,43 @@ export function AcademicFees({ canRetryAdmissionLogins = true }: { canRetryAdmis
   const loadData = async () => {
     setIsLoading(true);
     setErrorMsg('');
-    try {
-      const [ov, list] = await Promise.all([api.finances.getOverview(), api.finances.getStudentFees()]);
-      setOverview(ov);
-      setStudents(list as StudentFee[]);
-    } catch (error: unknown) {
-      setErrorMsg(error instanceof Error ? error.message : 'Failed to load fees.');
-    } finally {
-      setIsLoading(false);
+    const [overviewResult, studentsResult] = await Promise.allSettled([
+      api.finances.getOverview(),
+      api.finances.getStudentFees(),
+    ]);
+    if (studentsResult.status === 'fulfilled') {
+      const list = studentsResult.value as StudentFee[];
+      setStudents(list);
+      setOverview(overviewResult.status === 'fulfilled' ? overviewResult.value : {
+        collected: list.reduce((sum, student) => sum + student.totalPaid, 0),
+        outstanding: list.reduce((sum, student) => sum + student.totalDue, 0),
+        overdueAmount: list.reduce((sum, student) => sum + student.overdueAmount, 0),
+        overdueStudents: list.filter((student) => student.overdueAmount > 0).length,
+        invoiceCount: list.reduce((sum, student) => sum + student.invoiceCount, 0),
+        billingPeriod: '',
+      });
+    } else {
+      setStudents([]);
+      setOverview(null);
+      const cause = studentsResult.reason;
+      setErrorMsg(cause instanceof Error ? cause.message : 'Fee records are temporarily unavailable.');
     }
+    setIsLoading(false);
   };
 
   useEffect(() => {
     void loadData();
+  }, []);
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === 'visible') void loadData(); };
+    const interval = window.setInterval(refresh, 30_000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
   }, []);
 
   const filtered = useMemo(() => {
@@ -294,7 +332,7 @@ export function AcademicFees({ canRetryAdmissionLogins = true }: { canRetryAdmis
         <div>
           <h1 className="people-title">Fee &amp; Billing</h1>
           <p className="people-subtitle">
-            Collections, dues, and payments{overview ? ` · billing cycle ${overview.billingPeriod} BS` : ''}.
+            Collections, dues, and payments{overview?.billingPeriod ? ` · billing cycle ${overview.billingPeriod} BS` : ''}.
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -304,12 +342,10 @@ export function AcademicFees({ canRetryAdmissionLogins = true }: { canRetryAdmis
           </Button>
           <Button onClick={() => void runBilling()} disabled={isGenerating} style={{ height: '42px' }}>
             <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>receipt_long</span>
-            {isGenerating ? 'Generating…' : `Generate ${overview?.billingPeriod ?? ''} Invoices`}
+            {isGenerating ? 'Generating…' : overview?.billingPeriod ? `Generate ${overview.billingPeriod} Invoices` : 'Generate Invoices'}
           </Button>
         </div>
       </div>
-
-      {errorMsg ? <StatusBadge variant="error">{errorMsg}</StatusBadge> : null}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '18px' }}>
         <KPICard title="Collected" value={overview ? money(overview.collected) : '—'} delta="Paid invoices" icon="paid" accentColor="var(--color-success)" loading={isLoading} />
@@ -349,7 +385,7 @@ export function AcademicFees({ canRetryAdmissionLogins = true }: { canRetryAdmis
                   <td colSpan={6}>
                     <div className="people-empty">
                       <span className="material-symbols-outlined">payments</span>
-                      {isLoading ? 'Loading fees…' : students.length === 0 ? 'No students with fee records yet.' : 'No students match your filter.'}
+                      {isLoading ? 'Loading fees…' : errorMsg ? <><span>Fee records could not load.</span><Button variant="outline" onClick={() => void loadData()}>Try again</Button></> : students.length === 0 ? 'No students with fee records yet.' : 'No students match your filter.'}
                     </div>
                   </td>
                 </tr>
@@ -498,8 +534,12 @@ export function AcademicFees({ canRetryAdmissionLogins = true }: { canRetryAdmis
                           <span><b>Due {toBsLabel(inv.dueDate)}</b><small>{adDate(inv.dueDate)} AD{inv.paymentDate ? ` · paid ${adDate(inv.paymentDate)} AD` : ''}</small></span>
                           }
                         </div>
-                        {inv.status !== 'PAID' ? (
-                          <footer className="fee-invoice-actions">
+                        <footer className="fee-invoice-actions">
+                          <Button variant="outline" onClick={() => setInvoiceDocument(inv)}>
+                            <span className="material-symbols-outlined" aria-hidden="true">receipt_long</span>
+                            {inv.status === 'PAID' ? 'View receipt' : 'View bill'}
+                          </Button>
+                          {inv.status !== 'PAID' ? <>
                             <Button variant="outline" onClick={() => void openQr(inv)} disabled={qrLoadingId === inv.id}>
                               <span className="material-symbols-outlined" aria-hidden="true">qr_code_scanner</span>
                               {qrLoadingId === inv.id ? 'Generating…' : 'Payment QR'}
@@ -507,8 +547,8 @@ export function AcademicFees({ canRetryAdmissionLogins = true }: { canRetryAdmis
                             <Button onClick={() => openPaymentConfirmation(inv)} disabled={Boolean(payingId)}>
                               Record payment
                             </Button>
-                          </footer>
-                        ) : null}
+                          </> : null}
+                        </footer>
                       </article>
                     ))}</div>}
                   </section>
@@ -634,6 +674,7 @@ export function AcademicFees({ canRetryAdmissionLogins = true }: { canRetryAdmis
           </div>
         </>
       ) : null}
+      {invoiceDocument ? <InvoiceDocumentDialog data={invoiceDocument} onClose={() => setInvoiceDocument(null)} /> : null}
     </div>
   );
 }
