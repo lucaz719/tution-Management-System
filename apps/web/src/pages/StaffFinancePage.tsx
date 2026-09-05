@@ -3,12 +3,14 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { PageShell } from '../components/patterns/PageShell';
 import { ChangePasswordForm } from '../components/ChangePasswordForm';
 import { SharedBillingWorkspace } from '../components/finance/SharedBillingWorkspace';
+import { TenantPaymentsPage } from './TenantPaymentsPage';
+import { AcademicFees } from './AcademicFees';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../context/AuthContext';
 import { api, type AccountantWorkspace } from '../services/api';
 import './staffFinance.css';
 
-type Tab = 'overview' | 'petty-cash' | 'billing' | 'reports' | 'security';
+type Tab = 'overview' | 'petty-cash' | 'billing' | 'ledger' | 'payments' | 'reports' | 'security';
 type PettyCash = AccountantWorkspace['pettyCash'][number];
 type Invoice = AccountantWorkspace['invoices'][number];
 type CashDialog = 'new' | PettyCash | null;
@@ -25,7 +27,9 @@ const createCashLine = (item?: PettyCash['items'][number]): CashLine => ({
 const accountantNavItems = [
   { section: 'FINANCE' as const, label: 'Overview', icon: 'space_dashboard', path: '/staff/finance#overview' },
   { section: 'FINANCE' as const, label: 'Petty cash', icon: 'account_balance_wallet', path: '/staff/finance#petty-cash' },
-  { section: 'FINANCE' as const, label: 'Billing & invoices', icon: 'receipt_long', path: '/staff/finance#billing' },
+  { section: 'FINANCE' as const, label: 'Fee & billing', icon: 'payments', path: '/staff/finance#billing' },
+  { section: 'FINANCE' as const, label: 'Invoice & payroll ledger', icon: 'receipt_long', path: '/staff/finance#ledger' },
+  { section: 'FINANCE' as const, label: 'Payment requests', icon: 'fact_check', path: '/staff/finance#payments' },
   { section: 'FINANCE' as const, label: 'Reports', icon: 'analytics', path: '/staff/finance#reports' },
   { section: 'SETTINGS' as const, label: 'Security', icon: 'security', path: '/staff/finance#security' },
 ];
@@ -110,8 +114,8 @@ export function StaffFinancePage() {
   const [cashError, setCashError] = useState('');
   const [receiptUrl, setReceiptUrl] = useState('');
   const [reference, setReference] = useState('');
-  const loadWorkspace = useCallback(async () => {
-    setLoading(true);
+  const loadWorkspace = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     setLoadError('');
     try {
       const data = await api.finances.getAccountantWorkspace();
@@ -121,14 +125,25 @@ export function StaffFinancePage() {
       setWorkspace(null);
       setLoadError(error instanceof Error ? error.message : 'Unable to load branch finance records.');
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   }, []);
 
   useEffect(() => { void loadWorkspace(); }, [loadWorkspace]);
   useEffect(() => {
+    const refresh = () => { if (document.visibilityState === 'visible') void loadWorkspace(true); };
+    const interval = window.setInterval(refresh, 30_000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [loadWorkspace]);
+  useEffect(() => {
     const section = location.hash.slice(1);
-    if (['overview', 'petty-cash', 'billing', 'reports', 'security'].includes(section)) setTab(section as Tab);
+    if (['overview', 'petty-cash', 'billing', 'ledger', 'payments', 'reports', 'security'].includes(section)) setTab(section as Tab);
   }, [location.hash]);
 
   const cap = workspace?.pettyCashCap ?? 0;
@@ -218,18 +233,20 @@ export function StaffFinancePage() {
   const body = loading ? <section className="accountant-panel"><EmptyState title="Loading finance workspace" description="Fetching current branch records and permissions." /></section>
     : loadError ? <section className="accountant-panel"><div className="accountant-empty"><Icon name="error" /><strong>Finance workspace unavailable</strong><p>{loadError}</p><button type="button" className="accountant-secondary-button" onClick={() => void loadWorkspace()}>Try again</button></div></section>
     : !workspace ? null : <>
-      <section className="accountant-hero"><div><span className="accountant-eyebrow"><Icon name="account_balance_wallet" />{branchLabel}</span><h1>Finance control centre</h1><p>Reconcile branch collections and move petty cash through the recorded approval workflow.</p></div><button type="button" className="accountant-primary-button" disabled={!workspace.branches.length} onClick={() => openCashDialog('new')}><Icon name="add" />New petty cash request</button></section>
+      {tab === 'overview' && <section className="accountant-hero"><div><span className="accountant-eyebrow"><Icon name="account_balance_wallet" />{branchLabel}</span><h1>Finance control centre</h1><p>Reconcile branch collections and move petty cash through the recorded approval workflow.</p></div><button type="button" className="accountant-primary-button" disabled={!workspace.branches.length} onClick={() => openCashDialog('new')}><Icon name="add" />New petty cash request</button></section>}
 
       {tab === 'overview' && <><section className="accountant-kpis" aria-label="Finance summary">
         <article><span className="is-success"><Icon name="payments" /></span><div><p>Collected</p><strong>{money(workspace.summary.collected)}</strong><small>Across permitted invoices</small></div></article>
         <article><span className="is-warning"><Icon name="pending_actions" /></span><div><p>Outstanding</p><strong>{money(workspace.summary.outstanding)}</strong><small>{money(workspace.summary.overdueAmount)} overdue</small></div></article>
         <article><span className="is-info"><Icon name="account_balance_wallet" /></span><div><p>Petty cash available</p><strong>{money(remaining)}</strong><small>{money(cap)} per branch this month</small></div></article>
-        <article><span className="is-error"><Icon name="receipt" /></span><div><p>Open expense records</p><strong>{workspace.summary.openPettyCash}</strong><small>{workspace.summary.awaitingReceipt} awaiting receipt</small></div></article>
+        <article><span className="is-error"><Icon name="fact_check" /></span><div><p>Payment requests</p><strong>{workspace.summary.pendingPaymentReviews}</strong><small>{workspace.summary.pendingPaymentReviews === 1 ? 'receipt awaiting review' : 'receipts awaiting review'}</small></div></article>
       </section><section className="accountant-panel"><header><div><h2>Recent petty cash activity</h2><p>Latest persisted records in your assigned scope.</p></div><button type="button" className="accountant-text-button" onClick={() => navigate('/staff/finance#petty-cash')}>View all<Icon name="arrow_forward" /></button></header>{renderCashTable(workspace.pettyCash.slice(0, 5))}</section></>}
 
       {tab === 'petty-cash' && <><section className="accountant-section-head"><div><span className="accountant-eyebrow">Controlled disbursements</span><h2>Petty cash requests</h2><p>Requests remain open until an administrator verifies the receipt and closes the record.</p></div><button type="button" className="accountant-primary-button" disabled={!workspace.branches.length} onClick={() => openCashDialog('new')}><Icon name="add" />New request</button></section><section className="accountant-cap-strip"><div><Icon name="policy" /><span>Monthly cap per branch</span><strong>{money(cap)}</strong></div><div><span>Committed in scope</span><strong>{money(committed)}</strong></div><div><span>Available in scope</span><strong>{money(remaining)}</strong></div><small>Rejected requests do not consume the monthly cap.</small></section><section className="accountant-panel">{renderCashTable(workspace.pettyCash)}</section></>}
 
-      {tab === 'billing' && <SharedBillingWorkspace heading="Accountant billing & payroll" />}
+      {tab === 'billing' && <AcademicFees />}
+      {tab === 'ledger' && <SharedBillingWorkspace heading="Invoice creation & payroll ledger" />}
+      {tab === 'payments' && <TenantPaymentsPage />}
       {tab === 'reports' && <><section className="accountant-section-head"><div><span className="accountant-eyebrow">Scoped reconciliation</span><h2>Finance report summary</h2><p>Figures include only records permitted by your signed branch assignments.</p></div></section><section className="accountant-grid"><article className="accountant-panel accountant-report-card"><span className="is-info"><Icon name="menu_book" /></span><div><h2>Ledger activity</h2><p>Persisted paid invoices, expenses, and settled payroll entries.</p><small>{workspace.reports.ledgerEntryCount} entries in scope</small></div></article><article className="accountant-panel accountant-report-card"><span className="is-warning"><Icon name="receipt_long" /></span><div><h2>Expense records</h2><p>Branch expense records included in the current report scope.</p><small>{workspace.reports.expenseCount} records</small></div></article></section><section className="accountant-panel accountant-readonly"><header><div><h2>Scoped P&amp;L</h2><p>Read-only summary calculated from live permitted records.</p></div><span className="accountant-locked"><Icon name="visibility" />Read only</span></header><dl><div><dt>Revenue</dt><dd>{money(workspace.reports.revenue)}</dd></div><div><dt>Operating costs</dt><dd>{money(workspace.reports.operatingCosts)}</dd></div><div><dt>Net margin</dt><dd className={workspace.reports.netMargin >= 0 ? 'is-positive' : ''}>{money(workspace.reports.netMargin)}</dd></div></dl></section></>}
       {tab === 'security' && <><section className="accountant-section-head"><div><span className="accountant-eyebrow">Account</span><h2>Security Settings</h2><p>Manage your account password and security settings.</p></div></section><ChangePasswordForm className="accountant-panel" /></>}
     </>;

@@ -125,7 +125,8 @@ async function loadStudentBillingAccess(req: TenantRequest, studentId: string) {
   const student = await prisma.student.findFirst({
     where: { id: studentId, user: { tenantId: req.tenantId! } },
     include: {
-      user: { include: { userRoles: true } },
+      grade: true,
+      user: { include: { userRoles: { include: { branch: true } } } },
       studentParents: { include: { parent: true } },
     },
   });
@@ -250,15 +251,23 @@ router.post('/manual-payment/:invoiceId', authMiddleware, async (req: TenantRequ
 });
 
 router.get('/manual-payments', authMiddleware, async (req: TenantRequest, res: Response) => {
-  if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may review payment receipts.' });
-  const attempts = await prisma.paymentAttempt.findMany({ where: { tenantId: req.tenantId!, provider: 'BANK', status: { in: ['PENDING', 'SUCCESS', 'FAILED'] } }, include: { invoice: { include: { student: { include: { user: true } } } } }, orderBy: { createdAt: 'desc' }, take: 100 });
+  const access = billingBranchScopes(req.user);
+  if (!access.isTenantAdmin && access.scopes.length === 0) return res.status(403).json({ error: 'You do not have access to payment receipts.' });
+  const invoiceScope: Prisma.InvoiceWhereInput = access.isTenantAdmin
+    ? {}
+    : { student: { user: { userRoles: { some: { branchId: { in: access.scopes } } } } } };
+  const attempts = await prisma.paymentAttempt.findMany({ where: { tenantId: req.tenantId!, provider: 'BANK', status: { in: ['PENDING', 'SUCCESS', 'FAILED'] }, invoice: invoiceScope }, include: { invoice: { include: { student: { include: { user: true } } } } }, orderBy: { createdAt: 'desc' }, take: 100 });
   return res.json({ attempts: attempts.map((attempt) => ({ id: attempt.id, txnId: attempt.txnId, referenceId: attempt.referenceId, amount: Number(attempt.amountPaisa) / 100, status: attempt.status, receiptProof: attempt.receiptProof, createdAt: attempt.createdAt, reviewedAt: attempt.reviewedAt, reviewRemarks: attempt.reviewRemarks, invoiceId: attempt.invoiceId, studentName: `${attempt.invoice.student.user.firstName} ${attempt.invoice.student.user.lastName}`.trim() })) });
 });
 
 router.get('/payment-attempts', authMiddleware, async (req: TenantRequest, res: Response) => {
-  if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may view payment activity.' });
+  const access = billingBranchScopes(req.user);
+  if (!access.isTenantAdmin && access.scopes.length === 0) return res.status(403).json({ error: 'You do not have access to payment activity.' });
+  const invoiceScope: Prisma.InvoiceWhereInput = access.isTenantAdmin
+    ? {}
+    : { student: { user: { userRoles: { some: { branchId: { in: access.scopes } } } } } };
   const attempts = await prisma.paymentAttempt.findMany({
-    where: { tenantId: req.tenantId!, provider: { in: ['CONNECTIPS', 'BANK'] } },
+    where: { tenantId: req.tenantId!, provider: { in: ['CONNECTIPS', 'BANK'] }, invoice: invoiceScope },
     include: { invoice: { include: { student: { include: { user: true } } } } },
     orderBy: { createdAt: 'desc' },
     take: 200,
@@ -285,14 +294,18 @@ router.get('/payment-attempts', authMiddleware, async (req: TenantRequest, res: 
 });
 
 router.post('/manual-payments/:id/decision', authMiddleware, async (req: TenantRequest, res: Response) => {
-  if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may review payment receipts.' });
+  const access = billingBranchScopes(req.user);
+  if (!access.isTenantAdmin && access.scopes.length === 0) return res.status(403).json({ error: 'You do not have access to review payment receipts.' });
+  const invoiceScope: Prisma.InvoiceWhereInput = access.isTenantAdmin
+    ? {}
+    : { student: { user: { userRoles: { some: { branchId: { in: access.scopes } } } } } };
   const shape = parseStrictKeys(req.body, ['decision', 'remarks']);
   if (!shape.success) return res.status(400).json({ error: shape.error });
   const decision = readTrimmedString(shape.data, 'decision', { required: true, maxLength: 10, pattern: /^(APPROVE|REJECT)$/, message: 'Decision must be APPROVE or REJECT.' });
   const remarks = readTrimmedString(shape.data, 'remarks', { required: false, maxLength: 500, message: 'Remarks are too long.' });
   if (!decision.success) return res.status(400).json({ error: decision.error });
   if (!remarks.success) return res.status(400).json({ error: remarks.error });
-  const attempt = await prisma.paymentAttempt.findFirst({ where: { id: req.params.id, tenantId: req.tenantId!, provider: 'BANK' }, include: { invoice: true } });
+  const attempt = await prisma.paymentAttempt.findFirst({ where: { id: req.params.id, tenantId: req.tenantId!, provider: 'BANK', invoice: invoiceScope }, include: { invoice: true } });
   if (!attempt) return res.status(404).json({ error: 'Payment submission not found.' });
   if (attempt.status !== 'PENDING') return res.status(409).json({ error: 'This payment submission was already reviewed.' });
   if (decision.data === 'REJECT') { await prisma.paymentAttempt.update({ where: { id: attempt.id }, data: { status: 'FAILED', gatewayStatus: 'REJECTED', reviewRemarks: remarks.data, reviewedBy: req.user!.id, reviewedAt: new Date(), failedAt: new Date() } }); return res.json({ message: 'Payment receipt rejected.' }); }
@@ -604,7 +617,7 @@ router.get('/accountant-workspace', authMiddleware, async (req: TenantRequest, r
     const monthStart = new Date();
     monthStart.setDate(1);
     monthStart.setHours(0, 0, 0, 0);
-    const [branches, invoices, requests, monthlyRequests, expenses, payrolls, tenant] = await Promise.all([
+    const [branches, invoices, requests, monthlyRequests, expenses, payrolls, tenant, pendingPaymentReviews] = await Promise.all([
       prisma.branch.findMany({
         where: { tenantId: req.tenantId!, ...(tenantWide ? {} : { id: { in: branchIds } }) },
         select: { id: true, name: true },
@@ -637,6 +650,7 @@ router.get('/accountant-workspace', authMiddleware, async (req: TenantRequest, r
       prisma.expense.findMany({ where: expenseWhere, orderBy: { date: 'desc' }, take: 500 }),
       prisma.payroll.findMany({ where: payrollWhere, take: 500 }),
       prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { pettyCashCapNpr: true } }),
+      prisma.paymentAttempt.count({ where: { tenantId: req.tenantId!, provider: 'BANK', status: 'PENDING', ...(tenantWide ? {} : { invoice: { student: { user: { userRoles: { some: { branchId: { in: billing.scopes } } } } } } }) } }),
     ]);
 
     const invoiceSummary = summarizeInvoices(invoices);
@@ -662,6 +676,7 @@ router.get('/accountant-workspace', authMiddleware, async (req: TenantRequest, r
         invoiceCount: invoiceSummary.invoiceCount,
         openPettyCash: requests.filter((item) => item.status !== 'CLOSED' && item.status !== 'REJECTED').length,
         awaitingReceipt: requests.filter((item) => item.status === 'RELEASED').length,
+        pendingPaymentReviews,
       },
       pettyCash: requests.map((item) => ({
         id: item.id,
@@ -709,16 +724,20 @@ router.get('/accountant-workspace', authMiddleware, async (req: TenantRequest, r
   }
 });
 
-// Tenant-wide fee overview: collected, outstanding, overdue, current BS period.
+// Fee overview scoped to the signed user's billing assignments.
 router.get(
   '/overview',
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
-    if (!isTenantAdmin(req.user!)) {
-      return res.status(403).json({ error: 'Only the Tenant Admin may view institution-wide fee totals.' });
-    }
+    const access = billingBranchScopes(req.user);
+    if (!access.isTenantAdmin && access.scopes.length === 0) return res.status(403).json({ error: 'You do not have access to fee totals.' });
     try {
-      const invoices = await prisma.invoice.findMany({ where: { tenantId: req.tenantId! } });
+      const invoices = await prisma.invoice.findMany({
+        where: {
+          tenantId: req.tenantId!,
+          ...(access.isTenantAdmin ? {} : { student: { user: { userRoles: { some: { branchId: { in: access.scopes } } } } } }),
+        },
+      });
       const summary = summarizeInvoices(invoices);
       const overdueStudentIds = new Set(invoices.filter(invoiceOverdue).map((i) => i.studentId));
       const period = await getBillingPeriod(new Date(), 10);
@@ -794,7 +813,7 @@ router.get(
     try {
       const student = await loadStudentBillingAccess(req, req.params.studentId);
       if (!student) return res.status(404).json({ error: 'Student fee record not found or unavailable.' });
-      const [invoices, loginDeliveries] = await Promise.all([
+      const [invoices, loginDeliveries, tenant] = await Promise.all([
         prisma.invoice.findMany({
           where: { studentId: student.id, tenantId: req.tenantId! },
           orderBy: { dueDate: 'desc' },
@@ -812,6 +831,7 @@ router.get(
           WHERE "tenantId" = ${req.tenantId!} AND "studentId" = ${student.id}
           ORDER BY "recipient" ASC
         `,
+        prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { name: true, panNumber: true } }),
       ]);
       return res.json({
         admissionStatus: student.admissionStatus,
@@ -819,6 +839,20 @@ router.get(
         invoices: invoices.map((i) => ({
           id: i.id,
           invoiceType: i.invoiceType,
+          institutionName: tenant?.name ?? 'Institution',
+          panNumber: i.panNumberSnapshot || tenant?.panNumber || '',
+          vatRate: num(i.vatRateSnapshot),
+          studentName: `${student.user.firstName} ${student.user.lastName}`.trim(),
+          admissionNumber: student.admissionNumber,
+          gradeName: student.grade?.name ?? null,
+          branchName: student.user.userRoles.find((role) => role.branchId)?.branch?.name ?? null,
+          issuedAt: i.createdAt,
+          transactionId: i.transactionId,
+          lines: Array.isArray(i.lineItemsSnapshot)
+            ? (i.lineItemsSnapshot as Array<{ label?: unknown; amount?: unknown }>).map((line) => ({ label: String(line.label || 'Charge'), amount: num(line.amount) }))
+            : [{ label: invoiceTypeLabel(i.invoiceType), amount: num(i.amount) }],
+          discount: num(i.discount),
+          fine: num(i.fine),
           netPayable: num(i.netPayable),
           status: i.status,
           overdue: invoiceOverdue(i),
@@ -926,9 +960,11 @@ router.post(
 router.post(
   '/generate-invoices',
   authMiddleware,
-  hasPermission('manage_billing'),
   async (req: TenantRequest, res: Response) => {
     try {
+      const access = billingBranchScopes(req.user);
+      if (!access.isTenantAdmin && access.scopes.length === 0) return res.status(403).json({ error: 'You do not have access to generate invoices.' });
+      const studentScope = access.isTenantAdmin ? {} : { userRoles: { some: { branchId: { in: access.scopes } } } };
       const period = await getBillingPeriod(new Date(), 10);
       const tenantConfig = await prisma.tenant.findUnique({ where: { id: req.tenantId! } });
       if (!tenantConfig) return res.status(404).json({ error: 'Tenant not found.' });
@@ -950,7 +986,7 @@ router.post(
       // 1. Grade base tuition for every student who has a graded level.
       const students = await prisma.student.findMany({
         where: {
-          user: { tenantId: req.tenantId!, status: 'ACTIVE' },
+          user: { tenantId: req.tenantId!, status: 'ACTIVE', ...studentScope },
           admissionStatus: 'ACTIVE',
           gradeId: { not: null },
           enrollments: { some: { status: 'ACTIVE', OR: [{ validUntil: null }, { validUntil: { gt: new Date() } }] } },
@@ -968,7 +1004,7 @@ router.post(
         where: {
           status: 'ACTIVE',
           OR: [{ validUntil: null }, { validUntil: { gt: new Date() } }],
-          student: { admissionStatus: 'ACTIVE', user: { status: 'ACTIVE' } },
+          student: { admissionStatus: 'ACTIVE', user: { status: 'ACTIVE', ...studentScope } },
           course: { tenantId: req.tenantId! },
         },
         include: { course: true, student: { include: { grade: true } } },

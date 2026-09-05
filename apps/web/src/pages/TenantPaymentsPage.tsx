@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../components/ui/Button';
 import { StatusBadge, type StatusBadgeVariant } from '../components/ui/StatusBadge';
 import { api } from '../services/api';
-import { errorMessage } from '../services/api/client';
+import { ApiError, errorMessage } from '../services/api/client';
 
 type PaymentAttempt = Awaited<ReturnType<typeof api.finances.getPaymentAttempts>>['attempts'][number];
 type Filter = 'ALL' | 'REVIEW' | 'SUCCESS' | 'PENDING' | 'FAILED';
@@ -37,11 +37,39 @@ export function TenantPaymentsPage() {
 
   const load = async (quiet = false) => {
     quiet ? setRefreshing(true) : setLoading(true); setError('');
-    try { const result = await api.finances.getPaymentAttempts(); setAttempts(result.attempts); }
+    try {
+      try {
+        const result = await api.finances.getPaymentAttempts();
+        setAttempts(result.attempts);
+      } catch (cause) {
+        if (!(cause instanceof ApiError) || cause.status !== 404) throw cause;
+        const fallback = await api.finances.getManualPayments();
+        setAttempts(fallback.attempts.map((item) => ({
+          ...item,
+          provider: 'BANK' as const,
+          gatewayStatus: item.status === 'PENDING' ? 'AWAITING_REVIEW' : null,
+          gatewayMessage: null,
+          confirmedAt: item.status === 'SUCCESS' ? item.reviewedAt : null,
+          failedAt: item.status === 'FAILED' ? item.reviewedAt : null,
+          invoiceStatus: item.status === 'SUCCESS' ? 'PAID' : 'UNPAID',
+        })));
+      }
+    }
     catch (cause) { setError(errorMessage(cause)); }
     finally { setLoading(false); setRefreshing(false); }
   };
   useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === 'visible') void load(true); };
+    const interval = window.setInterval(refresh, 30_000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, []);
 
   const decide = async (id: string, decision: 'APPROVE' | 'REJECT') => {
     setReviewing(id); setError(''); setNotice('');

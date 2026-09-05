@@ -74,6 +74,17 @@ export function SharedBillingWorkspace({ heading = "Billing & payroll" }: { head
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    if (!target && !createMode) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setTarget(null);
+        setCreateMode(null);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [target, createMode]);
 
   const students = useMemo(() => (ledger?.students ?? []).filter((student) => `${student.studentName} ${student.email} ${student.grade} ${student.branchName}`.toLowerCase().includes(query.toLowerCase())), [ledger, query]);
   const teachers = useMemo(() => (ledger?.teachers ?? []).filter((teacher) => `${teacher.teacherName} ${teacher.email} ${teacher.designation} ${teacher.branchName}`.toLowerCase().includes(query.toLowerCase())), [ledger, query]);
@@ -328,7 +339,8 @@ export function SharedBillingWorkspace({ heading = "Billing & payroll" }: { head
       </Card>
 
       {selectedStudent && (
-        <Card hoverable={false}>
+        <div className="billing-dialog-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setTarget(null)}>
+        <Card hoverable={false} className="billing-dialog" role="dialog" aria-modal="true">
           <div className="accountant-header">
             <div className="accountant-header-title">
               <h2>{selectedStudent.studentName}</h2>
@@ -415,11 +427,12 @@ export function SharedBillingWorkspace({ heading = "Billing & payroll" }: { head
           ) : (
             <Empty>No invoices have been posted for this student.</Empty>
           )}
-        </Card>
+        </Card></div>
       )}
 
       {selectedTeacher && (
-        <Card hoverable={false}>
+        <div className="billing-dialog-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setTarget(null)}>
+        <Card hoverable={false} className="billing-dialog" role="dialog" aria-modal="true">
           <div className="accountant-header">
             <div className="accountant-header-title">
               <h2>{selectedTeacher.teacherName}</h2>
@@ -496,11 +509,12 @@ export function SharedBillingWorkspace({ heading = "Billing & payroll" }: { head
           ) : (
             <Empty>No payroll has been posted for this teacher.</Empty>
           )}
-        </Card>
+        </Card></div>
       )}
 
       {createMode && (
-        <Card hoverable={false}>
+        <div className="billing-dialog-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setCreateMode(null)}>
+        <Card hoverable={false} className="billing-dialog" role="dialog" aria-modal="true">
           <div className="accountant-header">
             <div className="accountant-header-title">
               <h2>Create {createMode === "student" ? "invoice" : "payroll"}</h2>
@@ -619,7 +633,7 @@ export function SharedBillingWorkspace({ heading = "Billing & payroll" }: { head
               {submitting ? "Creating…" : `Create ${createMode === "student" ? "invoice" : "payroll"}`}
             </Button>
           </form>
-        </Card>
+        </Card></div>
       )}
     </div>
   );

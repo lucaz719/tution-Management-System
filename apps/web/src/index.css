@@ -396,7 +396,7 @@ h1, h2, h3, h4 {
 
 /* Animations */
 .fade-in {
-  animation: fadeIn 0.4s ease-out forwards;
+  animation: fadeIn 0.4s ease-out;
 }
 
 @keyframes fadeIn {

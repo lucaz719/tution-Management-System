@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../components/ui/Button';
+import { InvoiceDocumentDialog, type InvoiceDocumentData } from '../components/InvoiceDocument';
 import { KPICard } from '../components/ui/KPICard';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { useToast } from '../components/ui/Toast';
@@ -32,7 +33,19 @@ interface Overview {
 
 interface Invoice {
   id: string;
-  invoiceType: string;
+  invoiceType: 'ADMISSION' | 'TUITION' | 'SUBJECT' | 'ACTIVITY';
+  institutionName: string;
+  panNumber: string;
+  vatRate: number;
+  studentName: string;
+  admissionNumber: string | null;
+  gradeName: string | null;
+  branchName: string | null;
+  issuedAt: string;
+  transactionId: string | null;
+  lines: Array<{ label: string; amount: number }>;
+  discount: number;
+  fine: number;
   netPayable: number;
   status: string;
   overdue: boolean;
@@ -76,6 +89,7 @@ export function AcademicFees() {
   const [isRetryingDelivery, setIsRetryingDelivery] = useState(false);
   const [qrModal, setQrModal] = useState<{ id: string; studentName: string; amount: number; month: string; qrString: string; dataUrl: string } | null>(null);
   const [qrLoadingId, setQrLoadingId] = useState('');
+  const [invoiceDocument, setInvoiceDocument] = useState<InvoiceDocumentData | null>(null);
 
   const openQr = async (invoice: Invoice) => {
     if (!payStudent) return;
@@ -91,19 +105,43 @@ export function AcademicFees() {
   const loadData = async () => {
     setIsLoading(true);
     setErrorMsg('');
-    try {
-      const [ov, list] = await Promise.all([api.finances.getOverview(), api.finances.getStudentFees()]);
-      setOverview(ov);
-      setStudents(list as StudentFee[]);
-    } catch (error: unknown) {
-      setErrorMsg(error instanceof Error ? error.message : 'Failed to load fees.');
-    } finally {
-      setIsLoading(false);
+    const [overviewResult, studentsResult] = await Promise.allSettled([
+      api.finances.getOverview(),
+      api.finances.getStudentFees(),
+    ]);
+    if (studentsResult.status === 'fulfilled') {
+      const list = studentsResult.value as StudentFee[];
+      setStudents(list);
+      setOverview(overviewResult.status === 'fulfilled' ? overviewResult.value : {
+        collected: list.reduce((sum, student) => sum + student.totalPaid, 0),
+        outstanding: list.reduce((sum, student) => sum + student.totalDue, 0),
+        overdueAmount: list.reduce((sum, student) => sum + student.overdueAmount, 0),
+        overdueStudents: list.filter((student) => student.overdueAmount > 0).length,
+        invoiceCount: list.reduce((sum, student) => sum + student.invoiceCount, 0),
+        billingPeriod: '',
+      });
+    } else {
+      setStudents([]);
+      setOverview(null);
+      const cause = studentsResult.reason;
+      setErrorMsg(cause instanceof Error ? cause.message : 'Fee records are temporarily unavailable.');
     }
+    setIsLoading(false);
   };
 
   useEffect(() => {
     void loadData();
+  }, []);
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === 'visible') void loadData(); };
+    const interval = window.setInterval(refresh, 30_000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
   }, []);
 
   const filtered = useMemo(() => {
@@ -222,7 +260,7 @@ export function AcademicFees() {
         <div>
           <h1 className="people-title">Fee &amp; Billing</h1>
           <p className="people-subtitle">
-            Collections, dues, and payments{overview ? ` · billing cycle ${overview.billingPeriod} BS` : ''}.
+            Collections, dues, and payments{overview?.billingPeriod ? ` · billing cycle ${overview.billingPeriod} BS` : ''}.
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -232,12 +270,10 @@ export function AcademicFees() {
           </Button>
           <Button onClick={() => void runBilling()} disabled={isGenerating} style={{ height: '42px' }}>
             <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>receipt_long</span>
-            {isGenerating ? 'Generating…' : `Generate ${overview?.billingPeriod ?? ''} Invoices`}
+            {isGenerating ? 'Generating…' : overview?.billingPeriod ? `Generate ${overview.billingPeriod} Invoices` : 'Generate Invoices'}
           </Button>
         </div>
       </div>
-
-      {errorMsg ? <StatusBadge variant="error">{errorMsg}</StatusBadge> : null}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '18px' }}>
         <KPICard title="Collected" value={overview ? money(overview.collected) : '—'} delta="Paid invoices" icon="paid" accentColor="var(--color-success)" loading={isLoading} />
@@ -277,7 +313,7 @@ export function AcademicFees() {
                   <td colSpan={6}>
                     <div className="people-empty">
                       <span className="material-symbols-outlined">payments</span>
-                      {isLoading ? 'Loading fees…' : students.length === 0 ? 'No students with fee records yet.' : 'No students match your filter.'}
+                      {isLoading ? 'Loading fees…' : errorMsg ? <><span>Fee records could not load.</span><Button variant="outline" onClick={() => void loadData()}>Try again</Button></> : students.length === 0 ? 'No students with fee records yet.' : 'No students match your filter.'}
                     </div>
                   </td>
                 </tr>
@@ -418,10 +454,11 @@ export function AcademicFees() {
                       </div>
                     </div>
                     {inv.status === 'PAID' ? (
-                      <StatusBadge variant="success">Paid</StatusBadge>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><StatusBadge variant="success">Paid</StatusBadge><Button variant="outline" onClick={() => setInvoiceDocument(inv)}><span className="material-symbols-outlined" aria-hidden="true">receipt_long</span>View receipt</Button></div>
                     ) : (
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         {inv.overdue ? <StatusBadge variant="error">Overdue</StatusBadge> : <StatusBadge variant="warning">Unpaid</StatusBadge>}
+                        <Button variant="outline" onClick={() => setInvoiceDocument(inv)}><span className="material-symbols-outlined" aria-hidden="true">receipt_long</span>View bill</Button>
                         <Button
                           variant="outline"
                           onClick={() => void openQr(inv)}
@@ -506,6 +543,7 @@ export function AcademicFees() {
           </div>
         </>
       ) : null}
+      {invoiceDocument ? <InvoiceDocumentDialog data={invoiceDocument} onClose={() => setInvoiceDocument(null)} /> : null}
     </div>
   );
 }

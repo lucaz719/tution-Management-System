@@ -39,6 +39,7 @@ export interface AccountantWorkspace {
     invoiceCount: number;
     openPettyCash: number;
     awaitingReceipt: number;
+    pendingPaymentReviews: number;
   };
   pettyCash: Array<{
     id: string;
@@ -254,7 +255,7 @@ export const api = {
       return request<{
         admissionStatus: 'PENDING_PAYMENT' | 'READY_FOR_LOGIN' | 'ACTIVE';
         loginDeliveries: Array<{ recipient: 'STUDENT' | 'PARENT'; status: 'PENDING' | 'SENT' | 'FAILED'; failureReason: string | null; attemptCount: number; lastAttemptAt: string | null; sentAt: string | null }>;
-        invoices: Array<{ id: string; invoiceType: string; netPayable: number; status: string; overdue: boolean; dueDate: string; billingCycleStart: string; billingCycleEnd: string; paymentDate: string | null }>;
+        invoices: Array<{ id: string; invoiceType: 'ADMISSION' | 'TUITION' | 'SUBJECT' | 'ACTIVITY'; institutionName: string; panNumber: string; vatRate: number; studentName: string; admissionNumber: string | null; gradeName: string | null; branchName: string | null; issuedAt: string; transactionId: string | null; lines: Array<{ label: string; amount: number }>; discount: number; fine: number; netPayable: number; status: string; overdue: boolean; dueDate: string; billingCycleStart: string; billingCycleEnd: string; paymentDate: string | null }>;
       }>(`/finances/students/${studentId}/invoices`);
     },
     getNepalPayQr: async (invoiceId: string) => request<{ invoiceId: string; merchantName: string; merchantCity: string; amount: number; currency: string; studentName: string; qrString: string }>(`/finances/nepalpay-qr/${encodeURIComponent(invoiceId)}`),

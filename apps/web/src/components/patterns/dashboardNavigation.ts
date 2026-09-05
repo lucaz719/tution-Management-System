@@ -63,6 +63,7 @@ export const DASHBOARD_NAVIGATION: Record<DashboardRole, DashboardNavItem[]> = {
     { section: 'Academic', label: 'Homework', icon: 'assignment', path: '/branch/homework' },
     { section: 'Academic', label: 'Results', icon: 'emoji_events', path: '/branch/results' },
     { section: 'Finance', label: 'Fee & Billing', icon: 'payments', path: '/branch/fees' },
+    { section: 'Finance', label: 'Payment Requests', icon: 'fact_check', path: '/branch/payments' },
     { section: 'Finance', label: 'Petty Cash', icon: 'savings', path: '/branch/petty-cash' },
     { section: 'Operations', label: 'Leave Requests', icon: 'event_busy', path: '/branch/leave-requests' },
     { section: 'Operations', label: 'Resource Logs', icon: 'description', path: '/branch/resource-logs' },
