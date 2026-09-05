@@ -686,6 +686,10 @@ async function main(): Promise<void> {
     response = await request('GET', '/api/finances/students', accountantCookie);
     assert.equal(response.status, 200, 'Accountant must be able to load the shared fee student list');
     assert(response.body.students.every((student: any) => student.branchId === branchA.id), 'Shared fee page must remain branch-scoped for Accountants');
+    response = await request('GET', '/api/finances/pl', accountantCookie);
+    assert.equal(response.status, 403, 'Accountants must not receive institution-wide P&L data');
+    response = await request('GET', '/api/finances/ledger/export', accountantCookie);
+    assert.equal(response.status, 403, 'Accountants must not export the institution-wide ledger');
     response = await request('GET', '/api/finances/petty-cash', accountantCookie);
     assert.equal(response.status, 200);
     assert(response.body.every((item: any) => item.accountantId === accountantA.id), 'Accountant petty-cash list must contain only owned records');
@@ -781,6 +785,7 @@ async function main(): Promise<void> {
     });
     assert.equal(response.status, 201);
     assert(response.body.payrolls.some((item: any) => item.staffRecordId === staffRecord.id));
+    assert(response.body.payrolls.every((item: any) => item.branchId === branchA.id), 'Payroll must persist the staff branch at creation time');
     response = await request('POST', '/api/hr/payroll/calculate', adminACookie, { month: 6, year: 2026 });
     assert.equal(response.status, 409, 'duplicate payroll periods are rejected');
     response = await request('GET', '/api/hr/payroll?month=6&year=2026&status=PENDING&search=staff-a', adminACookie);
@@ -794,6 +799,7 @@ async function main(): Promise<void> {
     const payroll = await prisma.payroll.create({
       data: {
         tenantId: tenantA.id,
+        branchId: branchA.id,
         staffRecordId: staffRecord.id,
         month: 7,
         year: 2026,
@@ -825,7 +831,7 @@ async function main(): Promise<void> {
     assert.equal(response.body.payroll.status, 'MANUALLY_PAID');
     assert.equal(response.body.payroll.settlementReference, 'BANK-SALARY-001');
     const bulkPayroll = await prisma.payroll.create({ data: {
-      tenantId: tenantA.id, staffRecordId: staffRecord.id, month: 8, year: 2026,
+      tenantId: tenantA.id, branchId: branchA.id, staffRecordId: staffRecord.id, month: 8, year: 2026,
       payslipNumber: `PS-202608-${staffRecord.id.slice(0, 8)}`, baseSalary: 40000,
       attendanceDeductions: 10.01, bonuses: 20.02, netPayable: 40010.01,
       calculationBreakdown: { baseSalary: 40000, bonuses: 20.02, deductions: 10.01, netPayable: 40010.01 },
@@ -969,7 +975,7 @@ async function main(): Promise<void> {
     });
     const invoiceA2 = await prisma.invoice.create({
       data: {
-        tenantId: tenantA.id, studentId: studentA2.id, amount: 1100, netPayable: 1100,
+        tenantId: tenantA.id, branchId: branchA2.id, studentId: studentA2.id, amount: 1100, netPayable: 1100,
         billingCycleStart: new Date(), billingCycleEnd: new Date(), dueDate: new Date(),
         invoiceType: 'TUITION', panNumberSnapshot: tenantA.panNumber,
       },
@@ -998,8 +1004,21 @@ async function main(): Promise<void> {
     assert.equal(response.status, 403, 'Branch Admin dashboard must reject an unassigned branch');
     response = await request('GET', `/api/finances/students/${studentA2.id}/invoices`, branchAdminCookie);
     assert.equal(response.status, 404, 'another branch student invoice list must be hidden');
+    response = await request('GET', `/api/finances/students/${studentA2.id}/invoices`, accountantCookie);
+    assert.equal(response.status, 404, 'Accountants must not read another branch student invoice list');
     response = await request('GET', `/api/finances/nepalpay-qr/${invoiceA2.id}`, branchAdminCookie);
     assert.equal(response.status, 404, 'another branch invoice QR must be hidden');
+    response = await request('GET', `/api/finances/nepalpay-qr/${invoiceA2.id}`, accountantCookie);
+    assert.equal(response.status, 404, 'Accountants must not read another branch invoice QR');
+    const transferredStudentRole = await prisma.userRole.findFirstOrThrow({ where: { userId: studentUserA2.id } });
+    await prisma.userRole.update({ where: { id: transferredStudentRole.id }, data: { branchId: branchA.id } });
+    response = await request('GET', `/api/finances/students/${studentA2.id}/invoices`, accountantCookie);
+    assert.equal(response.status, 200, 'Accountant may open a student after transfer into the assigned branch');
+    assert(!response.body.invoices.some((invoice: any) => invoice.id === invoiceA2.id), 'A transferred student must not expose the previous branch invoice');
+    response = await request('GET', `/api/finances/nepalpay-qr/${invoiceA2.id}`, accountantCookie);
+    assert.equal(response.status, 404, 'A transferred student must not expose the previous branch invoice QR');
+    response = await request('POST', `/api/finances/invoices/${invoiceA2.id}/pay`, accountantCookie, { transactionId: 'CROSS-BRANCH-DENIED' });
+    assert.equal(response.status, 403, 'A transferred student must not let the new branch collect an old branch invoice');
     response = await request('POST', `/api/teacher/session/${sessionA2.id}/update`, teacherCookie, {
       updateContent: 'IDOR attempt',
     });

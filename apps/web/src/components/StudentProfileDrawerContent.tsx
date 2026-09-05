@@ -137,7 +137,7 @@ export function StudentProfileDrawerContent(props: StudentProfileDrawerContentPr
     id: invoice.id, invoiceType: invoice.invoiceType, status: invoice.status,
     institutionName: profile.institutionName, panNumber: invoice.panNumberSnapshot, vatRate: invoice.vatRateSnapshot,
     studentName: profile.name, admissionNumber: student.admissionNumber, gradeName: student.grade,
-    branchName: profile.roles.find((role) => role.branchName)?.branchName,
+    branchName: invoice.branchName,
     issuedAt: invoice.createdAt, dueDate: invoice.dueDate, paymentDate: invoice.paymentDate,
     billingCycleStart: invoice.billingCycleStart, billingCycleEnd: invoice.billingCycleEnd,
     transactionId: invoice.transactionId, lines: invoice.lineItems, discount: invoice.discount,

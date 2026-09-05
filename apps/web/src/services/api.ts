@@ -300,7 +300,7 @@ export const api = {
       return request<{
         admissionStatus: 'PENDING_PAYMENT' | 'READY_FOR_LOGIN' | 'ACTIVE';
         loginDeliveries: Array<{ recipient: 'STUDENT' | 'PARENT'; status: 'PENDING' | 'SENT' | 'FAILED'; failureReason: string | null; attemptCount: number; lastAttemptAt: string | null; sentAt: string | null }>;
-        invoices: Array<{ id: string; invoiceType: string; netPayable: number; status: string; overdue: boolean; dueDate: string; billingCycleStart: string; billingCycleEnd: string; paymentDate: string | null }>;
+        invoices: Array<{ id: string; invoiceType: string; netPayable: number; status: string; overdue: boolean; dueDate: string; billingCycleStart: string; billingCycleEnd: string; paymentDate: string | null; branchName: string }>;
       }>(`/finances/students/${studentId}/invoices`);
     },
     getNepalPayQr: async (invoiceId: string) => request<{ invoiceId: string; merchantName: string; merchantCity: string; amount: number; currency: string; studentName: string; qrString: string }>(`/finances/nepalpay-qr/${encodeURIComponent(invoiceId)}`),

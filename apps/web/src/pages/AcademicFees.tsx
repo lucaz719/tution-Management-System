@@ -40,6 +40,7 @@ interface Invoice {
   billingCycleStart: string;
   billingCycleEnd: string;
   paymentDate: string | null;
+  branchName: string;
 }
 
 interface LoginDelivery {
@@ -489,7 +490,7 @@ export function AcademicFees({ canRetryAdmissionLogins = true }: { canRetryAdmis
                     ) : <div className="fee-invoice-list">{invoices.map((inv) => (
                       <article key={inv.id} className="fee-invoice-row">
                         <header>
-                          <div><span>{inv.invoiceType.toLowerCase().replaceAll('_', ' ')}</span><strong>{inv.invoiceType === 'ADMISSION' ? inv.status === 'PAID' && inv.paymentDate ? `Paid ${toBsLabel(inv.paymentDate)}` : 'Awaiting admission payment' : toBsMonthLabel(inv.billingCycleStart)}</strong></div>
+                          <div><span>{inv.invoiceType.toLowerCase().replaceAll('_', ' ')} · {inv.branchName}</span><strong>{inv.invoiceType === 'ADMISSION' ? inv.status === 'PAID' && inv.paymentDate ? `Paid ${toBsLabel(inv.paymentDate)}` : 'Awaiting admission payment' : toBsMonthLabel(inv.billingCycleStart)}</strong></div>
                           {inv.status === 'PAID' ? <StatusBadge variant="success">Paid</StatusBadge> : inv.overdue ? <StatusBadge variant="error">Overdue</StatusBadge> : <StatusBadge variant="warning">Unpaid</StatusBadge>}
                         </header>
                         <div className="fee-invoice-copy">
@@ -556,6 +557,7 @@ export function AcademicFees({ canRetryAdmissionLogins = true }: { canRetryAdmis
             <dl className="fee-payment-facts">
               <div><dt>Student</dt><dd>{payStudent.name}</dd></div>
               <div><dt>Invoice</dt><dd>{paymentInvoice.invoiceType.toLowerCase().replaceAll('_', ' ')}</dd></div>
+              <div><dt>Invoice branch</dt><dd>{paymentInvoice.branchName}</dd></div>
               <div><dt>Amount received</dt><dd>{money(paymentInvoice.netPayable)}</dd></div>
               <div><dt>Due date</dt><dd>{toBsLabel(paymentInvoice.dueDate)} · {adDate(paymentInvoice.dueDate)} AD</dd></div>
             </dl>

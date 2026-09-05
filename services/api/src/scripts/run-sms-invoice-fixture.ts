@@ -137,6 +137,7 @@ async function main(): Promise<void> {
       const invoice = await prisma.invoice.create({
         data: {
           tenantId: tenant.id,
+          branchId: branch.id,
           studentId: studentUser.student.id,
           amount,
           discount: 0,

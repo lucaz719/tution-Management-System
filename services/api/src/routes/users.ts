@@ -362,6 +362,7 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
         data: {
           tenantId: req.tenantId!,
           studentId: student.id,
+          branchId,
           invoiceType: 'ADMISSION',
           panNumberSnapshot: tenant.panNumber,
           vatRateSnapshot: tenant.vatRate,
@@ -507,6 +508,7 @@ router.get('/', authMiddleware, async (req: TenantRequest, res: Response) => {
 async function studentFeeSummary(studentId: string) {
   const invoices = await prisma.invoice.findMany({
     where: { studentId },
+    include: { branch: { select: { name: true } } },
     orderBy: { dueDate: 'desc' },
   });
   const num = (v: any) => Number(v ?? 0);
@@ -538,6 +540,7 @@ async function studentFeeSummary(studentId: string) {
       createdAt: i.createdAt,
       billingCycleStart: i.billingCycleStart,
       billingCycleEnd: i.billingCycleEnd,
+      branchName: i.branch.name,
     })),
   };
 }
@@ -574,7 +577,7 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
           orderBy: { date: 'desc' },
           take: 60,
         },
-        invoices: { orderBy: { dueDate: 'desc' }, take: 12 },
+        invoices: { include: { branch: { select: { name: true } } }, orderBy: { dueDate: 'desc' }, take: 12 },
         certificates: { include: { template: true }, orderBy: { issuedDate: 'desc' } },
       },
     });
@@ -778,7 +781,7 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
         studentName: `${student.user.firstName} ${student.user.lastName}`,
         admissionNumber: student.admissionNumber,
         gradeName: student.grade?.name ?? null,
-        branchName: student.enrollments[0]?.class.branch.name ?? null,
+        branchName: invoice.branch.name,
         issuedAt: invoice.createdAt,
         dueDate: invoice.dueDate,
         paymentDate: invoice.paymentDate,

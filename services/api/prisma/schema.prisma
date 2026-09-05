@@ -227,6 +227,9 @@ model Branch {
   academicEvents     AcademicEvent[]
   certificates       Certificate[]
   expenses           Expense[]
+  invoices           Invoice[]
+  paymentAttempts    PaymentAttempt[]
+  payrolls           Payroll[]
 }
 
 // 3. RBAC Roles
@@ -670,6 +673,8 @@ model Invoice {
   tenant            Tenant           @relation(fields: [tenantId], references: [id])
   studentId         String
   student           Student          @relation(fields: [studentId], references: [id])
+  branchId          String
+  branch            Branch           @relation(fields: [branchId], references: [id])
   amount            Decimal          @db.Decimal(12, 2)
   discount          Decimal          @default(0.00) @db.Decimal(12, 2)
   fine              Decimal          @default(0.00) @db.Decimal(12, 2)
@@ -691,6 +696,7 @@ model Invoice {
 
   // A student can receive only one recurring invoice of each type per BS cycle.
   @@unique([studentId, invoiceType, billingCycleStart])
+  @@index([tenantId, branchId, dueDate])
 }
 
 model PaymentAttempt {
@@ -699,6 +705,8 @@ model PaymentAttempt {
   tenant             Tenant               @relation(fields: [tenantId], references: [id])
   invoiceId          String
   invoice            Invoice              @relation(fields: [invoiceId], references: [id])
+  branchId           String
+  branch             Branch               @relation(fields: [branchId], references: [id])
   provider           PaymentProvider
   status             PaymentAttemptStatus @default(PENDING)
   txnId              String               @unique
@@ -721,6 +729,7 @@ model PaymentAttempt {
 
   @@index([tenantId, status, createdAt])
   @@index([invoiceId, provider, status])
+  @@index([tenantId, branchId, createdAt])
 }
 
 // 17. Leaves
@@ -1149,6 +1158,8 @@ model Payroll {
   tenant               Tenant      @relation(fields: [tenantId], references: [id])
   staffRecordId        String
   staffRecord          StaffRecord @relation(fields: [staffRecordId], references: [id])
+  branchId             String
+  branch               Branch      @relation(fields: [branchId], references: [id])
   month                Int
   year                 Int
   payslipNumber        String      @unique
@@ -1173,6 +1184,7 @@ model Payroll {
 
   @@unique([staffRecordId, month, year])
   @@index([tenantId, year, month, status])
+  @@index([tenantId, branchId, year, month])
 }
 
 model RefundRequest {
