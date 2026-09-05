@@ -53,7 +53,6 @@ interface Invoice {
   billingCycleStart: string;
   billingCycleEnd: string;
   paymentDate: string | null;
-  branchName: string;
 }
 
 interface LoginDelivery {
