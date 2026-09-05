@@ -19,7 +19,7 @@ export interface BillingLedger {
   students: Array<{
     studentId: string; studentName: string; email: string; grade: string; branchId: string | null; branchName: string;
     admissionDate: string; courseEnd: string; monthlyAmount: number; invoices: BillingInvoice[];
-    projections: Array<{ cycleStart: string; cycleEnd: string; dueDate: string; amount: number }>;
+    projections: Array<{ cycleStart: string; cycleEnd: string; dueDate: string; amount: number; billingPeriod: string }>;
   }>;
   teachers: Array<{
     teacherId: string; userId: string; teacherName: string; email: string; designation: string; contractType: string;
@@ -92,6 +92,51 @@ export interface BranchAdminDashboardData {
   appointments: Array<{ id: string; parent: string; student: string; preferredTime: string; description: string }>;
 }
 
+export interface AcademicClassEnrollment {
+  id: string;
+  studentId: string;
+  status: 'ACTIVE' | 'BLOCKED';
+  studentName: string;
+  studentEmail: string;
+}
+
+export interface AcademicClass {
+  id: string;
+  name: string;
+  courseId: string;
+  courseName: string;
+  courseType: string;
+  gradeId: string | null;
+  gradeName: string | null;
+  branchId: string;
+  branchName: string;
+  teacherId: string | null;
+  teacherName: string | null;
+  enrollmentCount: number;
+  enrollments: AcademicClassEnrollment[];
+  schedule: unknown;
+  academicYear: string;
+  effectiveFrom: string | null;
+  effectiveUntil: string | null;
+  archivedAt: string | null;
+  hasEnrollmentHistory: boolean;
+}
+
+export interface ClassDependencies {
+  archived: boolean;
+  canArchive: boolean;
+  canDelete: boolean;
+  dependencies: {
+    activeEnrollments: number;
+    enrollmentHistory: number;
+    sessions: number;
+    attendanceRecords: number;
+    homework: number;
+    syllabi: number;
+    resultDefinitions: number;
+  };
+}
+
 export interface BranchAppointment {
   id: string;
   status: 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'ALTERNATIVE_PROPOSED' | 'CONFIRMED' | 'CANCELLED';
@@ -161,7 +206,7 @@ export const api = {
     decideManualPayment: async (id: string, decision: 'APPROVE' | 'REJECT', remarks: string) => request<{ message: string }>(`/finances/manual-payments/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify({ decision, remarks }) }),
     getAccountantWorkspace: async () => request<AccountantWorkspace>('/finances/accountant-workspace'),
     getBillingLedger: async () => request<BillingLedger>('/finances/billing-ledger'),
-    createInvoice: async (payload: { studentId: string; amount: number; discount: number; fine: number; invoiceType: 'TUITION' | 'SUBJECT' | 'ACTIVITY'; billingCycleStart: string; billingCycleEnd: string; dueDate: string }) =>
+    createInvoice: async (payload: { studentId: string; amount: number; discount: number; fine: number; invoiceType: 'TUITION' | 'SUBJECT' | 'ACTIVITY'; periodAnchor: string }) =>
       request<{ message: string; invoice: BillingInvoice }>('/finances/billing-ledger/invoices', { method: 'POST', body: JSON.stringify(payload) }),
     createPayroll: async (payload: { staffRecordId: string; month: number; year: number; bonuses: number; deductions: number }) =>
       request<{ message: string; payroll: BillingPayroll }>('/finances/billing-ledger/payrolls', { method: 'POST', body: JSON.stringify(payload) }),
@@ -241,8 +286,9 @@ export const api = {
     getForecast: async () => request<any>('/finances/forecast'),
     getSuggestions: async () => request<any>('/finances/suggestions'),
     exportLedger: async () => request<{ format: string; entries: any[] }>('/finances/ledger/export'),
-    getBillingPeriod: async () => {
-      return request<{ label: string; bsYear: number; bsMonthName: string; bsMonthNameNp: string; daysInMonth: number; cycleStart: string; cycleEnd: string; dueDate: string }>('/finances/billing-period');
+    getBillingPeriod: async (anchor?: string) => {
+      const query = anchor ? `?anchor=${encodeURIComponent(anchor)}` : '';
+      return request<{ label: string; bsYear: number; bsMonthName: string; bsMonthNameNp: string; daysInMonth: number; cycleStart: string; cycleEnd: string; dueDate: string }>(`/finances/billing-period${query}`);
     },
     getOverview: async () => {
       return request<{ collected: number; outstanding: number; overdueAmount: number; overdueStudents: number; invoiceCount: number; billingPeriod: string }>('/finances/overview');
@@ -513,13 +559,22 @@ export const api = {
         results: Array<{ index: number; name: string; status: 'created' | 'skipped' | 'error'; error?: string }>;
       }>('/courses/bulk', { method: 'POST', body: JSON.stringify(payload) });
     },
-    listClasses: async () => {
-      const data = await request<{ classes: any[] }>('/courses/classes');
+    listClasses: async (options: { includeArchived?: boolean; signal?: AbortSignal } = {}) => {
+      const data = await request<{ classes: AcademicClass[] }>(`/courses/classes${options.includeArchived ? '?includeArchived=true' : ''}`, { signal: options.signal });
       return data.classes ?? [];
     },
-    listEligibleClassStudents: async (classId: string) => {
-      const data = await request<{ students: Array<{ studentId: string; studentName: string; studentEmail: string }> }>(`/courses/classes/${encodeURIComponent(classId)}/eligible-students`);
+    listEligibleClassStudents: async (classId: string, signal?: AbortSignal) => {
+      const data = await request<{ students: Array<{ studentId: string; studentName: string; studentEmail: string }> }>(`/courses/classes/${encodeURIComponent(classId)}/eligible-students`, { signal });
       return data.students ?? [];
+    },
+    getClassDependencies: async (classId: string, signal?: AbortSignal) => request<ClassDependencies>(`/courses/classes/${encodeURIComponent(classId)}/dependencies`, { signal }),
+    setClassArchived: async (classId: string, archived: boolean) => request<{ message: string; class: AcademicClass }>(`/courses/classes/${encodeURIComponent(classId)}/archive`, { method: 'PATCH', body: JSON.stringify({ archived }) }),
+    moveClassStudents: async (sourceClassId: string, targetClassId: string, studentIds: string[]) => request<{ message: string; moved: number }>(`/courses/classes/${encodeURIComponent(sourceClassId)}/move-students`, { method: 'POST', body: JSON.stringify({ targetClassId, studentIds }) }),
+    setupClass: async (payload: { branchId: string; gradeId: string; courseName: string; courseType: 'REGULAR' | 'SHORT_TERM'; className: string; monthlyBase: number; teacherId?: string | null; studentIds: string[] }) => {
+      return request<{ message: string; course: any; class: any }>('/courses/classes/setup', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
     },
     createClass: async (payload: { courseId: string; name: string; schedule: unknown; teacherId?: string | null; academicYear?: string; effectiveFrom?: string | null; effectiveUntil?: string | null }) => {
       return request<{ message: string; class: any }>('/courses/classes', {

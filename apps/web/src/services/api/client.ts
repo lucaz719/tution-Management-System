@@ -42,12 +42,7 @@ export const API_ORIGIN = new URL(API_BASE_URL).origin;
 export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
   if (options.body != null && !(options.body instanceof FormData)) headers.set('Content-Type', 'application/json');
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers, credentials: 'include' });
-  } catch (error) {
-    throw error;
-  }
+  const response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers, credentials: 'include' });
   if (!response.ok) {
     const body = await response.json().catch(() => ({})) as {
       error?: string; message?: string; fieldErrors?: ApiFieldError[];
@@ -56,7 +51,7 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
     if (response.status === 401 && window.location.pathname !== '/login') {
       localStorage.removeItem('tms_user');
       sessionStorage.removeItem('tms_user');
-      window.location.assign('/login');
+      window.location.replace('/session-ended?reason=expired');
     }
     throw error;
   }

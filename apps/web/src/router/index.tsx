@@ -10,6 +10,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { findNavigationItem, mapAuthRoleToDashboardRole, type DashboardRole } from '../components/patterns/dashboardNavigation';
 import type { UserRole } from '../features/auth/types';
+import { NotFoundPage, RouteFailurePage, SessionStatePage } from '../components/patterns/SystemStatePage';
 
 const DashboardShell = lazy(() => import('../components/patterns/DashboardShell').then((module) => ({ default: module.DashboardShell })));
 const SessionTimeoutDialog = lazy(() => import('../components/ui/SessionTimeoutDialog').then((module) => ({ default: module.SessionTimeoutDialog })));
@@ -57,7 +58,7 @@ const SecurityPage = lazy(() => import('../pages/SecurityPage').then((module) =>
 const PaymentResultPage = lazy(() => import('../pages/PaymentResultPage').then((module) => ({ default: module.PaymentResultPage })));
 
 function RequireAuth() {
-  const { isAuthenticated, isLoading, isTwoFactorPending } = useAuth();
+  const { isAuthenticated, isLoading, isTwoFactorPending, sessionIssue } = useAuth();
 
   if (isLoading) {
     return <FullPageSpinner />;
@@ -68,7 +69,8 @@ function RequireAuth() {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    if (sessionIssue === 'signed-out') return <Navigate to="/login" replace />;
+    return <Navigate to={`/session-ended?reason=${sessionIssue === 'unavailable' ? 'unavailable' : 'missing'}`} replace />;
   }
 
   return (
@@ -217,6 +219,7 @@ function RoleWorkspacePlaceholder({ role }: { role: DashboardRole }) {
 
 const router = createBrowserRouter([
   {
+    errorElement: <RouteFailurePage />,
     element: <RedirectIfAuth />,
     children: [
       {
@@ -226,15 +229,18 @@ const router = createBrowserRouter([
           { path: '/forgot-password', element: <Suspense fallback={<FullPageSpinner />}><ForgotPasswordPage /></Suspense> },
           { path: '/reset-password', element: <Navigate to="/forgot-password" replace /> },
           { path: '/reset-password/:token', element: <Suspense fallback={<FullPageSpinner />}><ResetPasswordPage /></Suspense> },
+          { path: '/session-ended', element: <SessionStatePage /> },
         ],
       },
     ],
   },
   {
     path: '/force-change-password',
+    errorElement: <RouteFailurePage />,
     element: <Suspense fallback={<FullPageSpinner />}><ForceChangePasswordPage /></Suspense>,
   },
   {
+    errorElement: <RouteFailurePage />,
     element: <RequireTwoFactor />,
     children: [
       { path: '/2fa', element: <Suspense fallback={<FullPageSpinner />}><TwoFactorPage /></Suspense> },
@@ -242,6 +248,7 @@ const router = createBrowserRouter([
     ],
   },
   {
+    errorElement: <RouteFailurePage />,
     element: <RequireAuth />,
     children: [
       {
@@ -347,7 +354,7 @@ const router = createBrowserRouter([
     ],
   },
   { path: '/', element: <Navigate to="/login" replace /> },
-  { path: '*', element: <Navigate to="/login" replace /> },
+  { path: '*', element: <NotFoundPage />, errorElement: <RouteFailurePage /> },
 ]);
 
 export function AppRouter() {

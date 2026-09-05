@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import forge from 'node-forge';
 import prisma from './db';
 import { activateAdmissionAndSendLogins } from './admission-logins';
+import { getAdmissionTenure } from './nepali';
 
 interface ConnectIpsConfig {
   merchantId: number;
@@ -173,6 +174,7 @@ export async function validateAndConfirmConnectIps(txnId: string) {
     return prisma.paymentAttempt.findUniqueOrThrow({ where: { id: attempt.id } });
   }
 
+  const admissionTenure = attempt.invoice.invoiceType === 'ADMISSION' ? await getAdmissionTenure(now) : null;
   const confirmed = await prisma.$transaction(async (tx) => {
     const claim = await tx.paymentAttempt.updateMany({
       where: { id: attempt.id, status: { not: 'SUCCESS' } },
@@ -196,7 +198,7 @@ export async function validateAndConfirmConnectIps(txnId: string) {
         id: attempt.invoiceId,
         status: { in: ['UNPAID', 'OVERDUE', 'BLOCKED_OVERRIDE'] },
       },
-      data: { status: 'PAID', transactionId: attempt.txnId, paymentDate: now },
+      data: { status: 'PAID', transactionId: attempt.txnId, paymentDate: now, ...(admissionTenure ? { billingCycleStart: admissionTenure.start, billingCycleEnd: admissionTenure.end } : {}) },
     });
     if (invoiceTransition.count !== 1) {
       const paidInvoice = await tx.invoice.findUniqueOrThrow({ where: { id: attempt.invoiceId } });

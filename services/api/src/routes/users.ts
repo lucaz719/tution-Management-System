@@ -19,6 +19,7 @@ import { invoiceLineItems } from '../utils/invoice-document';
 import { normalizeSchedule } from '../utils/schedule';
 import { parseStrictKeys, parseStrictObject, readFiniteNumber, readTrimmedString } from '../utils/request-validation';
 import { salaryStructureFor, type SupportedContractType } from '../services/payroll-service';
+import { getAdmissionTenure } from '../utils/nepali';
 
 const router = Router();
 
@@ -304,6 +305,7 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
   };
   const dueDate = new Date(now);
   dueDate.setDate(dueDate.getDate() + 7);
+  const admissionTenure = await getAdmissionTenure(now);
 
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -366,8 +368,8 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
           lineItemsSnapshot: [{ label: 'One-time admission fee', amount: Number(branch.admissionFee) }],
           amount: branch.admissionFee,
           netPayable: branch.admissionFee,
-          billingCycleStart: now,
-          billingCycleEnd: now,
+          billingCycleStart: admissionTenure.start,
+          billingCycleEnd: admissionTenure.end,
           dueDate,
           status: branch.admissionFee > 0 ? 'UNPAID' : 'PAID',
           paymentDate: branch.admissionFee > 0 ? null : now,

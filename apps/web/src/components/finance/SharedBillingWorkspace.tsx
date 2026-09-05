@@ -116,17 +116,13 @@ export function SharedBillingWorkspace({ heading = "Billing & payroll" }: { head
     try {
       if (createMode === "student") {
         const start = new Date(year, month - 1, 1);
-        const end = new Date(year, month, 0);
-        const due = new Date(year, month - 1, 10);
         const result = await api.finances.createInvoice({
           studentId: personId,
           amount: Number(amount),
           discount: Number(discount),
           fine: Number(fine),
           invoiceType,
-          billingCycleStart: isoDate(start),
-          billingCycleEnd: isoDate(end),
-          dueDate: isoDate(due),
+          periodAnchor: isoDate(start),
         });
         setMessage(result.message);
       } else {

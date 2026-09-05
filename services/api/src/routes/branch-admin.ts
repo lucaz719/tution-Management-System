@@ -113,13 +113,13 @@ router.get('/teacher-workflows', async (req: TenantRequest, res: Response) => {
     prisma.homework.findMany({ where: { class: { branchId, course: { tenantId: req.tenantId! } } }, include: { class: { include: { assignedTeacher: { select: { firstName: true, lastName: true } } } } }, orderBy: { createdAt: 'desc' }, take: 100 }),
     prisma.resultDefinition.findMany({ where: { tenantId: req.tenantId!, branchId }, include: { scores: { select: { publishedAt: true } } }, orderBy: { testDate: 'desc' } }),
     prisma.leave.findMany({ where: { tenantId: req.tenantId!, branchId, user: { userRoles: { some: { role: { name: 'Teacher' } } } } }, include: { user: { select: { firstName: true, lastName: true } } }, orderBy: { createdAt: 'desc' }, take: 100 }),
-    prisma.class.findMany({ where: { branchId, course: { tenantId: req.tenantId! }, teacherId: { not: null } }, include: { course: { select: { name: true } }, assignedTeacher: { select: { firstName: true, lastName: true } } }, orderBy: { name: 'asc' } }),
+    prisma.class.findMany({ where: { branchId, archivedAt: null, course: { tenantId: req.tenantId! }, teacherId: { not: null } }, include: { course: { select: { name: true } }, assignedTeacher: { select: { firstName: true, lastName: true } } }, orderBy: { name: 'asc' } }),
     prisma.user.findMany({
       where: { tenantId: req.tenantId!, userRoles: { some: { branchId, role: { name: 'Teacher' } } } },
       select: {
         id: true, firstName: true, lastName: true, email: true, phone: true, status: true, image: true, createdAt: true,
         staffRecord: { select: { joiningDate: true, designation: true, contractType: true, salaryStructure: true, payrolls: { orderBy: [{ year: 'desc' }, { month: 'desc' }], take: 6 } } },
-        assignedClasses: { where: { branchId }, select: { id: true, name: true, schedule: true, course: { select: { name: true } }, _count: { select: { enrollments: true } } }, orderBy: { name: 'asc' } },
+        assignedClasses: { where: { branchId, archivedAt: null }, select: { id: true, name: true, schedule: true, course: { select: { name: true } }, _count: { select: { enrollments: true } } }, orderBy: { name: 'asc' } },
         teacherAttendance: { where: { branchId, timestamp: { gte: attendanceSince } }, select: { stampType: true, timestamp: true }, orderBy: { timestamp: 'desc' } },
       },
       orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
@@ -132,7 +132,7 @@ router.post('/result-definitions', async (req: TenantRequest, res: Response) => 
   const { branchId, classId } = req.body; const title = String(req.body?.title || '').trim(); const testDate = new Date(req.body?.testDate);
   if (!branchAllowed(req, branchId, 'manage_branch_calendar')) return res.status(403).json({ error: 'You cannot create results for this branch.' });
   if (!classId || !title || Number.isNaN(testDate.getTime())) return res.status(400).json({ error: 'Class, result title, and test date are required.' });
-  const klass = await prisma.class.findFirst({ where: { id: classId, branchId, course: { tenantId: req.tenantId! } }, include: { course: { select: { name: true } } } }); if (!klass) return res.status(404).json({ error: 'Class not found in this branch.' });
+  const klass = await prisma.class.findFirst({ where: { id: classId, branchId, archivedAt: null, course: { tenantId: req.tenantId! } }, include: { course: { select: { name: true } } } }); if (!klass) return res.status(404).json({ error: 'Active class not found in this branch.' });
   const definition = await prisma.resultDefinition.create({ data: { tenantId: req.tenantId!, branchId, classId, createdBy: req.user!.id, title, subject: klass.course.name, testDate } });
   return res.status(201).json({ message: 'Result created and made available to the assigned teacher.', definition });
 });

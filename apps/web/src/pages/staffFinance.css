@@ -123,8 +123,10 @@
 .accountant-cap-strip strong { font-size: 14px; font-variant-numeric: tabular-nums; }
 .accountant-toolbar { padding: var(--sp-3); border: 1px solid var(--accountant-border); border-radius: var(--radius-md); background: var(--accountant-card); display: flex; align-items: center; gap: var(--sp-3); }
 .accountant-search { flex: 1; min-width: 0; display: grid; gap: 6px; color: var(--accountant-ink); font-size: 12px; font-weight: 700; }
-.accountant-search-control { position: relative; }
-.accountant-search-control .material-symbols-outlined { position: absolute; left: 12px; top: 50%; translate: 0 -50%; pointer-events: none; color: var(--accountant-muted); font-size: 20px; }
+.accountant-search-control { position: relative; width: 100%; }
+.accountant-search-control .material-symbols-outlined { position: absolute; z-index: 1; left: 12px; top: 50%; translate: 0 -50%; pointer-events: none; color: var(--accountant-muted); font-size: 20px; line-height: 1; }
+.accountant-search-control input { width: 100%; min-height: 40px; padding: 9px 12px 9px 44px; border: 1px solid var(--accountant-border); border-radius: var(--radius-sm); color: var(--accountant-ink); background: var(--bg-background); font: inherit; font-weight: 400; }
+.accountant-search-control input:focus-visible { outline: 3px solid color-mix(in srgb, var(--color-primary) 24%, transparent); outline-offset: 1px; border-color: var(--color-primary); }
 .accountant-filter { display: grid; gap: 6px; color: var(--accountant-ink); font-size: 12px; font-weight: 700; }
 .accountant-toolbar input, .accountant-toolbar select { min-height: 40px; border: 1px solid var(--accountant-border); border-radius: var(--radius-sm); color: var(--accountant-ink); background: var(--bg-background); }
 .accountant-toolbar input { width: 100%; padding: 9px 12px 9px 44px; }
@@ -149,7 +151,7 @@
 .accountant-readonly dt { color: var(--accountant-muted); font-size: 12px; }
 .accountant-readonly dd { margin-top: var(--sp-2); font-family: var(--font-display); font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .accountant-readonly dd.is-positive { color: var(--color-success); }
-.accountant-modal-layer { position: fixed; inset: 0; z-index: 1500; padding: var(--sp-5); background: color-mix(in srgb, var(--color-primary-dark) 54%, transparent); backdrop-filter: blur(4px); display: grid; place-items: center; }
+.accountant-modal-layer { position: fixed; inset: 0; z-index: 1500; padding: var(--sp-5); background: color-mix(in srgb, var(--color-primary-dark) 54%, transparent); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); display: grid; place-items: center; }
 .accountant-modal { width: min(100%, 780px); max-height: calc(100vh - 48px); overflow-y: auto; border-radius: var(--radius-lg); color: var(--color-text); background: var(--color-surface); box-shadow: var(--shadow-modal); }
 .accountant-modal > header { padding: var(--sp-5); border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-4); }
 .accountant-modal h2 { font-family: var(--font-display); font-size: 23px; font-weight: 600; }
@@ -232,7 +234,7 @@
 .accountant-header-actions { display: flex; gap: var(--sp-3); }
 .accountant-button { padding: 9px 18px; border: 1px solid var(--accountant-border); border-radius: var(--radius-md); font-weight: 600; font-size: 13.5px; color: var(--color-primary-dark); background: linear-gradient(180deg, var(--color-surface), color-mix(in srgb, var(--color-surface) 95%, var(--color-primary))); cursor: pointer; box-shadow: 0 2px 4px color-mix(in srgb, var(--color-primary) 5%, transparent); transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
 .accountant-button:hover { border-color: var(--color-primary); box-shadow: 0 4px 8px color-mix(in srgb, var(--color-primary) 12%, transparent); transform: translateY(-1px); }
-.accountant-controls { padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-4); border: 1px solid var(--accountant-border); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--color-surface) 60%, transparent); backdrop-filter: blur(12px); display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; box-shadow: 0 4px 12px color-mix(in srgb, var(--color-primary-dark) 3%, transparent); }
+.accountant-controls { padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-4); border: 1px solid var(--accountant-border); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--color-surface) 60%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; box-shadow: 0 4px 12px color-mix(in srgb, var(--color-primary-dark) 3%, transparent); }
 .accountant-tabs { display: inline-flex; background: color-mix(in srgb, var(--accountant-border) 40%, transparent); padding: 4px; border-radius: var(--radius-md); gap: 2px; }
 .accountant-tabs button { padding: 7px 16px; border: 0; border-radius: calc(var(--radius-md) - 2px); background: transparent; color: var(--accountant-muted); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s ease-out; }
 .accountant-tabs button[aria-selected="true"] { background: var(--color-surface); color: var(--color-primary); box-shadow: 0 2px 4px color-mix(in srgb, var(--color-primary-dark) 5%, transparent); }
@@ -287,6 +289,12 @@
 .admission-fieldset { display: grid; gap: 12px; margin: 0; padding: 16px; border: 1px solid var(--border); border-radius: 10px; }
 .admission-fieldset legend { padding: 0 6px; font-weight: 700; color: var(--color-text); }
 .admission-fieldset label { display: grid; gap: 6px; font-size: 13px; font-weight: 700; color: var(--color-text); }
+.admission-parent-warning { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid var(--color-warning); border-radius: 10px; background: color-mix(in srgb, var(--color-warning) 10%, var(--bg-card)); }
+.admission-parent-warning p { margin: 4px 0 0; color: var(--text-muted); font-size: 13px; }
+.admission-parent-warning button { min-height: 40px; flex: 0 0 auto; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); color: var(--color-primary); font: inherit; font-weight: 700; cursor: pointer; }
+.admission-parent-warning button:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.admission-parent-ready { margin: 0; padding: 10px 12px; border-left: 3px solid var(--color-success); border-radius: 10px; background: color-mix(in srgb, var(--color-success) 9%, var(--bg-card)); color: var(--color-text); font-size: 13px; font-weight: 700; }
+@media (max-width: 640px) { .admission-parent-warning { align-items: stretch; flex-direction: column; } .admission-parent-warning button { width: 100%; } }
 .admission-result-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
 .admission-print-record { margin-top: 20px; padding: 24px; border: 1px solid var(--border); color: var(--color-text); background: var(--color-surface); }
 .admission-print-record > header { display: flex; justify-content: space-between; gap: 24px; padding-bottom: 16px; border-bottom: 2px solid var(--color-primary); }
@@ -523,6 +531,7 @@
 
 .admin-detail-dialog::backdrop {
   background: rgba(15, 23, 42, 0.52);
+  -webkit-backdrop-filter: blur(2px);
   backdrop-filter: blur(2px);
 }
 

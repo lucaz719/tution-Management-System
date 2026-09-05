@@ -366,11 +366,11 @@ async function main(): Promise<void> {
       'non-admin roles must not receive the branch-management projection or geofence configuration');
 
     response = await request('GET', '/api/finances/overview', branchAdminCookie);
-    assert.equal(response.status, 403,
-      'Branch Admin must not receive institution-wide finance totals');
+    assert.equal(response.status, 200,
+      'Branch Admin should receive finance totals scoped to the assigned branch');
     response = await request('GET', '/api/finances/overview', accountantCookie);
-    assert.equal(response.status, 403,
-      'branch-scoped finance roles must use their scoped workspace, not tenant-wide totals');
+    assert.equal(response.status, 200,
+      'branch-scoped finance roles should receive fee totals for their permitted branches');
 
     response = await request('GET', '/api/tenant-admin/dashboard', adminACookie);
     assert.equal(response.status, 200,
@@ -681,6 +681,11 @@ async function main(): Promise<void> {
     assert(response.body.pettyCash.some((item: any) => item.id === pettyCashId), 'Accountant workspace must include the caller\'s request');
     assert(!response.body.pettyCash.some((item: any) => item.id === adminPettyCash.body.pettyCash.id), 'Accountant workspace must hide another requester\'s petty cash');
     assert(response.body.invoices.every((invoice: any) => invoice.branchId === branchA.id), 'Accountant invoices must stay within assigned branches');
+    response = await request('GET', '/api/finances/overview', accountantCookie);
+    assert.equal(response.status, 200, 'Accountant must be able to load the shared fee overview');
+    response = await request('GET', '/api/finances/students', accountantCookie);
+    assert.equal(response.status, 200, 'Accountant must be able to load the shared fee student list');
+    assert(response.body.students.every((student: any) => student.branchId === branchA.id), 'Shared fee page must remain branch-scoped for Accountants');
     response = await request('GET', '/api/finances/petty-cash', accountantCookie);
     assert.equal(response.status, 200);
     assert(response.body.every((item: any) => item.accountantId === accountantA.id), 'Accountant petty-cash list must contain only owned records');
