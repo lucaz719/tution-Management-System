@@ -306,6 +306,7 @@ const router = createBrowserRouter([
               { path: '/branch/staff', element: <Suspense fallback={<FullPageSpinner />}><PeopleDirectory /></Suspense> },
               { path: '/branch/admissions', element: <Suspense fallback={<FullPageSpinner />}><TenantAdmissionsPage /></Suspense> },
               { path: '/branch/students', element: <Suspense fallback={<FullPageSpinner />}><AcademicStudents /></Suspense> },
+              { path: '/branch/payments', element: <Suspense fallback={<FullPageSpinner />}><TenantPaymentsPage /></Suspense> },
               { path: '/branch/*', element: <Suspense fallback={<FullPageSpinner />}><BranchAdminWorkspace /></Suspense> },
             ],
           },

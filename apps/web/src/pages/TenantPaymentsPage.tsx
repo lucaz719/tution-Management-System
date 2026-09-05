@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../components/ui/Button';
 import { StatusBadge, type StatusBadgeVariant } from '../components/ui/StatusBadge';
 import { api } from '../services/api';
-import { errorMessage } from '../services/api/client';
+import { ApiError, errorMessage } from '../services/api/client';
 
 type PaymentAttempt = Awaited<ReturnType<typeof api.finances.getPaymentAttempts>>['attempts'][number];
 type Filter = 'ALL' | 'REVIEW' | 'SUCCESS' | 'PENDING' | 'FAILED';
@@ -37,11 +37,39 @@ export function TenantPaymentsPage() {
 
   const load = async (quiet = false) => {
     quiet ? setRefreshing(true) : setLoading(true); setError('');
-    try { const result = await api.finances.getPaymentAttempts(); setAttempts(result.attempts); }
+    try {
+      try {
+        const result = await api.finances.getPaymentAttempts();
+        setAttempts(result.attempts);
+      } catch (cause) {
+        if (!(cause instanceof ApiError) || cause.status !== 404) throw cause;
+        const fallback = await api.finances.getManualPayments();
+        setAttempts(fallback.attempts.map((item) => ({
+          ...item,
+          provider: 'BANK' as const,
+          gatewayStatus: item.status === 'PENDING' ? 'AWAITING_REVIEW' : null,
+          gatewayMessage: null,
+          confirmedAt: item.status === 'SUCCESS' ? item.reviewedAt : null,
+          failedAt: item.status === 'FAILED' ? item.reviewedAt : null,
+          invoiceStatus: item.status === 'SUCCESS' ? 'PAID' : 'UNPAID',
+        })));
+      }
+    }
     catch (cause) { setError(errorMessage(cause)); }
     finally { setLoading(false); setRefreshing(false); }
   };
   useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === 'visible') void load(true); };
+    const interval = window.setInterval(refresh, 30_000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, []);
 
   const decide = async (id: string, decision: 'APPROVE' | 'REJECT') => {
     setReviewing(id); setError(''); setNotice('');
@@ -80,7 +108,7 @@ export function TenantPaymentsPage() {
     </section>
     <section className="payments-card payments-activity">
       <div className="payments-activity-head"><div><h2>Payment activity</h2><p>One view for online confirmations and manually verified QR payments.</p></div><span>{attempts.length} records</span></div>
-      <div className="payments-toolbar"><label className="payments-search"><span className="material-symbols-outlined" aria-hidden="true">search</span><span className="sr-only">Search payments</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search student, reference, or invoice" /></label><div className="payments-filters" aria-label="Filter payments">{filters.map((item) => <button key={item.value} type="button" className={filter === item.value ? 'is-active' : ''} aria-pressed={filter === item.value} onClick={() => setFilter(item.value)}>{item.label}</button>)}</div></div>
+      <div className="payments-toolbar"><label className="payments-search"><span className="material-symbols-outlined" aria-hidden="true">search</span><input type="search" aria-label="Search payments" autoComplete="off" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search student, reference, or invoice" /></label><div className="payments-filters" aria-label="Filter payments">{filters.map((item) => <button key={item.value} type="button" className={filter === item.value ? 'is-active' : ''} aria-pressed={filter === item.value} onClick={() => setFilter(item.value)}>{item.label}</button>)}</div></div>
       {visible.length ? <div className="payments-table-scroll"><table className="payments-table"><thead><tr><th>Payer / invoice</th><th>Method</th><th>Reference</th><th>Amount</th><th>Submitted</th><th>Status</th><th>Review</th></tr></thead><tbody>{visible.map((item) => {
         const needsReview = item.provider === 'BANK' && item.status === 'PENDING';
         return <tr key={item.id}><td><strong>{item.studentName}</strong><small>Invoice {item.invoiceId.slice(0, 8).toUpperCase()}</small></td><td><span className="payments-method"><span className="material-symbols-outlined" aria-hidden="true">{item.provider === 'CONNECTIPS' ? 'bolt' : 'qr_code_2'}</span>{item.provider === 'CONNECTIPS' ? 'connectIPS' : 'Manual QR'}</span></td><td><code>{item.referenceId}</code>{item.gatewayMessage ? <small>{item.gatewayMessage}</small> : null}</td><td className="payments-amount">NPR {item.amount.toLocaleString('en-NP')}</td><td>{new Date(item.createdAt).toLocaleString('en-NP')}</td><td><StatusBadge variant={statusVariant(item)}>{displayStatus(item)}</StatusBadge></td><td>{item.provider === 'BANK' ? <div className="payments-row-review">{item.receiptProof ? <a href={item.receiptProof} target="_blank" rel="noreferrer">View receipt</a> : null}{needsReview ? <><input aria-label={`Review note for ${item.studentName}`} value={remarks[item.id] || ''} maxLength={500} placeholder="Review note" onChange={(event) => setRemarks((current) => ({ ...current, [item.id]: event.target.value }))} /><div><Button type="button" disabled={reviewing === item.id} onClick={() => void decide(item.id, 'APPROVE')}>Approve</Button><Button type="button" variant="danger" disabled={reviewing === item.id || !(remarks[item.id] || '').trim()} onClick={() => void decide(item.id, 'REJECT')}>Reject</Button></div></> : item.reviewRemarks ? <small>{item.reviewRemarks}</small> : null}</div> : <small>Automatic verification</small>}</td></tr>;

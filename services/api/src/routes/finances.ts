@@ -121,7 +121,8 @@ async function loadStudentBillingAccess(req: TenantRequest, studentId: string) {
   const student = await prisma.student.findFirst({
     where: { id: studentId, user: { tenantId: req.tenantId! } },
     include: {
-      user: { include: { userRoles: true } },
+      grade: true,
+      user: { include: { userRoles: { include: { branch: true } } } },
       studentParents: { include: { parent: true } },
     },
   });
@@ -247,15 +248,17 @@ router.post('/manual-payment/:invoiceId', authMiddleware, async (req: TenantRequ
 });
 
 router.get('/manual-payments', authMiddleware, async (req: TenantRequest, res: Response) => {
-  if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may review payment receipts.' });
-  const attempts = await prisma.paymentAttempt.findMany({ where: { tenantId: req.tenantId!, provider: 'BANK', status: { in: ['PENDING', 'SUCCESS', 'FAILED'] } }, include: { invoice: { include: { student: { include: { user: true } } } } }, orderBy: { createdAt: 'desc' }, take: 100 });
+  const access = billingBranchScopes(req.user);
+  if (!access.isTenantAdmin && access.scopes.length === 0) return res.status(403).json({ error: 'You do not have access to payment receipts.' });
+  const attempts = await prisma.paymentAttempt.findMany({ where: { tenantId: req.tenantId!, provider: 'BANK', status: { in: ['PENDING', 'SUCCESS', 'FAILED'] }, ...(access.isTenantAdmin ? {} : { branchId: { in: access.scopes } }) }, include: { invoice: { include: { student: { include: { user: true } } } } }, orderBy: { createdAt: 'desc' }, take: 100 });
   return res.json({ attempts: attempts.map((attempt) => ({ id: attempt.id, txnId: attempt.txnId, referenceId: attempt.referenceId, amount: Number(attempt.amountPaisa) / 100, status: attempt.status, receiptProof: attempt.receiptProof, createdAt: attempt.createdAt, reviewedAt: attempt.reviewedAt, reviewRemarks: attempt.reviewRemarks, invoiceId: attempt.invoiceId, studentName: `${attempt.invoice.student.user.firstName} ${attempt.invoice.student.user.lastName}`.trim() })) });
 });
 
 router.get('/payment-attempts', authMiddleware, async (req: TenantRequest, res: Response) => {
-  if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may view payment activity.' });
+  const access = billingBranchScopes(req.user);
+  if (!access.isTenantAdmin && access.scopes.length === 0) return res.status(403).json({ error: 'You do not have access to payment activity.' });
   const attempts = await prisma.paymentAttempt.findMany({
-    where: { tenantId: req.tenantId!, provider: { in: ['CONNECTIPS', 'BANK'] } },
+    where: { tenantId: req.tenantId!, provider: { in: ['CONNECTIPS', 'BANK'] }, ...(access.isTenantAdmin ? {} : { branchId: { in: access.scopes } }) },
     include: { invoice: { include: { student: { include: { user: true } } } } },
     orderBy: { createdAt: 'desc' },
     take: 200,
@@ -282,14 +285,15 @@ router.get('/payment-attempts', authMiddleware, async (req: TenantRequest, res: 
 });
 
 router.post('/manual-payments/:id/decision', authMiddleware, async (req: TenantRequest, res: Response) => {
-  if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may review payment receipts.' });
+  const access = billingBranchScopes(req.user);
+  if (!access.isTenantAdmin && access.scopes.length === 0) return res.status(403).json({ error: 'You do not have access to review payment receipts.' });
   const shape = parseStrictKeys(req.body, ['decision', 'remarks']);
   if (!shape.success) return res.status(400).json({ error: shape.error });
   const decision = readTrimmedString(shape.data, 'decision', { required: true, maxLength: 10, pattern: /^(APPROVE|REJECT)$/, message: 'Decision must be APPROVE or REJECT.' });
   const remarks = readTrimmedString(shape.data, 'remarks', { required: false, maxLength: 500, message: 'Remarks are too long.' });
   if (!decision.success) return res.status(400).json({ error: decision.error });
   if (!remarks.success) return res.status(400).json({ error: remarks.error });
-  const attempt = await prisma.paymentAttempt.findFirst({ where: { id: req.params.id, tenantId: req.tenantId!, provider: 'BANK' }, include: { invoice: true } });
+  const attempt = await prisma.paymentAttempt.findFirst({ where: { id: req.params.id, tenantId: req.tenantId!, provider: 'BANK', ...(access.isTenantAdmin ? {} : { branchId: { in: access.scopes } }) }, include: { invoice: true } });
   if (!attempt) return res.status(404).json({ error: 'Payment submission not found.' });
   if (attempt.status !== 'PENDING') return res.status(409).json({ error: 'This payment submission was already reviewed.' });
   if (decision.data === 'REJECT') { await prisma.paymentAttempt.update({ where: { id: attempt.id }, data: { status: 'FAILED', gatewayStatus: 'REJECTED', reviewRemarks: remarks.data, reviewedBy: req.user!.id, reviewedAt: new Date(), failedAt: new Date() } }); return res.json({ message: 'Payment receipt rejected.' }); }
@@ -639,7 +643,7 @@ router.get('/accountant-workspace', authMiddleware, async (req: TenantRequest, r
     const monthStart = new Date();
     monthStart.setDate(1);
     monthStart.setHours(0, 0, 0, 0);
-    const [branches, invoices, requests, monthlyRequests, expenses, payrolls, tenant] = await Promise.all([
+    const [branches, invoices, requests, monthlyRequests, expenses, payrolls, tenant, pendingPaymentReviews] = await Promise.all([
       prisma.branch.findMany({
         where: { tenantId: req.tenantId!, ...(tenantWide ? {} : { id: { in: branchIds } }) },
         select: { id: true, name: true },
@@ -672,6 +676,7 @@ router.get('/accountant-workspace', authMiddleware, async (req: TenantRequest, r
       prisma.expense.findMany({ where: expenseWhere, orderBy: { date: 'desc' }, take: 500 }),
       prisma.payroll.findMany({ where: payrollWhere, take: 500 }),
       prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { pettyCashCapNpr: true } }),
+      prisma.paymentAttempt.count({ where: { tenantId: req.tenantId!, provider: 'BANK', status: 'PENDING', ...(tenantWide ? {} : { branchId: { in: billing.scopes } }) } }),
     ]);
 
     const invoiceSummary = summarizeInvoices(invoices);
@@ -697,6 +702,7 @@ router.get('/accountant-workspace', authMiddleware, async (req: TenantRequest, r
         invoiceCount: invoiceSummary.invoiceCount,
         openPettyCash: requests.filter((item) => item.status !== 'CLOSED' && item.status !== 'REJECTED').length,
         awaitingReceipt: requests.filter((item) => item.status === 'RELEASED').length,
+        pendingPaymentReviews,
       },
       pettyCash: requests.map((item) => ({
         id: item.id,
@@ -844,7 +850,7 @@ router.get(
       const invoiceScope = ownStudent || ownParent || billingAccess.isTenantAdmin
         ? {}
         : { branchId: { in: billingAccess.scopes } };
-      const [invoices, loginDeliveries] = await Promise.all([
+      const [invoices, loginDeliveries, tenant] = await Promise.all([
         prisma.invoice.findMany({
           where: { studentId: student.id, tenantId: req.tenantId!, ...invoiceScope },
           include: { branch: { select: { name: true } } },
@@ -863,6 +869,7 @@ router.get(
           WHERE "tenantId" = ${req.tenantId!} AND "studentId" = ${student.id}
           ORDER BY "recipient" ASC
         `,
+        prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { name: true, panNumber: true } }),
       ]);
       const normalizedInvoices = await Promise.all(invoices.map(async (invoice) => {
         if (invoice.invoiceType !== 'ADMISSION' || invoice.status !== 'PAID' || !invoice.paymentDate) return invoice;
@@ -875,6 +882,19 @@ router.get(
         invoices: normalizedInvoices.map((i) => ({
           id: i.id,
           invoiceType: i.invoiceType,
+          institutionName: tenant?.name ?? 'Institution',
+          panNumber: i.panNumberSnapshot || tenant?.panNumber || '',
+          vatRate: num(i.vatRateSnapshot),
+          studentName: `${student.user.firstName} ${student.user.lastName}`.trim(),
+          admissionNumber: student.admissionNumber,
+          gradeName: student.grade?.name ?? null,
+          issuedAt: i.createdAt,
+          transactionId: i.transactionId,
+          lines: Array.isArray(i.lineItemsSnapshot)
+            ? (i.lineItemsSnapshot as Array<{ label?: unknown; amount?: unknown }>).map((line) => ({ label: String(line.label || 'Charge'), amount: num(line.amount) }))
+            : [{ label: invoiceTypeLabel(i.invoiceType), amount: num(i.amount) }],
+          discount: num(i.discount),
+          fine: num(i.fine),
           netPayable: num(i.netPayable),
           status: i.status,
           overdue: invoiceOverdue(i),

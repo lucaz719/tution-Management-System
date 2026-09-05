@@ -46,6 +46,9 @@
 .accountant-icon-button:hover { color: var(--color-primary); background: color-mix(in srgb, var(--color-primary) 7%, transparent); }
 .accountant-icon-button .material-symbols-outlined { font-size: 20px; }
 .accountant-page button:focus-visible, .accountant-modal button:focus-visible, .accountant-page input:focus-visible, .accountant-page select:focus-visible, .accountant-modal input:focus-visible, .accountant-modal select:focus-visible, .accountant-modal textarea:focus-visible { outline: 3px solid color-mix(in srgb, var(--color-primary-light) 42%, transparent); outline-offset: 2px; }
+.billing-dialog-layer { position: fixed; inset: 0; z-index: 1250; display: grid; place-items: center; padding: var(--sp-5); background: color-mix(in srgb, var(--color-text) 42%, transparent); backdrop-filter: blur(3px); }
+.billing-dialog { width: min(1120px, 100%); max-height: calc(100vh - (var(--sp-5) * 2)); overflow: auto; }
+@media (max-width: 700px) { .billing-dialog-layer { align-items: end; padding: 0; } .billing-dialog { max-height: 92vh; border-radius: var(--radius-lg) var(--radius-lg) 0 0; } }
 .accountant-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); }
 .accountant-kpis article { min-width: 0; padding: var(--sp-4); border: 1px solid var(--accountant-border); border-radius: var(--radius-md); background: var(--accountant-card); display: flex; align-items: center; gap: var(--sp-3); }
 .accountant-kpis article > span, .accountant-work-list button > span, .accountant-report-card > span { width: 42px; height: 42px; flex: 0 0 42px; border-radius: var(--radius-md); display: grid; place-items: center; }
@@ -120,8 +123,10 @@
 .accountant-cap-strip strong { font-size: 14px; font-variant-numeric: tabular-nums; }
 .accountant-toolbar { padding: var(--sp-3); border: 1px solid var(--accountant-border); border-radius: var(--radius-md); background: var(--accountant-card); display: flex; align-items: center; gap: var(--sp-3); }
 .accountant-search { flex: 1; min-width: 0; display: grid; gap: 6px; color: var(--accountant-ink); font-size: 12px; font-weight: 700; }
-.accountant-search-control { position: relative; }
-.accountant-search-control .material-symbols-outlined { position: absolute; left: 12px; top: 50%; translate: 0 -50%; pointer-events: none; color: var(--accountant-muted); font-size: 20px; }
+.accountant-search-control { position: relative; width: 100%; }
+.accountant-search-control .material-symbols-outlined { position: absolute; z-index: 1; left: 12px; top: 50%; translate: 0 -50%; pointer-events: none; color: var(--accountant-muted); font-size: 20px; line-height: 1; }
+.accountant-search-control input { width: 100%; min-height: 40px; padding: 9px 12px 9px 44px; border: 1px solid var(--accountant-border); border-radius: var(--radius-sm); color: var(--accountant-ink); background: var(--bg-background); font: inherit; font-weight: 400; }
+.accountant-search-control input:focus-visible { outline: 3px solid color-mix(in srgb, var(--color-primary) 24%, transparent); outline-offset: 1px; border-color: var(--color-primary); }
 .accountant-filter { display: grid; gap: 6px; color: var(--accountant-ink); font-size: 12px; font-weight: 700; }
 .accountant-toolbar input, .accountant-toolbar select { min-height: 40px; border: 1px solid var(--accountant-border); border-radius: var(--radius-sm); color: var(--accountant-ink); background: var(--bg-background); }
 .accountant-toolbar input { width: 100%; padding: 9px 12px 9px 44px; }

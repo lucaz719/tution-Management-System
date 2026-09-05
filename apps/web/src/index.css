@@ -396,7 +396,7 @@ h1, h2, h3, h4 {
 
 /* Animations */
 .fade-in {
-  animation: fadeIn 0.4s ease-out forwards;
+  animation: fadeIn 0.4s ease-out;
 }
 
 @keyframes fadeIn {
@@ -2024,8 +2024,8 @@ h1, h2, h3, h4 {
 .payments-activity-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 20px 22px; border-bottom: 1px solid var(--border); }
 .payments-activity-head > span { color: var(--text-muted); font-size: 13px; }
 .payments-toolbar { display: grid; grid-template-columns: minmax(240px, 1fr) auto; gap: 14px; padding: 14px 22px; border-bottom: 1px solid var(--border); }
-.payments-search { position: relative; display: flex; align-items: center; }
-.payments-search .material-symbols-outlined { position: absolute; left: 11px; color: var(--text-muted); font-size: 20px; }
+.payments-search { position: relative; display: flex; align-items: center; min-width: 0; }
+.payments-search .material-symbols-outlined { position: absolute; z-index: 1; left: 12px; top: 50%; translate: 0 -50%; color: var(--text-muted); font-size: 20px; line-height: 1; pointer-events: none; }
 .payments-search input { width: 100%; min-height: 42px; padding: 9px 12px 9px 40px; border: 1px solid var(--border); border-radius: 10px; color: var(--text); background: var(--bg-background); font: inherit; }
 .payments-filters { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .payments-filters button { min-height: 40px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 9px; color: var(--text-muted); background: var(--bg-card); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
