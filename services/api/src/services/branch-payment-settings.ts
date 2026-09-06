@@ -32,6 +32,10 @@ export function getTenantPaymentSettings(): PaymentSettings {
 /**
  * Get branch-specific payment settings with tenant fallback
  * Returns branch settings if configured, otherwise tenant defaults
+ * 
+ * ACCESS CONTROL (enforced in API routes):
+ * - READ: Tenant admin or branch admin (for their branch)
+ * - WRITE (upsert/delete): Tenant admin only
  */
 export async function getBranchPaymentSettings(
   tenantId: string,

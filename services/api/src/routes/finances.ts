@@ -63,7 +63,7 @@ router.get('/payment-settings', authMiddleware, async (req: TenantRequest, res: 
   }
 });
 
-// PUT /branches/:branchId/payment-settings - Update branch-specific payment settings
+// PUT /branches/:branchId/payment-settings - Update branch-specific payment settings (tenant admin only)
 router.put('/branches/:branchId/payment-settings', authMiddleware, async (req: TenantRequest, res: Response) => {
   try {
     const { branchId } = req.params as { branchId: string };
@@ -72,9 +72,9 @@ router.put('/branches/:branchId/payment-settings', authMiddleware, async (req: T
       return res.status(400).json({ error: 'Branch ID is required' });
     }
     
-    // Verify access: tenant admin or branch admin for this branch
-    if (!canAccessBranch(req.user, branchId)) {
-      return res.status(403).json({ error: 'Insufficient permissions for this branch' });
+    // Verify access: tenant admin only (branch admins can view but not edit)
+    if (!isTenantAdmin(req.user)) {
+      return res.status(403).json({ error: 'Tenant Admin access required to manage payment settings' });
     }
     
     // Verify branch exists
@@ -119,7 +119,7 @@ router.put('/branches/:branchId/payment-settings', authMiddleware, async (req: T
   }
 });
 
-// DELETE /branches/:branchId/payment-settings - Reset branch settings to tenant defaults
+// DELETE /branches/:branchId/payment-settings - Reset branch settings to tenant defaults (tenant admin only)
 router.delete('/branches/:branchId/payment-settings', authMiddleware, async (req: TenantRequest, res: Response) => {
   try {
     const { branchId } = req.params as { branchId: string };
@@ -128,9 +128,9 @@ router.delete('/branches/:branchId/payment-settings', authMiddleware, async (req
       return res.status(400).json({ error: 'Branch ID is required' });
     }
     
-    // Verify access
-    if (!canAccessBranch(req.user, branchId)) {
-      return res.status(403).json({ error: 'Insufficient permissions for this branch' });
+    // Verify access: tenant admin only
+    if (!isTenantAdmin(req.user)) {
+      return res.status(403).json({ error: 'Tenant Admin access required to manage payment settings' });
     }
     
     // Verify branch exists
