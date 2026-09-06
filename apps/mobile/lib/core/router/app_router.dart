@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:tms_mobile/core/auth/role_codes.dart';
+import 'package:tms_mobile/core/network/api_client.dart';
 import 'package:tms_mobile/core/providers/auth_provider.dart';
 import 'package:tms_mobile/features/auth/screens/login_screen.dart';
 import 'package:tms_mobile/features/auth/screens/forgot_password_screen.dart';
@@ -34,6 +35,11 @@ import 'package:tms_mobile/features/tenant_admin/screens/tenant_admin_home_scree
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authProvider);
+
+  // MOB-005: a 401 anywhere in the app drops provider state so the
+  // redirect guard below sends the user to /login (session-expired path).
+  ApiClient.onSessionInvalidated =
+      () => ref.read(authProvider.notifier).forceLogout();
 
   return GoRouter(
     initialLocation: '/login',

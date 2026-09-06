@@ -34,6 +34,10 @@ class ApiClient {
   bool _initialized = false;
   static PersistCookieJar? _cookieJar;
 
+  /// Fired after local session data is cleared on a 401. The app layer
+  /// (auth provider) sets this so the router redirects to /login.
+  static void Function()? onSessionInvalidated;
+
   /// Initialize the client. Call once from main() before runApp.
   Future<void> init() async {
     if (_initialized) return;
@@ -96,8 +100,10 @@ class _AuthInterceptor extends Interceptor {
   Future<void> onError(
       DioException err, ErrorInterceptorHandler handler) async {
     if (err.response?.statusCode == 401) {
-      // Session expired or token invalidated
+      // Session expired or invalidated: clear local state, then tell the
+      // app layer so the router kicks back to /login (MOB-005).
       await ApiClient.clearAuth();
+      ApiClient.onSessionInvalidated?.call();
     }
 
     // Surface a human-readable message from the API response body.
