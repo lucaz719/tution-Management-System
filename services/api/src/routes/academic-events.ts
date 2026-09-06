@@ -1,9 +1,10 @@
+import { calendarAccessWhere, CalendarAccessError, CALENDAR_AUDIENCES } from '../services/calendar-access';
 import { Router, Response } from 'express';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { EventType } from '@tms/types';
-import { canAccessBranch, isTenantAdmin } from '../utils/access-control';
+import { canAccessBranch, isTenantAdmin, managedBranchIds } from '../utils/access-control';
 
 const router = Router();
 
@@ -13,7 +14,10 @@ router.post(
   authMiddleware,
   hasPermission('manage_branch_calendar'),
   async (req: TenantRequest, res: Response) => {
-    const { title, description, eventType, startDate, endDate, branchId } = req.body;
+    const { title, description, eventType, startDate, endDate, branchId, classId } = req.body;
+    const audience = req.body.audience ?? 'STAFF';
+    if (!CALENDAR_AUDIENCES.includes(audience) || !['HOLIDAY', 'EXAM', 'EVENT', 'FEE_DUE'].includes(eventType)) return res.status(400).json({ error: 'Invalid event type or audience.' });
+    if (!Number.isFinite(Date.parse(startDate)) || !Number.isFinite(Date.parse(endDate)) || Date.parse(endDate) < Date.parse(startDate)) return res.status(400).json({ error: 'Choose valid start and end dates.' });
 
     if (!title || !eventType || !startDate || !endDate) {
       return res.status(400).json({
@@ -29,10 +33,14 @@ router.post(
         const branch = await prisma.branch.findFirst({ where: { id: branchId, tenantId: req.tenantId! } });
         if (!branch) return res.status(404).json({ error: 'Branch not found in your institution.' });
       }
+      const targetClass = classId ? await prisma.class.findFirst({ where: { id: classId, archivedAt: null, course: { tenantId: req.tenantId! } } }) : null;
+      if (classId && (!targetClass || (branchId && targetClass.branchId !== branchId) || !canAccessBranch(req.user!, targetClass.branchId))) return res.status(403).json({ error: 'Class access denied.' });
       const event = await prisma.academicEvent.create({
         data: {
           tenantId: req.tenantId!,
-          branchId: branchId || null,
+          branchId: targetClass?.branchId || branchId || null,
+          classId: targetClass?.id || null,
+          audience,
           title,
           description,
           eventType: eventType as EventType,
@@ -56,21 +64,33 @@ router.get(
     const branchId = req.query.branchId as string | undefined;
 
     try {
-      const events = await prisma.academicEvent.findMany({
-        where: {
-          tenantId: req.tenantId!,
-          OR: [
-            { branchId: null },
-            { branchId: branchId || undefined },
-          ],
-        },
-      });
+      const where = await calendarAccessWhere(req.user!, req.tenantId!, { branchId, viewerRole: typeof req.query.viewerRole === 'string' ? req.query.viewerRole : undefined, studentId: typeof req.query.studentId === 'string' ? req.query.studentId : undefined });
+      const events = await prisma.academicEvent.findMany({ where, include: { branch: { select: { name: true } }, class: { select: { name: true } } }, orderBy: { startDate: 'asc' } });
       return res.status(200).json({ events });
     } catch (error: any) {
+      if (error instanceof CalendarAccessError) return res.status(403).json({ error: error.message });
       return res.status(500).json({ error: 'Failed to load academic events.' });
     }
   }
 );
+
+// Administrator targeting options are restricted to managed classes.
+router.get('/options', authMiddleware, hasPermission('manage_branch_calendar'), async (req: TenantRequest, res: Response) => {
+  try {
+    const classes = await prisma.class.findMany({ where: { archivedAt: null, course: { tenantId: req.tenantId! }, ...(isTenantAdmin(req.user!) ? {} : { branchId: { in: managedBranchIds(req.user!) } }) }, select: { id: true, name: true, branchId: true, branch: { select: { name: true } } }, orderBy: { name: 'asc' } });
+    return res.json({ classes });
+  } catch { return res.status(500).json({ error: 'Could not load event targeting options.' }); }
+});
+
+router.patch('/:id/audience', authMiddleware, hasPermission('manage_branch_calendar'), async (req: TenantRequest, res: Response) => {
+  const audience = req.body.audience;
+  if (!CALENDAR_AUDIENCES.includes(audience)) return res.status(400).json({ error: 'Invalid audience.' });
+  try {
+    const result = await prisma.academicEvent.updateMany({ where: { id: req.params.id, tenantId: req.tenantId!, ...(isTenantAdmin(req.user!) ? {} : { branchId: { in: managedBranchIds(req.user!) } }) }, data: { audience } });
+    if (!result.count) return res.status(404).json({ error: 'Editable event not found.' });
+    return res.json({ updated: true });
+  } catch { return res.status(500).json({ error: 'Could not update event audience.' }); }
+});
 
 // 3. Payment Calendar: Retrieve fee deadlines, color-coded and complete with invoice + Nepal Pay QR
 router.get(

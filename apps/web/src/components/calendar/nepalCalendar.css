@@ -1,0 +1,85 @@
+.nepal-calendar { --calendar-accent: var(--color-primary); --calendar-holiday: color-mix(in srgb, var(--color-error) 75%, var(--color-text)); font-family: var(--font-ui); min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-card); }
+[data-theme='dark'] .nepal-calendar { --calendar-accent: var(--brand); --calendar-holiday: color-mix(in srgb, var(--color-error) 55%, var(--color-text)); }
+.nepal-calendar__today-strip { padding: var(--sp-5); border-bottom: 1px solid var(--border); background: var(--color-surface); }
+.nepal-calendar__toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-4); padding: var(--sp-5) var(--sp-5) var(--sp-3); }
+.nepal-calendar button, .nepal-calendar select { font: inherit; }
+.nepal-calendar__month-button { display: flex; align-items: center; gap: var(--sp-2); min-height: 44px; padding: 0; color: var(--color-text); background: transparent; border: 0; cursor: pointer; }
+.nepal-calendar__month-button > span:first-child { font-family: 'Nirmala UI', 'Mangal', var(--font-ui); font-size: 24px; font-weight: 700; line-height: 1.5; }
+.nepal-calendar__subtitle { color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.nepal-calendar__controls { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.nepal-calendar__controls .calendar-system-toggle button { min-height: 40px; }
+[data-theme='dark'] .nepal-calendar__controls .calendar-system-toggle button[aria-pressed='true'] { color: var(--calendar-accent); }
+.nepal-calendar__controls > button, .nepal-calendar__picker button, .nepal-calendar__message button { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-1); padding: var(--sp-2); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--color-text); background: var(--bg-card); cursor: pointer; }
+.nepal-calendar__controls > .nepal-calendar__today-button { color: var(--calendar-accent); font-weight: 700; padding-inline: var(--sp-3); }
+.nepal-calendar__today-button > span:last-child { font-size: 12px; }
+.nepal-calendar button:disabled { opacity: .45; cursor: not-allowed; }
+.nepal-calendar button:focus-visible, .nepal-calendar select:focus-visible { outline: 2px solid var(--calendar-accent); outline-offset: -3px; }
+.nepal-calendar__picker { display: flex; align-items: end; flex-wrap: wrap; gap: var(--sp-3); padding: var(--sp-4) var(--sp-5); background: var(--color-surface); }
+.nepal-calendar__picker label { display: grid; gap: var(--sp-1); font-size: 12px; color: var(--text-muted); }
+.nepal-calendar__picker select { min-height: 44px; padding: var(--sp-2); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card); color: var(--color-text); }
+.nepal-calendar__legend { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; padding: var(--sp-3) var(--sp-5) var(--sp-4); font-size: 12px; color: var(--text-muted); }
+.nepal-calendar__legend > span { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.nepal-calendar__legend i { width: 8px; height: 8px; border-radius: 2px; background: var(--calendar-accent); }
+.nepal-calendar__legend i[data-kind='selected'] { background: transparent; border: 2px solid var(--calendar-accent); }
+.nepal-calendar__legend i[data-kind='off'] { background: var(--calendar-holiday); }
+.nepal-calendar__timezone { margin-left: auto; }
+.nepal-calendar__grid { padding: 0 var(--sp-5); }
+.nepal-calendar__week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.nepal-calendar__weekday { text-align: center; padding: var(--sp-3) 0; font-family: 'Nirmala UI', 'Mangal', var(--font-ui); font-size: 14px; font-weight: 700; color: var(--text-muted); }
+.nepal-calendar__weekday[data-off] { color: var(--calendar-holiday); }
+.nepal-calendar__weekday-short { display: none; }
+.nepal-calendar__cell { min-width: 0; border-top: 1px solid var(--border); border-left: 1px solid var(--border); }
+.nepal-calendar__cell:last-child { border-right: 1px solid var(--border); }
+.nepal-calendar__week:last-child .nepal-calendar__cell { border-bottom: 1px solid var(--border); }
+.nepal-calendar__cell button { position: relative; width: 100%; height: 144px; display: flex; flex-direction: column; align-items: center; padding: var(--sp-2); border: 0; background: transparent; color: var(--color-text); cursor: pointer; }
+.nepal-calendar__cell button:hover { background: var(--color-surface); }
+.nepal-calendar__secondary { align-self: flex-end; font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.nepal-calendar__annotations { display: grid; align-content: start; width: 100%; height: 36px; margin-top: var(--sp-1); font-size: 12px; line-height: 18px; font-weight: 600; text-align: center; }
+.nepal-calendar__annotations > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nepal-calendar__annotations [data-type='HOLIDAY'] { color: var(--calendar-holiday); }
+.nepal-calendar__number { font-family: 'Nirmala UI', 'Mangal', var(--font-ui); font-size: 28px; line-height: 1.5; }
+.nepal-calendar__day-footer { display: flex; justify-content: center; flex-wrap: wrap; gap: var(--sp-1); font-size: 12px; line-height: 1.4; }
+.nepal-calendar__cell button[data-outside] { background: var(--color-surface); color: var(--text-muted); }
+.nepal-calendar__cell button[data-off] .nepal-calendar__number, .nepal-calendar__cell button[data-off] .nepal-calendar__day-footer { color: var(--calendar-holiday); }
+.nepal-calendar__cell button[data-selected] { box-shadow: inset 0 0 0 2px var(--calendar-accent); }
+.nepal-calendar__cell button[data-today] { background: var(--color-primary); color: var(--text-light); }
+.nepal-calendar__cell button[data-today] .nepal-calendar__secondary, .nepal-calendar__cell button[data-today] .nepal-calendar__number, .nepal-calendar__cell button[data-today] .nepal-calendar__day-footer, .nepal-calendar__cell button[data-today] .nepal-calendar__annotations > span { color: inherit; }
+.nepal-calendar__cell button[data-today][data-selected] { outline: 2px solid var(--text-light); outline-offset: -5px; }
+.nepal-calendar__cell button[data-today]:focus-visible { outline: 3px dashed var(--text-light); outline-offset: -7px; }
+.nepal-calendar__mobile-count { display: none; }
+.nepal-calendar__details { padding: var(--sp-5); }
+.nepal-calendar__detail-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
+.nepal-calendar__detail-heading h4 { font-family: 'Nirmala UI', 'Mangal', var(--font-ui); font-size: 20px; margin-block: var(--sp-1); color: var(--color-text); }
+.nepal-calendar__detail-heading p, .nepal-calendar__detail-heading > span { color: var(--text-muted); font-size: 12px; }
+.nepal-calendar__detail-heading .nepal-calendar__eyebrow { color: var(--calendar-accent); font-weight: 700; }
+.nepal-calendar__events { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: var(--sp-3); margin-top: var(--sp-4); }
+.nepal-calendar__event { padding: var(--sp-4); border: 1px solid var(--border); border-radius: var(--radius-sm); overflow-wrap: anywhere; }
+.nepal-calendar__event-type { color: var(--calendar-accent); font-size: 12px; font-weight: 700; }
+.nepal-calendar__event h5 { font-size: 15px; margin-top: var(--sp-2); color: var(--color-text); }
+.nepal-calendar__event p { font-size: 13px; color: var(--text-muted); line-height: 1.6; margin-top: var(--sp-2); white-space: pre-line; }
+.nepal-calendar__empty, .nepal-calendar__message { padding: var(--sp-4); margin-top: var(--sp-4); background: var(--color-surface); color: var(--text-muted); font-size: 13px; line-height: 1.6; border-radius: var(--radius-sm); }
+.nepal-calendar__message { margin: var(--sp-4); }
+.nepal-calendar__loading { min-height: 420px; display: grid; place-items: center; color: var(--text-muted); background: var(--color-surface); }
+@media (max-width: 600px) {
+  .nepal-calendar__toolbar { gap: var(--sp-2); }
+  .nepal-calendar__month-button > span:first-child { font-size: 20px; }
+  .nepal-calendar__controls { width: 100%; justify-content: space-between; flex-wrap: nowrap; gap: var(--sp-1); }
+  .nepal-calendar__controls .calendar-system-toggle button { min-width: 40px; padding-inline: var(--sp-2); }
+  .nepal-calendar__legend { font-size: 10px; }
+  .nepal-calendar__timezone { display: none; }
+  .nepal-calendar__today-button > span:last-child { display: none; }
+  .nepal-calendar__today-strip, .nepal-calendar__toolbar, .nepal-calendar__details { padding: var(--sp-4); }
+  .nepal-calendar__grid { padding-inline: var(--sp-2); }
+  .nepal-calendar__legend { padding: var(--sp-2) var(--sp-4); gap: var(--sp-2) var(--sp-3); }
+  .nepal-calendar__timezone { margin-left: 0; }
+  .nepal-calendar__weekday-full { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .nepal-calendar__weekday-short { display: inline; }
+  .nepal-calendar__cell button { height: 100px; padding: var(--sp-1); }
+  .nepal-calendar__annotations { display: none; }
+  .nepal-calendar__number { font-size: 23px; }
+  .nepal-calendar__day-footer { font-size: 10px; }
+  .nepal-calendar__day-footer > span { display: none; }
+  .nepal-calendar__mobile-count { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; line-height: 16px; margin-top: auto; white-space: nowrap; }
+  .nepal-calendar__mobile-count::before { content: ''; width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+  .nepal-calendar__secondary { font-size: 12px; }
+}

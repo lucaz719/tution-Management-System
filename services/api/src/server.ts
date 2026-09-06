@@ -27,6 +27,7 @@ import cronRouter from './routes/cron';
 import parentRouter from './routes/parent';
 import receptionRouter from './routes/reception';
 import branchAdminRouter from './routes/branch-admin';
+import tenantAdminRouter from './routes/tenant-admin';
 
 import { toNodeHandler } from 'better-auth/node';
 import { auth } from './utils/auth';
@@ -106,6 +107,7 @@ app.use('/api/auth', (req, res, next) => {
 // parser and cookie/session handling remain intact.
 app.all('/api/auth/*', monitorCredentialSignIn, toNodeHandler(auth));
 
+app.use('/api/finances/manual-payment', express.json({ limit: '2mb' }));
 app.use(express.json({ limit: '256kb' }));
 
 // Global tenant middleware; authenticated scope comes from the verified session.
@@ -138,6 +140,7 @@ app.use('/api/cron', cronRouter);
 app.use('/api/parent', parentRouter);
 app.use('/api/reception', receptionRouter);
 app.use('/api/branch-admin', branchAdminRouter);
+app.use('/api/tenant-admin', tenantAdminRouter);
 
 // Integration-only probe for the central error boundary. It is never mounted
 // in local development or production.

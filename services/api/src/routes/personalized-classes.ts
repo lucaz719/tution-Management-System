@@ -1,8 +1,10 @@
+import { Prisma } from '@prisma/client';
 import { Router, Response } from 'express';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { canAccessBranch } from '../utils/access-control';
+import { parseSchedule } from '../utils/schedule';
 
 const router = Router();
 
@@ -22,6 +24,8 @@ router.post(
     if (!canAccessBranch(req.user!, branchId)) {
       return res.status(403).json({ error: 'You may only create personalized classes for your assigned branch.' });
     }
+    const parsedSchedule = parseSchedule(schedule);
+    if (!parsedSchedule.success) return res.status(400).json({ error: parsedSchedule.error });
 
     try {
       // In a regular setup, a personalized class is modeled as a Class with PERSONALIZED course type
@@ -30,7 +34,7 @@ router.post(
           branchId,
           courseId,
           name,
-          schedule,
+          schedule: parsedSchedule.data as unknown as Prisma.InputJsonValue,
         },
       });
 

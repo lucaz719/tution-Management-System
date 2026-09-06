@@ -241,7 +241,7 @@ async function seedDemoTenant(): Promise<void> {
             joiningDate: new Date('2025-01-05'),
             designation: spec.roleName,
             contractType: 'FIXED',
-            salaryStructure: { basicMonthly: 45000 },
+            salaryStructure: { baseMonthlySalary: 45000 },
           },
         });
       }
@@ -376,8 +376,8 @@ async function seedDemoPortalData(tenantId: string, branchId: string): Promise<v
   await prisma.studentScore.upsert({ where: { id: 'demo-score-science' }, update: {}, create: { id: 'demo-score-science', tenantId, studentId: student.id, recordedBy: teacher.id, subject: 'Science', assessment: 'Practical Assessment', score: 45, maximum: 50, passMarks: 20, percentile: 91, publishedAt: daysFromNow(-3), testDate: daysFromNow(-6) } });
   await prisma.studentRemark.upsert({ where: { id: 'demo-remark-progress' }, update: {}, create: { id: 'demo-remark-progress', tenantId, studentId: student.id, authorId: teacher.id, subject: 'Learning progress', message: 'Anisha is participating confidently and has improved her calculation accuracy.', signal: 'IMPROVING', parentVisible: true } });
 
-  await prisma.invoice.upsert({ where: { id: 'demo-invoice-unpaid' }, update: {}, create: { id: 'demo-invoice-unpaid', tenantId, studentId: student.id, amount: 6500, discount: 500, fine: 0, netPayable: 6000, billingCycleStart: daysFromNow(-10), billingCycleEnd: daysFromNow(20), dueDate: daysFromNow(7), status: 'UNPAID', invoiceType: 'TUITION', panNumberSnapshot: DEMO_TENANT_PAN, vatRateSnapshot: 0, nepalPayQrCode: 'DEMO-NEPALPAY-QR' } });
-  await prisma.invoice.upsert({ where: { id: 'demo-invoice-paid' }, update: {}, create: { id: 'demo-invoice-paid', tenantId, studentId: student.id, amount: 6500, netPayable: 6500, billingCycleStart: daysFromNow(-40), billingCycleEnd: daysFromNow(-11), dueDate: daysFromNow(-17), status: 'PAID', invoiceType: 'TUITION', panNumberSnapshot: DEMO_TENANT_PAN, vatRateSnapshot: 0, transactionId: 'DEMO-TXN-0001', paymentDate: daysFromNow(-20) } });
+  await prisma.invoice.upsert({ where: { id: 'demo-invoice-unpaid' }, update: {}, create: { id: 'demo-invoice-unpaid', tenantId, branchId, studentId: student.id, amount: 6500, discount: 500, fine: 0, netPayable: 6000, billingCycleStart: daysFromNow(-10), billingCycleEnd: daysFromNow(20), dueDate: daysFromNow(7), status: 'UNPAID', invoiceType: 'TUITION', panNumberSnapshot: DEMO_TENANT_PAN, vatRateSnapshot: 0, nepalPayQrCode: 'DEMO-NEPALPAY-QR' } });
+  await prisma.invoice.upsert({ where: { id: 'demo-invoice-paid' }, update: {}, create: { id: 'demo-invoice-paid', tenantId, branchId, studentId: student.id, amount: 6500, netPayable: 6500, billingCycleStart: daysFromNow(-40), billingCycleEnd: daysFromNow(-11), dueDate: daysFromNow(-17), status: 'PAID', invoiceType: 'TUITION', panNumberSnapshot: DEMO_TENANT_PAN, vatRateSnapshot: 0, transactionId: 'DEMO-TXN-0001', paymentDate: daysFromNow(-20) } });
 
   await prisma.parentMessage.upsert({ where: { id: 'demo-message-parent' }, update: {}, create: { id: 'demo-message-parent', tenantId, studentId: student.id, senderId: parentUser.id, receiverId: teacher.id, messageText: 'Could you please share which algebra topics Anisha should revise this week?' } });
   await prisma.parentMessage.upsert({ where: { id: 'demo-message-teacher' }, update: {}, create: { id: 'demo-message-teacher', tenantId, studentId: student.id, senderId: teacher.id, receiverId: parentUser.id, messageText: 'Please focus on equations with variables on both sides. I have also posted a practice sheet.', readAt: now } });
@@ -404,7 +404,6 @@ async function seedDemoPortalData(tenantId: string, branchId: string): Promise<v
 
   await prisma.tenantRequest.upsert({ where: { id: 'demo-tenant-request-pending' }, update: {}, create: { id: 'demo-tenant-request-pending', name: 'Himalayan Learning Centre', email: 'hello@himalayan-demo.edu.np', phone: '9812345678', panNumber: '222222222', remarks: 'Two branches with approximately 420 students.', status: 'PENDING' } });
   await prisma.tenantRequest.upsert({ where: { id: 'demo-tenant-request-approved' }, update: {}, create: { id: 'demo-tenant-request-approved', name: 'Sunrise Tutorial Hub', email: 'admin@sunrise-demo.edu.np', phone: '9801234567', panNumber: '333333333', remarks: 'Requested onboarding for the upcoming academic term.', status: 'APPROVED' } });
-  await prisma.branchSocialDraft.upsert({ where: { id: 'demo-social-draft' }, update: {}, create: { id: 'demo-social-draft', tenantId, branchId, authorId: branchAdmin.id, text: 'Our Grade 8 learners explored cell structures through hands-on microscopy today.', mediaUrls: ['/demo/social/science-lab.jpg'], platforms: ['FACEBOOK', 'INSTAGRAM'], proposedTime: daysFromNow(1, 17), status: 'PENDING_APPROVAL' } });
   await prisma.expense.upsert({ where: { id: 'demo-expense-rent' }, update: {}, create: { id: 'demo-expense-rent', tenantId, branchId, category: 'RENT', amount: 85000, purpose: 'Baneshwor branch monthly rent', date: daysFromNow(-9), approvedBy: tenantAdmin.id } });
   await prisma.expense.upsert({ where: { id: 'demo-expense-utilities' }, update: {}, create: { id: 'demo-expense-utilities', tenantId, branchId, category: 'UTILITIES', amount: 12450, purpose: 'Electricity and internet charges', date: daysFromNow(-4), approvedBy: branchAdmin.id } });
 
@@ -412,8 +411,6 @@ async function seedDemoPortalData(tenantId: string, branchId: string): Promise<v
   if (teacherStaff) {
     await prisma.staffPerformanceScore.upsert({ where: { staffRecordId: teacherStaff.id }, update: {}, create: { staffRecordId: teacherStaff.id, overallScore: 92, attendanceRate: 96, classUpdateRate: 94, studentFeedbackScore: 4.6, parentFeedbackScore: 4.7, leaveComplianceRate: 100, scoreHistory: [{ month: 'Baisakh', score: 88 }, { month: 'Jestha', score: 90 }, { month: 'Ashadh', score: 92 }] } });
     await prisma.staffDocument.upsert({ where: { id: 'demo-staff-document' }, update: {}, create: { id: 'demo-staff-document', staffRecordId: teacherStaff.id, documentType: 'CONTRACT', fileUrl: '/demo/staff/teacher-contract.pdf', expiryDate: daysFromNow(240) } });
-    await prisma.payroll.upsert({ where: { id: 'demo-payroll-current' }, update: {}, create: { id: 'demo-payroll-current', tenantId, staffRecordId: teacherStaff.id, month: now.getMonth() + 1, year: now.getFullYear(), baseSalary: 45000, attendanceDeductions: 0, bonuses: 2500, netPayable: 47500, status: 'APPROVED_FOR_MANUAL_PAYMENT', approvedBy: tenantAdmin.id, approvedAt: now } });
-    await prisma.payroll.upsert({ where: { id: 'demo-payroll-paid' }, update: {}, create: { id: 'demo-payroll-paid', tenantId, staffRecordId: teacherStaff.id, month: now.getMonth() || 12, year: now.getMonth() ? now.getFullYear() : now.getFullYear() - 1, baseSalary: 45000, attendanceDeductions: 500, bonuses: 1000, netPayable: 45500, status: 'MANUALLY_PAID', approvedBy: tenantAdmin.id, approvedAt: daysFromNow(-25), settlementReference: 'BANK-DEMO-8842', reconciledBy: accountant.id, paymentDate: daysFromNow(-24) } });
   }
 
   const wallet = await prisma.canteenWallet.upsert({ where: { studentId: student.id }, update: { balance: 850 }, create: { studentId: student.id, balance: 850, status: 'ACTIVE' } });

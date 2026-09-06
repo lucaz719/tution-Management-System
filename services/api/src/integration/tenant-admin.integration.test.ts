@@ -356,6 +356,29 @@ async function main(): Promise<void> {
     assert.deepEqual(response.body.branches.map((branch: any) => branch.id), [branchA.id],
       'client-controlled tenant headers must not change scope');
 
+    response = await request('GET', '/api/branches', branchAdminCookie);
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.branches.map((branch: any) => branch.id), [branchA.id],
+      'Branch Admin branch listings must be derived from assigned branch roles');
+
+    response = await request('GET', '/api/branches', accountantCookie);
+    assert.equal(response.status, 403,
+      'non-admin roles must not receive the branch-management projection or geofence configuration');
+
+    response = await request('GET', '/api/finances/overview', branchAdminCookie);
+    assert.equal(response.status, 200,
+      'Branch Admin should receive finance totals scoped to the assigned branch');
+    response = await request('GET', '/api/finances/overview', accountantCookie);
+    assert.equal(response.status, 200,
+      'branch-scoped finance roles should receive fee totals for their permitted branches');
+
+    response = await request('GET', '/api/tenant-admin/dashboard', adminACookie);
+    assert.equal(response.status, 200,
+      'Tenant Admin dashboard must remain mounted when platform administration is disabled');
+    assert.deepEqual(response.body.branchSummary.map((branch: any) => branch.branchId), [branchA.id]);
+    response = await request('GET', '/api/tenant-admin/dashboard', branchAdminCookie);
+    assert.equal(response.status, 403, 'Branch Admin must not receive institution-wide dashboard summaries');
+
     response = await request('POST', '/api/branches', adminACookie, {
       tenantId: tenantB.id,
       name: 'Created Safely',
@@ -509,6 +532,16 @@ async function main(): Promise<void> {
       signIn(studentCredentials.email, studentCredentials.temporaryPassword),
       signIn(parentCredentials.email, parentCredentials.temporaryPassword),
     ]);
+
+    response = await request('GET', '/api/branches', studentCookie);
+    assert.equal(response.status, 403, 'Students must not enumerate branch-management metadata');
+    response = await request('GET', '/api/branches', parentCookie);
+    assert.equal(response.status, 403, 'Parents must not enumerate branch-management metadata');
+    response = await request('GET', '/api/finances/overview', studentCookie);
+    assert.equal(response.status, 403, 'Students must not receive institution-wide finance totals');
+    response = await request('GET', '/api/finances/overview', parentCookie);
+    assert.equal(response.status, 403, 'Parents must not receive institution-wide finance totals');
+
     const activatedStudent = await prisma.student.findUniqueOrThrow({
       where: { id: admissionStudentId },
       include: { user: true, studentParents: { include: { parent: { include: { user: true } } } } },
@@ -648,6 +681,15 @@ async function main(): Promise<void> {
     assert(response.body.pettyCash.some((item: any) => item.id === pettyCashId), 'Accountant workspace must include the caller\'s request');
     assert(!response.body.pettyCash.some((item: any) => item.id === adminPettyCash.body.pettyCash.id), 'Accountant workspace must hide another requester\'s petty cash');
     assert(response.body.invoices.every((invoice: any) => invoice.branchId === branchA.id), 'Accountant invoices must stay within assigned branches');
+    response = await request('GET', '/api/finances/overview', accountantCookie);
+    assert.equal(response.status, 200, 'Accountant must be able to load the shared fee overview');
+    response = await request('GET', '/api/finances/students', accountantCookie);
+    assert.equal(response.status, 200, 'Accountant must be able to load the shared fee student list');
+    assert(response.body.students.every((student: any) => student.branchId === branchA.id), 'Shared fee page must remain branch-scoped for Accountants');
+    response = await request('GET', '/api/finances/pl', accountantCookie);
+    assert.equal(response.status, 403, 'Accountants must not receive institution-wide P&L data');
+    response = await request('GET', '/api/finances/ledger/export', accountantCookie);
+    assert.equal(response.status, 403, 'Accountants must not export the institution-wide ledger');
     response = await request('GET', '/api/finances/petty-cash', accountantCookie);
     assert.equal(response.status, 200);
     assert(response.body.every((item: any) => item.accountantId === accountantA.id), 'Accountant petty-cash list must contain only owned records');
@@ -717,7 +759,7 @@ async function main(): Promise<void> {
         joiningDate: new Date('2026-01-01'),
         designation: 'Teacher',
         contractType: 'FIXED',
-        salaryStructure: { basicMonthly: 40000 },
+        salaryStructure: { baseMonthlySalary: 40000 },
       },
     });
     response = await request('POST', '/api/hr/payroll/calculate', branchAdminCookie, {
@@ -727,6 +769,10 @@ async function main(): Promise<void> {
     assert.equal(response.status, 403, 'Branch Admin cannot calculate tenant-wide payroll');
     response = await request('GET', '/api/hr/payroll', branchAdminCookie);
     assert.equal(response.status, 403, 'Branch Admin cannot view tenant-wide payroll');
+    response = await request('POST', '/api/hr/payroll/preview', adminACookie, { month: 6, year: 2026 });
+    assert.equal(response.status, 200, 'Tenant Admin can preview payroll without writing records');
+    assert(response.body.payrolls.some((item: any) => item.staffRecordId === staffRecord.id));
+    assert.equal(await prisma.payroll.count({ where: { tenantId: tenantA.id, month: 6, year: 2026 } }), 0);
     response = await request('POST', '/api/hr/payroll/calculate', adminACookie, {
       month: 6,
       year: 2026,
@@ -739,17 +785,31 @@ async function main(): Promise<void> {
     });
     assert.equal(response.status, 201);
     assert(response.body.payrolls.some((item: any) => item.staffRecordId === staffRecord.id));
+    assert(response.body.payrolls.every((item: any) => item.branchId === branchA.id), 'Payroll must persist the staff branch at creation time');
+    response = await request('POST', '/api/hr/payroll/calculate', adminACookie, { month: 6, year: 2026 });
+    assert.equal(response.status, 409, 'duplicate payroll periods are rejected');
+    response = await request('GET', '/api/hr/payroll?month=6&year=2026&status=PENDING&search=staff-a', adminACookie);
+    assert.equal(response.status, 200, 'payroll supports period, status, and staff search filters');
+    assert(response.body.payrolls.every((item: any) => item.month === 6 && item.year === 2026 && item.status === 'PENDING'));
+    assert(response.body.payrolls.some((item: any) => item.staffRecordId === staffRecord.id));
+    assert(response.body.summary.staffCount >= response.body.payrolls.length);
+    assert(response.body.summary.netPayable >= 40000);
+    response = await request('GET', '/api/hr/payroll?month=13&year=2026', adminACookie);
+    assert.equal(response.status, 400, 'payroll rejects invalid period filters');
     const payroll = await prisma.payroll.create({
       data: {
         tenantId: tenantA.id,
+        branchId: branchA.id,
         staffRecordId: staffRecord.id,
         month: 7,
         year: 2026,
+        payslipNumber: `PS-202607-${staffRecord.id.slice(0, 8)}`,
         baseSalary: 40000,
         attendanceDeductions: 0,
         bonuses: 0,
         netPayable: 40000,
         status: 'PENDING',
+        calculationBreakdown: { baseSalary: 40000, bonuses: 0, deductions: 0, netPayable: 40000 },
       },
     });
     response = await request('POST', `/api/hr/payroll/approve/${payroll.id}`, adminBCookie, {});
@@ -770,6 +830,23 @@ async function main(): Promise<void> {
     assert.equal(response.status, 200);
     assert.equal(response.body.payroll.status, 'MANUALLY_PAID');
     assert.equal(response.body.payroll.settlementReference, 'BANK-SALARY-001');
+    const bulkPayroll = await prisma.payroll.create({ data: {
+      tenantId: tenantA.id, branchId: branchA.id, staffRecordId: staffRecord.id, month: 8, year: 2026,
+      payslipNumber: `PS-202608-${staffRecord.id.slice(0, 8)}`, baseSalary: 40000,
+      attendanceDeductions: 10.01, bonuses: 20.02, netPayable: 40010.01,
+      calculationBreakdown: { baseSalary: 40000, bonuses: 20.02, deductions: 10.01, netPayable: 40010.01 },
+      adjustmentRemarks: 'Integration adjustment', status: 'PENDING',
+    } });
+    response = await request('POST', '/api/hr/payroll/approve-bulk', adminBCookie, { ids: [bulkPayroll.id] });
+    assert.equal(response.status, 404, 'bulk approval hides foreign-tenant payroll identifiers');
+    response = await request('POST', '/api/hr/payroll/approve-bulk', adminACookie, { ids: [bulkPayroll.id] });
+    assert.equal(response.status, 200);
+    response = await request('POST', '/api/hr/payroll/reconcile-bulk', adminACookie, { entries: [{ id: bulkPayroll.id, reference: 'BANK-BULK-001', paymentEvidence: 'bank-statement-row-1' }] });
+    assert.equal(response.status, 200);
+    const settledBulk = await prisma.payroll.findUniqueOrThrow({ where: { id: bulkPayroll.id } });
+    assert.equal(settledBulk.status, 'MANUALLY_PAID');
+    assert.equal(settledBulk.paymentEvidence, 'bank-statement-row-1');
+    assert(settledBulk.settlementDate);
 
     // Courses, classes, enrollment, billing controls, timetable, and CRUD.
     response = await request('POST', '/api/courses/classes', adminACookie, {
@@ -817,6 +894,22 @@ async function main(): Promise<void> {
       classId: classAId,
     });
     assert.equal(response.status, 409);
+    response = await request('POST', '/api/courses/classes', adminACookie, {
+      courseId: courseA.id,
+      name: 'Class 10 Mathematics Conflict',
+      schedule: [{ day: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date().getDay()], start: '09:30', end: '10:30' }],
+    });
+    assert.equal(response.status, 201);
+    const conflictingClassId = response.body.class.id;
+    response = await request('POST', '/api/courses/enroll', adminACookie, {
+      studentId: admissionStudentId,
+      courseId: courseA.id,
+      classId: conflictingClassId,
+    });
+    assert.equal(response.status, 409, 'students cannot be enrolled into overlapping active classes');
+    assert.match(response.body.error, /Student conflict:/);
+    assert(Array.isArray(response.body.conflicts));
+    assert.equal(await prisma.enrollment.count({ where: { studentId: admissionStudentId, classId: conflictingClassId } }), 0);
     response = await request('POST', '/api/courses/billing/block', adminACookie, {
       studentId: foreignStudent.id,
       courseId: courseB.id,
@@ -882,7 +975,7 @@ async function main(): Promise<void> {
     });
     const invoiceA2 = await prisma.invoice.create({
       data: {
-        tenantId: tenantA.id, studentId: studentA2.id, amount: 1100, netPayable: 1100,
+        tenantId: tenantA.id, branchId: branchA2.id, studentId: studentA2.id, amount: 1100, netPayable: 1100,
         billingCycleStart: new Date(), billingCycleEnd: new Date(), dueDate: new Date(),
         invoiceType: 'TUITION', panNumberSnapshot: tenantA.panNumber,
       },
@@ -911,8 +1004,21 @@ async function main(): Promise<void> {
     assert.equal(response.status, 403, 'Branch Admin dashboard must reject an unassigned branch');
     response = await request('GET', `/api/finances/students/${studentA2.id}/invoices`, branchAdminCookie);
     assert.equal(response.status, 404, 'another branch student invoice list must be hidden');
+    response = await request('GET', `/api/finances/students/${studentA2.id}/invoices`, accountantCookie);
+    assert.equal(response.status, 404, 'Accountants must not read another branch student invoice list');
     response = await request('GET', `/api/finances/nepalpay-qr/${invoiceA2.id}`, branchAdminCookie);
     assert.equal(response.status, 404, 'another branch invoice QR must be hidden');
+    response = await request('GET', `/api/finances/nepalpay-qr/${invoiceA2.id}`, accountantCookie);
+    assert.equal(response.status, 404, 'Accountants must not read another branch invoice QR');
+    const transferredStudentRole = await prisma.userRole.findFirstOrThrow({ where: { userId: studentUserA2.id } });
+    await prisma.userRole.update({ where: { id: transferredStudentRole.id }, data: { branchId: branchA.id } });
+    response = await request('GET', `/api/finances/students/${studentA2.id}/invoices`, accountantCookie);
+    assert.equal(response.status, 200, 'Accountant may open a student after transfer into the assigned branch');
+    assert(!response.body.invoices.some((invoice: any) => invoice.id === invoiceA2.id), 'A transferred student must not expose the previous branch invoice');
+    response = await request('GET', `/api/finances/nepalpay-qr/${invoiceA2.id}`, accountantCookie);
+    assert.equal(response.status, 404, 'A transferred student must not expose the previous branch invoice QR');
+    response = await request('POST', `/api/finances/invoices/${invoiceA2.id}/pay`, accountantCookie, { transactionId: 'CROSS-BRANCH-DENIED' });
+    assert.equal(response.status, 403, 'A transferred student must not let the new branch collect an old branch invoice');
     response = await request('POST', `/api/teacher/session/${sessionA2.id}/update`, teacherCookie, {
       updateContent: 'IDOR attempt',
     });
@@ -1366,14 +1472,34 @@ async function main(): Promise<void> {
     assert.equal(response.status, 201);
     response = await request('POST', '/api/users', adminACookie, {
       branchId: branchA.id,
+      role: 'Teacher',
+      firstName: 'Missing',
+      lastName: 'Salary',
+      email: 'missing-salary@integration.tms.local',
+      phone: '9800000098',
+      contractType: 'FIXED',
+    });
+    assert.equal(response.status, 400, 'staff creation requires compensation');
+    response = await request('POST', '/api/users', adminACookie, {
+      branchId: branchA.id,
       role: 'Receptionist',
       firstName: 'Reception',
       lastName: 'User',
       email: 'reception-created@integration.tms.local',
       phone: '9800000022',
+      contractType: 'FIXED',
+      baseMonthlySalary: 28000,
     });
     assert.equal(response.status, 201);
     const createdUserId = response.body.user.id;
+    const createdStaff = await prisma.staffRecord.findUniqueOrThrow({ where: { userId: createdUserId } });
+    assert.deepEqual(createdStaff.salaryStructure, { baseMonthlySalary: 28000 });
+    response = await request('PUT', `/api/users/${createdUserId}`, adminACookie, {
+      contractType: 'HOUR_RATE',
+      hourlyRate: 550,
+    });
+    assert.equal(response.status, 200, 'existing staff compensation can be repaired or changed');
+    assert.deepEqual((await prisma.staffRecord.findUniqueOrThrow({ where: { userId: createdUserId } })).salaryStructure, { hourlyRate: 550 });
     response = await request('POST', '/api/users', adminACookie, {
       branchId: branchB.id,
       role: 'Receptionist',
@@ -1381,6 +1507,8 @@ async function main(): Promise<void> {
       lastName: 'User',
       email: 'foreign-created@integration.tms.local',
       phone: '9800000023',
+      contractType: 'FIXED',
+      baseMonthlySalary: 28000,
     });
     assert.equal(response.status, 404);
     response = await request('POST', '/api/users/bulk-students', adminACookie, {

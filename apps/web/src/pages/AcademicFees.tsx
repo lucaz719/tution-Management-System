@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../components/ui/Button';
+import { InvoiceDocumentDialog, type InvoiceDocumentData } from '../components/InvoiceDocument';
 import { KPICard } from '../components/ui/KPICard';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { useToast } from '../components/ui/Toast';
 import { api, type BillingLedger } from '../services/api';
-import { toBsLabel } from '../utils/nepaliDate';
+import { toBsLabel, toBsMonthLabel, toDualDateLabel } from '../utils/nepaliDate';
+import QRCode from 'qrcode';
 
 interface StudentFee {
   studentId: string;
@@ -31,6 +33,19 @@ interface Overview {
 
 interface Invoice {
   id: string;
+  invoiceType: 'ADMISSION' | 'TUITION' | 'SUBJECT' | 'ACTIVITY';
+  institutionName: string;
+  panNumber: string;
+  vatRate: number;
+  studentName: string;
+  admissionNumber: string | null;
+  gradeName: string | null;
+  branchName: string | null;
+  issuedAt: string;
+  transactionId: string | null;
+  lines: Array<{ label: string; amount: number }>;
+  discount: number;
+  fine: number;
   netPayable: number;
   status: string;
   overdue: boolean;
@@ -40,11 +55,24 @@ interface Invoice {
   paymentDate: string | null;
 }
 
+interface LoginDelivery {
+  recipient: 'STUDENT' | 'PARENT';
+  status: 'PENDING' | 'SENT' | 'FAILED';
+  failureReason: string | null;
+  attemptCount: number;
+  lastAttemptAt: string | null;
+  sentAt: string | null;
+}
+
 function money(n: number): string {
   return `NPR ${n.toLocaleString()}`;
 }
 
-export function AcademicFees() {
+function adDate(input: string | Date): string {
+  return new Date(input).toLocaleDateString('en-NP', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kathmandu' });
+}
+
+export function AcademicFees({ canRetryAdmissionLogins = true }: { canRetryAdmissionLogins?: boolean }) {
   const { showToast } = useToast();
   const [overview, setOverview] = useState<Overview | null>(null);
   const [students, setStudents] = useState<StudentFee[]>([]);
@@ -58,25 +86,75 @@ export function AcademicFees() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [billingProfile, setBillingProfile] = useState<BillingLedger['students'][number] | null>(null);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
+  const [drawerLoadError, setDrawerLoadError] = useState('');
   const [payingId, setPayingId] = useState('');
-  const [qrModal, setQrModal] = useState<{ id: string; studentName: string; amount: number; month: string } | null>(null);
+  const [paymentInvoice, setPaymentInvoice] = useState<Invoice | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'BANK'>('CASH');
+  const [paymentReference, setPaymentReference] = useState('');
+  const [paymentError, setPaymentError] = useState('');
+  const [paymentNotice, setPaymentNotice] = useState<{ message: string; delivered: boolean | null } | null>(null);
+  const [admissionStatus, setAdmissionStatus] = useState<'PENDING_PAYMENT' | 'READY_FOR_LOGIN' | 'ACTIVE' | null>(null);
+  const [loginDeliveries, setLoginDeliveries] = useState<LoginDelivery[]>([]);
+  const [isRetryingDelivery, setIsRetryingDelivery] = useState(false);
+  const [qrModal, setQrModal] = useState<{ id: string; studentName: string; amount: number; month: string; qrString: string; dataUrl: string } | null>(null);
+  const [qrLoadingId, setQrLoadingId] = useState('');
+  const [invoiceDocument, setInvoiceDocument] = useState<InvoiceDocumentData | null>(null);
+  const drawerRef = useRef<HTMLElement>(null);
+  const drawerBodyRef = useRef<HTMLDivElement>(null);
+  const paymentDialogRef = useRef<HTMLDialogElement>(null);
+  const drawerTriggerRef = useRef<HTMLElement | null>(null);
+
+  const openQr = async (invoice: Invoice) => {
+    if (!payStudent) return;
+    setQrLoadingId(invoice.id);
+    try {
+      const payload = await api.finances.getNepalPayQr(invoice.id);
+      const dataUrl = await QRCode.toDataURL(payload.qrString, { width: 360, margin: 2, errorCorrectionLevel: 'M' });
+      setQrModal({ id: invoice.id, studentName: payload.studentName, amount: payload.amount, month: toDualDateLabel(invoice.dueDate), qrString: payload.qrString, dataUrl });
+    } catch (cause) { showToast(cause instanceof Error ? cause.message : 'Unable to generate the payment QR.', 'error'); }
+    finally { setQrLoadingId(''); }
+  };
 
   const loadData = async () => {
     setIsLoading(true);
     setErrorMsg('');
-    try {
-      const [ov, list] = await Promise.all([api.finances.getOverview(), api.finances.getStudentFees()]);
-      setOverview(ov);
-      setStudents(list as StudentFee[]);
-    } catch (error: unknown) {
-      setErrorMsg(error instanceof Error ? error.message : 'Failed to load fees.');
-    } finally {
-      setIsLoading(false);
+    const [overviewResult, studentsResult] = await Promise.allSettled([
+      api.finances.getOverview(),
+      api.finances.getStudentFees(),
+    ]);
+    if (studentsResult.status === 'fulfilled') {
+      const list = studentsResult.value as StudentFee[];
+      setStudents(list);
+      setOverview(overviewResult.status === 'fulfilled' ? overviewResult.value : {
+        collected: list.reduce((sum, student) => sum + student.totalPaid, 0),
+        outstanding: list.reduce((sum, student) => sum + student.totalDue, 0),
+        overdueAmount: list.reduce((sum, student) => sum + student.overdueAmount, 0),
+        overdueStudents: list.filter((student) => student.overdueAmount > 0).length,
+        invoiceCount: list.reduce((sum, student) => sum + student.invoiceCount, 0),
+        billingPeriod: '',
+      });
+    } else {
+      setStudents([]);
+      setOverview(null);
+      const cause = studentsResult.reason;
+      setErrorMsg(cause instanceof Error ? cause.message : 'Fee records are temporarily unavailable.');
     }
+    setIsLoading(false);
   };
 
   useEffect(() => {
     void loadData();
+  }, []);
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === 'visible') void loadData(); };
+    const interval = window.setInterval(refresh, 30_000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
   }, []);
 
   const filtered = useMemo(() => {
@@ -91,38 +169,147 @@ export function AcademicFees() {
   }, [students, search, filter]);
 
   const openPayments = async (student: StudentFee) => {
+    if (!payStudent) drawerTriggerRef.current = document.activeElement as HTMLElement | null;
     setPayStudent(student);
     setInvoicesLoading(true);
+    setDrawerLoadError('');
     setInvoices([]);
     setBillingProfile(null);
+    setPaymentNotice(null);
+    setAdmissionStatus(null);
+    setLoginDeliveries([]);
     try {
-      const [list, ledger] = await Promise.all([
+      const [invoiceData, ledger] = await Promise.all([
         api.finances.getStudentInvoices(student.studentId),
         api.finances.getBillingLedger(),
       ]);
-      setInvoices(list as Invoice[]);
+      setInvoices(invoiceData.invoices as Invoice[]);
+      setAdmissionStatus(invoiceData.admissionStatus);
+      setLoginDeliveries(invoiceData.loginDeliveries);
+      if (invoiceData.admissionStatus === 'READY_FOR_LOGIN') {
+        const sent = invoiceData.loginDeliveries.filter((item) => item.status === 'SENT').map((item) => item.recipient.toLowerCase());
+        const failed = invoiceData.loginDeliveries.filter((item) => item.status === 'FAILED');
+        const detail = [
+          ...(sent.length ? [`${sent.join(' and ')} SMS sent.`] : []),
+          ...failed.map((item) => `${item.recipient.toLowerCase()} SMS failed${item.failureReason ? `: ${item.failureReason}` : '.'}`),
+        ].join(' ');
+        setPaymentNotice({ message: detail || 'Admission payment is recorded, but login SMS delivery is still pending.', delivered: false });
+      }
       setBillingProfile(ledger.students.find((item) => item.studentId === student.studentId) ?? null);
     } catch (error: unknown) {
-      showToast(error instanceof Error ? error.message : 'Failed to load invoices.', 'error');
+      setDrawerLoadError(error instanceof Error ? error.message : 'Failed to load invoices.');
     } finally {
       setInvoicesLoading(false);
     }
   };
 
-  const recordPayment = async (invoiceId: string) => {
-    setPayingId(invoiceId);
+  const recordPayment = async () => {
+    if (!paymentInvoice) return;
+    const reference = paymentMethod === 'BANK' ? paymentReference.trim() : 'CASH';
+    if (paymentMethod === 'BANK' && !reference) {
+      setPaymentError('Enter the bank transaction or deposit reference.');
+      return;
+    }
+    setPayingId(paymentInvoice.id);
+    setPaymentError('');
     try {
-      await api.finances.payInvoice(invoiceId, 'CASH');
-      showToast('Payment recorded.', 'success');
+      const result = await api.finances.payInvoice(paymentInvoice.id, reference);
+      const delivered = result.loginDelivery?.delivered ?? null;
+      setPaymentNotice({ message: result.message, delivered });
+      showToast(result.message, delivered === false ? 'error' : 'success');
       if (payStudent) {
-        const list = await api.finances.getStudentInvoices(payStudent.studentId);
-        setInvoices(list as Invoice[]);
+        const invoiceData = await api.finances.getStudentInvoices(payStudent.studentId);
+        setInvoices(invoiceData.invoices as Invoice[]);
+        setAdmissionStatus(invoiceData.admissionStatus);
+        setLoginDeliveries(invoiceData.loginDeliveries);
       }
       await loadData();
+      setPaymentInvoice(null);
+      setPaymentReference('');
+      paymentDialogRef.current?.close();
     } catch (error: unknown) {
-      showToast(error instanceof Error ? error.message : 'Failed to record payment.', 'error');
+      setPaymentError(error instanceof Error ? error.message : 'Failed to record payment. Try again.');
     } finally {
       setPayingId('');
+    }
+  };
+
+  const openPaymentConfirmation = (invoice: Invoice) => {
+    setPaymentInvoice(invoice);
+    setPaymentMethod('CASH');
+    setPaymentReference('');
+    setPaymentError('');
+  };
+
+  const closePaymentConfirmation = () => {
+    if (payingId) return;
+    paymentDialogRef.current?.close();
+    setPaymentInvoice(null);
+    setPaymentError('');
+  };
+
+  useEffect(() => {
+    if (!paymentInvoice) return;
+    paymentDialogRef.current?.showModal();
+  }, [paymentInvoice]);
+
+  useEffect(() => {
+    if (!paymentNotice || paymentNotice.delivered === false) return;
+    const timer = window.setTimeout(() => setPaymentNotice(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [paymentNotice]);
+
+  useEffect(() => {
+    if (!payStudent || paymentInvoice || qrModal) return;
+    const drawer = drawerRef.current;
+    drawerBodyRef.current?.scrollTo({ top: 0 });
+    drawer?.focus();
+    const keyboard = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPayStudent(null);
+      if (event.key !== 'Tab' || !drawer) return;
+      const focusable = [...drawer.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])')];
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', keyboard);
+    return () => document.removeEventListener('keydown', keyboard);
+  }, [payStudent, paymentInvoice, qrModal]);
+
+  useEffect(() => {
+    if (payStudent) return;
+    drawerTriggerRef.current?.focus();
+  }, [payStudent]);
+
+  const retryLoginDelivery = async () => {
+    if (!payStudent) return;
+    setIsRetryingDelivery(true);
+    try {
+      const result = await api.people.issueAdmissionLogins(payStudent.studentId);
+      setPaymentNotice({ message: result.message, delivered: true });
+      setAdmissionStatus('ACTIVE');
+      setLoginDeliveries(result.delivery.recipients.map((item) => ({
+        recipient: item.recipient,
+        status: item.status,
+        failureReason: item.error,
+        attemptCount: 1,
+        lastAttemptAt: item.sentAt,
+        sentAt: item.sentAt,
+      })));
+      showToast(result.message, 'success');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Login SMS delivery failed again.';
+      setPaymentNotice({ message, delivered: false });
+      showToast(message, 'error');
+      const invoiceData = await api.finances.getStudentInvoices(payStudent.studentId).catch(() => null);
+      if (invoiceData) {
+        setAdmissionStatus(invoiceData.admissionStatus);
+        setLoginDeliveries(invoiceData.loginDeliveries);
+      }
+    } finally {
+      setIsRetryingDelivery(false);
     }
   };
 
@@ -145,7 +332,7 @@ export function AcademicFees() {
         <div>
           <h1 className="people-title">Fee &amp; Billing</h1>
           <p className="people-subtitle">
-            Collections, dues, and payments{overview ? ` · billing cycle ${overview.billingPeriod} BS` : ''}.
+            Collections, dues, and payments{overview?.billingPeriod ? ` · billing cycle ${overview.billingPeriod} BS` : ''}.
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -155,12 +342,10 @@ export function AcademicFees() {
           </Button>
           <Button onClick={() => void runBilling()} disabled={isGenerating} style={{ height: '42px' }}>
             <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>receipt_long</span>
-            {isGenerating ? 'Generating…' : `Generate ${overview?.billingPeriod ?? ''} Invoices`}
+            {isGenerating ? 'Generating…' : overview?.billingPeriod ? `Generate ${overview.billingPeriod} Invoices` : 'Generate Invoices'}
           </Button>
         </div>
       </div>
-
-      {errorMsg ? <StatusBadge variant="error">{errorMsg}</StatusBadge> : null}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '18px' }}>
         <KPICard title="Collected" value={overview ? money(overview.collected) : '—'} delta="Paid invoices" icon="paid" accentColor="var(--color-success)" loading={isLoading} />
@@ -200,7 +385,7 @@ export function AcademicFees() {
                   <td colSpan={6}>
                     <div className="people-empty">
                       <span className="material-symbols-outlined">payments</span>
-                      {isLoading ? 'Loading fees…' : students.length === 0 ? 'No students with fee records yet.' : 'No students match your filter.'}
+                      {isLoading ? 'Loading fees…' : errorMsg ? <><span>Fee records could not load.</span><Button variant="outline" onClick={() => void loadData()}>Try again</Button></> : students.length === 0 ? 'No students with fee records yet.' : 'No students match your filter.'}
                     </div>
                   </td>
                 </tr>
@@ -242,84 +427,194 @@ export function AcademicFees() {
 
       {payStudent ? (
         <>
-          <div className="people-drawer-overlay" onClick={() => setPayStudent(null)} />
-          <aside className="people-drawer" role="dialog" aria-modal="true">
+          <button type="button" className="people-drawer-overlay" onClick={() => setPayStudent(null)} aria-label="Close student billing details" />
+          <aside ref={drawerRef} tabIndex={-1} className="people-drawer fee-drawer" role="dialog" aria-modal="true" aria-labelledby="fee-drawer-title">
             <div className="people-drawer-head">
               <div>
-                <h2>{payStudent.name}</h2>
-                <p>Invoices — record cash/bank payments here.</p>
+                <h2 id="fee-drawer-title">{payStudent.name}</h2>
+                <p>{payStudent.branchName ?? 'Branch not assigned'} · Student billing</p>
               </div>
               <button type="button" className="people-drawer-close" onClick={() => setPayStudent(null)} aria-label="Close">
                 <span className="material-symbols-outlined">close</span>
               </button>
             </div>
-            <div className="people-drawer-body">
+            <div ref={drawerBodyRef} className="people-drawer-body">
+              {paymentNotice ? (
+                <div
+                  role={paymentNotice.delivered === false ? 'alert' : 'status'}
+                  className={`fee-sms-notice${paymentNotice.delivered === false ? ' is-action-required' : ' is-success'}`}
+                >
+                  <span className="material-symbols-outlined" aria-hidden="true">{paymentNotice.delivered === false ? 'error' : 'check_circle'}</span>
+                  <div><strong>{paymentNotice.delivered === false ? 'SMS delivery needs attention' : 'Payment recorded successfully'}</strong><p>{paymentNotice.message}</p>
+                  {paymentNotice.delivered === false ? (
+                    <p>
+                      Payment is saved. Review each recipient below and retry any notification that failed.
+                    </p>
+                  ) : null}
+                  {paymentNotice.delivered === false && loginDeliveries.length ? (
+                    <div className="fee-sms-deliveries" aria-label="Login SMS notification log">
+                      {loginDeliveries.map((delivery) => (
+                        <div key={delivery.recipient}>
+                          <span>
+                            {delivery.recipient === 'STUDENT' ? 'Student login SMS' : 'Parent login SMS'}
+                            {delivery.status === 'FAILED' && delivery.failureReason ? (
+                              <small>{delivery.failureReason}</small>
+                            ) : delivery.sentAt ? (
+                              <small>Sent {new Date(delivery.sentAt).toLocaleString('en-NP')}</small>
+                            ) : null}
+                          </span>
+                          <StatusBadge variant={delivery.status === 'SENT' ? 'success' : delivery.status === 'FAILED' ? 'error' : 'warning'}>
+                            {delivery.status === 'SENT' ? 'Sent' : delivery.status === 'FAILED' ? 'Failed' : 'Pending'}
+                          </StatusBadge>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  {canRetryAdmissionLogins && paymentNotice.delivered === false && admissionStatus === 'READY_FOR_LOGIN' ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void retryLoginDelivery()}
+                      disabled={isRetryingDelivery}
+                      style={{ marginTop: '10px', minHeight: '40px' }}
+                    >
+                      {isRetryingDelivery ? 'Retrying SMS…' : 'Retry login SMS'}
+                    </Button>
+                  ) : null}
+                  </div>
+                  <button type="button" onClick={() => setPaymentNotice(null)} aria-label="Dismiss notification"><span className="material-symbols-outlined" aria-hidden="true">close</span></button>
+                </div>
+              ) : null}
               {invoicesLoading ? (
-                <p style={{ color: 'var(--text-muted)', fontSize: '14px', textAlign: 'center', padding: '24px 0' }}>Loading invoices…</p>
+                <div className="fee-drawer-skeleton" aria-busy="true" aria-label="Loading student billing details">
+                  <div /><div /><div />
+                </div>
+              ) : drawerLoadError ? (
+                <div className="fee-drawer-error" role="alert">
+                  <span className="material-symbols-outlined" aria-hidden="true">error</span>
+                  <strong>Billing details could not be loaded</strong>
+                  <p>{drawerLoadError}</p>
+                  <Button variant="outline" onClick={() => void openPayments(payStudent)}>Try again</Button>
+                </div>
               ) : (
                 <>
-                  {billingProfile ? (
-                    <section style={{ padding: '14px 16px', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--color-surface)', marginBottom: '14px' }}>
-                      <h3 style={{ fontSize: '15px', margin: 0 }}>Billing plan</h3>
-                      <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '4px 0 12px' }}>
-                        {billingProfile.grade} · estimated monthly billing {money(billingProfile.monthlyAmount)} · course through {new Date(billingProfile.courseEnd).toLocaleDateString('en-NP')}
-                      </p>
-                      {billingProfile.projections.length ? (
-                        <div style={{ display: 'grid', gap: '8px' }}>
-                          {billingProfile.projections.map((projection) => (
-                            <div key={projection.cycleStart} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', paddingTop: '8px', borderTop: '1px solid var(--border)' }}>
-                              <span style={{ fontSize: '12px' }}>{new Date(projection.cycleStart).toLocaleDateString('en-NP', { month: 'short', year: 'numeric' })} · due {new Date(projection.dueDate).toLocaleDateString('en-NP')}</span>
-                              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><strong style={{ fontSize: '13px' }}>{money(projection.amount)}</strong><StatusBadge variant="info">Projection</StatusBadge></span>
-                            </div>
-                          ))}
+                  <section className="fee-student-summary" aria-labelledby="fee-balance-title">
+                    <div className="fee-section-heading">
+                      <div>
+                        <span>Current balance</span>
+                        <h3 id="fee-balance-title">{money(payStudent.totalDue)}</h3>
+                      </div>
+                      <StatusBadge variant={payStudent.overdueAmount > 0 ? 'error' : payStudent.totalDue > 0 ? 'warning' : 'success'}>
+                        {payStudent.overdueAmount > 0 ? 'Overdue' : payStudent.totalDue > 0 ? 'Payment due' : 'Cleared'}
+                      </StatusBadge>
+                    </div>
+                    <dl className="fee-summary-grid">
+                      <div><dt>Outstanding</dt><dd>{money(payStudent.totalDue)}</dd></div>
+                      <div><dt>Overdue</dt><dd className={payStudent.overdueAmount > 0 ? 'is-overdue' : ''}>{money(payStudent.overdueAmount)}</dd></div>
+                      <div><dt>Paid to date</dt><dd className="is-paid">{money(payStudent.totalPaid)}</dd></div>
+                    </dl>
+                  </section>
+
+                  <section className="fee-drawer-section" aria-labelledby="posted-invoices-title">
+                    <div className="fee-section-title">
+                      <div><h3 id="posted-invoices-title">Posted invoices</h3><p>Recorded charges and payment status</p></div>
+                      <span>{invoices.length}</span>
+                    </div>
+                    {invoices.length === 0 ? (
+                      <div className="people-empty" role="status"><span className="material-symbols-outlined" aria-hidden="true">receipt_long</span>No invoices have been posted for this student yet.</div>
+                    ) : <div className="fee-invoice-list">{invoices.map((inv) => (
+                      <article key={inv.id} className="fee-invoice-row">
+                        <header>
+                          <div><span>{inv.invoiceType.toLowerCase().replaceAll('_', ' ')} · {inv.branchName}</span><strong>{inv.invoiceType === 'ADMISSION' ? inv.status === 'PAID' && inv.paymentDate ? `Paid ${toBsLabel(inv.paymentDate)}` : 'Awaiting admission payment' : toBsMonthLabel(inv.billingCycleStart)}</strong></div>
+                          {inv.status === 'PAID' ? <StatusBadge variant="success">Paid</StatusBadge> : inv.overdue ? <StatusBadge variant="error">Overdue</StatusBadge> : <StatusBadge variant="warning">Unpaid</StatusBadge>}
+                        </header>
+                        <div className="fee-invoice-copy">
+                          <strong>{money(inv.netPayable)}</strong>
+                          {inv.invoiceType === 'ADMISSION' && inv.status === 'PAID' ? <span><b>Valid until {toBsLabel(inv.billingCycleEnd)}</b><small>{adDate(inv.paymentDate || inv.billingCycleStart)} AD paid · {adDate(inv.billingCycleEnd)} AD expiry</small></span> :
+                          <span><b>Due {toBsLabel(inv.dueDate)}</b><small>{adDate(inv.dueDate)} AD{inv.paymentDate ? ` · paid ${adDate(inv.paymentDate)} AD` : ''}</small></span>
+                          }
                         </div>
+                        <footer className="fee-invoice-actions">
+                          <Button variant="outline" onClick={() => setInvoiceDocument(inv)}>
+                            <span className="material-symbols-outlined" aria-hidden="true">receipt_long</span>
+                            {inv.status === 'PAID' ? 'View receipt' : 'View bill'}
+                          </Button>
+                          {inv.status !== 'PAID' ? <>
+                            <Button variant="outline" onClick={() => void openQr(inv)} disabled={qrLoadingId === inv.id}>
+                              <span className="material-symbols-outlined" aria-hidden="true">qr_code_scanner</span>
+                              {qrLoadingId === inv.id ? 'Generating…' : 'Payment QR'}
+                            </Button>
+                            <Button onClick={() => openPaymentConfirmation(inv)} disabled={Boolean(payingId)}>
+                              Record payment
+                            </Button>
+                          </> : null}
+                        </footer>
+                      </article>
+                    ))}</div>}
+                  </section>
+
+                  {billingProfile ? (
+                    <section className="fee-drawer-section fee-billing-plan" aria-labelledby="billing-plan-title">
+                      <div className="fee-section-title">
+                        <div><h3 id="billing-plan-title">Billing plan</h3><p>{billingProfile.grade} · active through {toBsLabel(billingProfile.courseEnd)} <small>({adDate(billingProfile.courseEnd)} AD)</small></p></div>
+                        <strong>{money(billingProfile.monthlyAmount)}<small>/month</small></strong>
+                      </div>
+                      {billingProfile.projections.length ? (
+                        <details className="fee-projections">
+                          <summary><span>Future schedule</span><strong>{billingProfile.projections.length} cycle{billingProfile.projections.length === 1 ? '' : 's'}</strong></summary>
+                          <div>{billingProfile.projections.map((projection) => (
+                            <div key={projection.cycleStart}>
+                              <span><b>{projection.billingPeriod} BS</b><small>Due {toBsLabel(projection.dueDate)} · {adDate(projection.dueDate)} AD</small></span>
+                              <strong>{money(projection.amount)}</strong>
+                            </div>
+                          ))}</div>
+                        </details>
                       ) : <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: 0 }}>No future billing cycles remain in the current course window.</p>}
                     </section>
                   ) : null}
-                  {invoices.length === 0 ? (
-                    <div className="people-empty" role="status"><span className="material-symbols-outlined" aria-hidden="true">receipt_long</span>No invoices have been posted for this student yet.</div>
-                  ) : invoices.map((inv) => (
-                  <div key={inv.id} style={{ padding: '14px 16px', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--color-bg)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
-                    <div>
-                      <div style={{ fontSize: '15px', fontWeight: 700 }}>{money(inv.netPayable)}</div>
-                      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '3px' }}>
-                        Due {toBsLabel(inv.dueDate)} BS
-                        {inv.paymentDate ? ` · paid ${toBsLabel(inv.paymentDate)} BS` : ''}
-                      </div>
-                    </div>
-                    {inv.status === 'PAID' ? (
-                      <StatusBadge variant="success">Paid</StatusBadge>
-                    ) : (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        {inv.overdue ? <StatusBadge variant="error">Overdue</StatusBadge> : <StatusBadge variant="warning">Unpaid</StatusBadge>}
-                        <Button
-                          variant="outline"
-                          onClick={() => setQrModal({
-                            id: inv.id,
-                            studentName: payStudent.name,
-                            amount: inv.netPayable,
-                            month: toBsLabel(inv.dueDate)
-                          })}
-                          style={{ minHeight: '34px', height: '34px', padding: '6px 12px', borderColor: 'var(--color-accent)', color: 'var(--color-accent-hover)' }}
-                        >
-                          <span className="material-symbols-outlined" style={{ fontSize: '16px', marginRight: '4px' }}>qr_code_scanner</span>
-                          QR
-                        </Button>
-                        <Button onClick={() => void recordPayment(inv.id)} disabled={payingId === inv.id} style={{ minHeight: '34px', height: '34px', padding: '6px 14px' }}>
-                          {payingId === inv.id ? 'Saving…' : 'Mark Paid'}
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                  ))}
                 </>
               )}
             </div>
-            <div className="people-drawer-foot">
-              <Button variant="outline" onClick={() => setPayStudent(null)} style={{ flex: 1 }}>Done</Button>
-            </div>
           </aside>
         </>
+      ) : null}
+
+      {paymentInvoice && payStudent ? (
+        <dialog
+          ref={paymentDialogRef}
+          className="fee-payment-dialog"
+          aria-labelledby="fee-payment-title"
+          onCancel={(event) => { event.preventDefault(); closePaymentConfirmation(); }}
+          onClose={() => { if (!payingId) setPaymentInvoice(null); }}
+        >
+          <form onSubmit={(event) => { event.preventDefault(); void recordPayment(); }}>
+            <div className="fee-payment-dialog-head">
+              <div><span>Confirm collection</span><h2 id="fee-payment-title">Record payment</h2></div>
+              <button type="button" onClick={closePaymentConfirmation} disabled={Boolean(payingId)} aria-label="Close payment confirmation"><span className="material-symbols-outlined" aria-hidden="true">close</span></button>
+            </div>
+            <p>Verify the student, amount, and payment method before updating the ledger.</p>
+            <dl className="fee-payment-facts">
+              <div><dt>Student</dt><dd>{payStudent.name}</dd></div>
+              <div><dt>Invoice</dt><dd>{paymentInvoice.invoiceType.toLowerCase().replaceAll('_', ' ')}</dd></div>
+              <div><dt>Invoice branch</dt><dd>{paymentInvoice.branchName}</dd></div>
+              <div><dt>Amount received</dt><dd>{money(paymentInvoice.netPayable)}</dd></div>
+              <div><dt>Due date</dt><dd>{toBsLabel(paymentInvoice.dueDate)} · {adDate(paymentInvoice.dueDate)} AD</dd></div>
+            </dl>
+            <fieldset className="fee-payment-methods">
+              <legend>Payment method</legend>
+              <label><input type="radio" name="payment-method" value="CASH" checked={paymentMethod === 'CASH'} onChange={() => setPaymentMethod('CASH')} />Cash</label>
+              <label><input type="radio" name="payment-method" value="BANK" checked={paymentMethod === 'BANK'} onChange={() => setPaymentMethod('BANK')} />Bank transfer</label>
+            </fieldset>
+            {paymentMethod === 'BANK' ? <label className="fee-payment-reference" htmlFor="fee-payment-reference">Transaction reference<input id="fee-payment-reference" type="text" autoComplete="off" maxLength={128} required value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} placeholder="Bank transaction or deposit ID" /></label> : null}
+            {paymentError ? <div className="fee-payment-error" role="alert"><span className="material-symbols-outlined" aria-hidden="true">error</span>{paymentError}</div> : null}
+            <div className="fee-payment-actions">
+              <Button type="button" variant="outline" onClick={closePaymentConfirmation} disabled={Boolean(payingId)}>Cancel</Button>
+              <Button type="submit" disabled={Boolean(payingId) || (paymentMethod === 'BANK' && !paymentReference.trim())} aria-busy={Boolean(payingId)}>
+                {payingId ? 'Recording payment…' : `Record ${money(paymentInvoice.netPayable)}`}
+              </Button>
+            </div>
+          </form>
+        </dialog>
       ) : null}
 
       {/* NepalPay QR Modal */}
@@ -354,7 +649,6 @@ export function AcademicFees() {
               Invoice for <strong>{qrModal.studentName}</strong> ({qrModal.month} BS)
             </div>
 
-            {/* Generated QR Mock Card */}
             <div style={{
               background: '#F8F9FA',
               padding: '24px',
@@ -363,27 +657,7 @@ export function AcademicFees() {
               marginBottom: '20px',
               display: 'inline-block'
             }}>
-              <svg width="180" height="180" viewBox="0 0 180 180" style={{ display: 'block', margin: '0 auto' }}>
-                {/* Outer frame */}
-                <rect x="10" y="10" width="160" height="160" fill="none" stroke="#0F4C8A" strokeWidth="4" rx="8" />
-                {/* QR Pattern Simulation */}
-                <rect x="25" y="25" width="40" height="40" fill="#0F4C8A" />
-                <rect x="33" y="33" width="24" height="24" fill="#FFFFFF" />
-                <rect x="39" y="39" width="12" height="12" fill="#0F4C8A" />
-
-                <rect x="115" y="25" width="40" height="40" fill="#0F4C8A" />
-                <rect x="123" y="33" width="24" height="24" fill="#FFFFFF" />
-                <rect x="129" y="39" width="12" height="12" fill="#0F4C8A" />
-
-                <rect x="25" y="115" width="40" height="40" fill="#0F4C8A" />
-                <rect x="33" y="123" width="24" height="24" fill="#FFFFFF" />
-                <rect x="39" y="129" width="12" height="12" fill="#0F4C8A" />
-
-                <path d="M75 25h30v10H75zM75 45h20v20H75zM100 55h20v10h-20zM25 75h50v10H25zM85 75h30v20H85zM125 75h30v10h-30zM45 95h30v30H45zM95 105h20v40H95zM125 115h25v25h-25z" fill="#2C3E50" />
-                {/* NepalPay Logo Icon Center */}
-                <circle cx="90" cy="90" r="16" fill="#F39C12" />
-                <text x="90" y="94" textAnchor="middle" fill="#FFFFFF" fontSize="10" fontWeight="900">NPR</text>
-              </svg>
+              <img src={qrModal.dataUrl} width="180" height="180" alt={`NepalPay payment QR for ${qrModal.studentName}`} style={{ display: 'block', margin: '0 auto' }} />
             </div>
 
             <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--color-primary)', marginBottom: '4px' }}>
@@ -393,13 +667,15 @@ export function AcademicFees() {
               Scan using FONEPAY, eSewa, Khalti, or any NepalPay Mobile Banking app.
             </div>
 
-            <Button onClick={() => { showToast('QR code copied to clipboard!', 'success'); setQrModal(null); }} style={{ width: '100%' }}>
+            <Button onClick={() => { const link = document.createElement('a'); link.href = qrModal.dataUrl; link.download = `nepalpay-${qrModal.id}.png`; link.click(); }} style={{ width: '100%' }}>
               <span className="material-symbols-outlined" style={{ fontSize: '18px', marginRight: '6px' }}>download</span>
-              Done / Save QR
+              Download QR
             </Button>
+            <Button variant="outline" onClick={() => void navigator.clipboard.writeText(qrModal.qrString).then(() => showToast('Payment payload copied.', 'success')).catch(() => showToast('Could not copy the payment payload.', 'error'))} style={{ width: '100%', marginTop: 8 }}>Copy payment payload</Button>
           </div>
         </>
       ) : null}
+      {invoiceDocument ? <InvoiceDocumentDialog data={invoiceDocument} onClose={() => setInvoiceDocument(null)} /> : null}
     </div>
   );
 }

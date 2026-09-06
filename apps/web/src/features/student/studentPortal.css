@@ -478,7 +478,7 @@
 .student-payment-help dt { color: var(--student-muted); }
 .student-payment-help dd { color: var(--student-text); font-weight: 700; }
 
-.student-modal-backdrop { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: 24px; background: rgba(0,20,52,.55); backdrop-filter: blur(4px); }
+.student-modal-backdrop { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: 24px; background: rgba(0,20,52,.55); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
 .student-modal { position: relative; width: min(100%, 430px); padding: 28px; border-radius: 18px; background: var(--color-surface); color: var(--student-text); text-align: center; box-shadow: 0 24px 60px rgba(0,20,52,.3); animation: student-modal-enter 220ms var(--student-silk) both; }
 @keyframes student-modal-enter { from { opacity: 0; transform: scale(.96) translateY(8px); } to { opacity: 1; transform: scale(1) translateY(0); } }
 .student-modal h2 { margin-top: 6px; color: var(--student-navy); font-family: Fraunces, var(--font-display); }
@@ -518,6 +518,7 @@
 .student-certificate-list button,
 .student-download-link { display: inline-flex; align-items: center; gap: 7px; padding: 8px 12px; border: 1px solid var(--student-border); border-radius: 7px; background: transparent; color: var(--student-blue); font-weight: 700; text-decoration: none; cursor: pointer; }
 .student-certificate-list button:disabled { color: var(--student-muted); cursor: not-allowed; opacity: .65; }
+.student-certificate-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 
 .student-calendar-list { display: flex; flex-direction: column; }
 .student-calendar-list article, .student-calendar-list > button { gap: 16px; padding: 17px 4px; border: 0; border-bottom: 1px solid var(--student-border); background: transparent; color: var(--student-text); display: flex; align-items: center; text-align: left; }
@@ -531,6 +532,7 @@
 .student-digital-calendar { padding: 0; overflow: hidden; }
 .student-digital-calendar > header { min-height: 80px; padding: 18px 20px; border-bottom: 1px solid var(--student-border); display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .student-digital-calendar > header h2 { margin-top: 3px; color: var(--student-navy); font-family: Fraunces, var(--font-display); font-size: 22px; }
+.student-digital-calendar > header > div:first-child > small, .student-selected-events > small { display: block; margin-top: 3px; color: var(--student-muted); font-size: 11px; font-weight: 700; }
 .student-digital-calendar > header > div:last-child { display: flex; align-items: center; gap: 6px; }
 .student-digital-calendar > header button { min-width: 42px; padding: 8px 10px; border: 1px solid var(--student-border); border-radius: 7px; background: transparent; color: var(--student-blue); cursor: pointer; font-weight: 800; }
 .student-calendar-weekdays, .student-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
@@ -540,9 +542,11 @@
 .student-calendar-grid > button { min-width: 0; min-height: 68px; padding: 8px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--student-text); cursor: pointer; display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; }
 .student-calendar-grid > button:hover { background: rgba(21,96,189,.055); }
 .student-calendar-grid > button.is-outside { color: var(--student-muted); opacity: .48; }
-.student-calendar-grid > button.is-today > span { display: grid; place-items: center; width: 26px; height: 26px; margin: -4px; border-radius: 50%; background: var(--student-blue); color: #fff; }
+.student-calendar-grid > button.is-today > span { padding: 3px 5px; margin: -4px; border-radius: 12px; background: var(--student-blue); color: #fff; }
 .student-calendar-grid > button.is-selected { border-color: var(--student-blue); background: rgba(21,96,189,.075); }
 .student-calendar-grid > button > span { font-size: 12px; font-weight: 800; }
+.student-calendar-grid > button > span small { margin-left: 3px; color: var(--student-muted); font-size: 8px; font-weight: 700; }
+.student-calendar-grid > button.is-today > span small { color: inherit; opacity: .82; }
 .student-calendar-grid > button > i { min-height: 8px; display: flex; gap: 3px; }
 .student-calendar-grid > button b { width: 6px; height: 6px; border-radius: 50%; background: var(--student-blue); }
 .student-calendar-grid > button b.is-success { background: var(--student-success); }
@@ -556,9 +560,10 @@
 .student-selected-events article p { margin-top: 3px; color: var(--student-muted); font-size: 12px; }
 .student-upcoming-panel { max-height: 720px; overflow-y: auto; }
 .student-date-block { width: 54px; height: 58px; display: grid; place-content: center; border-radius: 7px; text-align: center; }
-.student-date-block strong, .student-date-block span { display: block; }
+.student-date-block strong, .student-date-block span, .student-date-block small { display: block; }
 .student-date-block strong { font-size: 20px; line-height: 1; }
 .student-date-block span { margin-top: 3px; font-size: 9px; font-weight: 800; }
+.student-date-block small { margin-top: 2px; font-size: 8px; font-weight: 700; opacity: .8; }
 .student-date-block.is-success { background: rgba(0,171,102,.09); color: #007f4b; }
 .student-date-block.is-error { background: rgba(230,57,70,.09); color: #c42734; }
 .student-date-block.is-warning { background: rgba(224,142,0,.1); color: #9b6200; }
@@ -648,6 +653,7 @@
   .student-session { align-items: flex-start; }
   .student-session .student-status { display: none; }
   .student-assignment-list article, .student-certificate-list article { align-items: flex-start; flex-wrap: wrap; }
+  .student-certificate-actions { flex: 1 0 100%; padding-left: 56px; justify-content: flex-start; }
   .student-assignment__due { flex: 1 0 100% !important; padding-left: 56px; text-align: left; }
   .student-assignment__due .student-status { margin-left: 0; }
   .student-attendance-summary { grid-template-columns: 82px 1fr; gap: 16px; padding: 20px; }

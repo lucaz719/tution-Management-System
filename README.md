@@ -132,7 +132,8 @@ the API and web application.
 
 ```powershell
 Copy-Item .env.docker.example .env
-# Replace BETTER_AUTH_SECRET and POSTGRES_PASSWORD in .env.
+# Replace BETTER_AUTH_SECRET, NEPALPAY_WEBHOOK_SECRET, and POSTGRES_PASSWORD in .env.
+# For a VPS, set TMS_API_BASE_URL, BETTER_AUTH_URL, and WEB_ORIGIN to your HTTPS staging or production URLs before building.
 docker compose up --build -d
 docker compose ps
 ```
@@ -156,6 +157,13 @@ when the schema is current.
 ### connectIPS payments
 
 connectIPS is disabled by default. Configure the `CONNECTIPS_*` values shown in
+`.env.docker.example`. Set `CONNECTIPS_ENVIRONMENT=STAGING` with UAT gateway
+credentials, and use `LIVE` only in the production container. Set
+`CONNECTIPS_PUBLIC_BASE_URL` to the externally reachable API origin for each
+deployment. For the current staging API use
+`https://api.staging.sanskardipshikshalaya.com.np`; production uses
+`https://api.tms.sanskardipshikshalaya.com.np`. The Payments
+screen reports this container-owned environment but cannot change it.
 `services/api/.env.example` using NCHL-issued UAT credentials. The creditor PFX
 must be supplied as base64 and must never be committed.
 
@@ -186,7 +194,7 @@ scheduler.
 
 ## Development provisioning flow
 
-When `PLATFORM_ADMIN_ENABLED=true`, the seeded development Super Admin can provision the initial institution and Tenant Admin. After the Tenant Admin is created:
+When `PLATFORM_ADMIN_ENABLED=true`, the seeded Super Admin can provision the initial institution and Tenant Admin. A production deployment also requires `PLATFORM_ADMIN_PRODUCTION_ACK=INITIAL_TENANT_BOOTSTRAP`. After the Tenant Admin is created:
 
 1. Sign in as Tenant Admin.
 2. Change the temporary password immediately.
@@ -197,9 +205,10 @@ When `PLATFORM_ADMIN_ENABLED=true`, the seeded development Super Admin can provi
 
 ```env
 PLATFORM_ADMIN_ENABLED="false"
+PLATFORM_ADMIN_PRODUCTION_ACK=""
 ```
 
-Restart the API after changing the flag. Production must not mount or compile a client-facing Super Admin surface.
+Restart the API after changing the flags. When disabled, Super Admin sessions and provisioning endpoints are rejected; the Tenant Admin continues to operate normally. The production acknowledgement is intentionally temporary and must be cleared after the initial handoff.
 
 ## Verification commands
 
@@ -264,6 +273,8 @@ Production requirements:
 
 ## Documentation
 
+- [Staging-first deployment workflow](docs/DEPLOYMENT_WORKFLOW.md) — branch
+  protection, Coolify environment isolation, promotion, and rollback procedure.
 - [Operational working memory and current project status](.memory) — read this
   first before development and update it in the same change set when current
   state, validation, known gaps, or next work changes.

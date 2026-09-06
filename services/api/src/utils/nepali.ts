@@ -84,3 +84,17 @@ export async function formatBsDate(adDate: Date): Promise<string> {
   const nd = new NepaliDate(atUtcMidnight(adDate));
   return `${MONTH_EN[nd.month]} ${nd.day}, ${nd.year}`;
 }
+
+// Admission access starts on the payment date and lasts one complete Bikram
+// Sambat year. The inclusive end is the day before the same BS date next year.
+export async function getAdmissionTenure(paidAt: Date): Promise<{ start: Date; end: Date }> {
+  const { NepaliDate, NEPALI_DATE_MAP } = await lib();
+  const start = atUtcMidnight(paidAt);
+  const paidBs = new NepaliDate(start);
+  const nextYear = paidBs.year + 1;
+  const daysInTargetMonth = NEPALI_DATE_MAP.find((row) => row.year === nextYear)?.days[paidBs.month] ?? 30;
+  const anniversary = atUtcMidnight(new NepaliDate(nextYear, paidBs.month, Math.min(paidBs.day, daysInTargetMonth)).getEnglishDate());
+  const end = new Date(anniversary);
+  end.setUTCDate(end.getUTCDate() - 1);
+  return { start, end };
+}

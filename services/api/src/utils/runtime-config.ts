@@ -6,6 +6,8 @@ export interface RuntimeConfig {
   webOrigin: string;
 }
 
+export const PRODUCTION_BOOTSTRAP_ACK = 'INITIAL_TENANT_BOOTSTRAP';
+
 function required(env: Environment, name: string): string {
   const value = env[name]?.trim();
   if (!value) {
@@ -43,11 +45,20 @@ export function validateRuntimeConfig(env: Environment = process.env): RuntimeCo
   const webOrigin = validateUrl(required(env, 'WEB_ORIGIN'), 'WEB_ORIGIN', isProduction);
 
   if (isProduction) {
-    if (env.PLATFORM_ADMIN_ENABLED === 'true') {
-      throw new Error('PLATFORM_ADMIN_ENABLED must be false in production.');
+    if (env.PLATFORM_ADMIN_ENABLED === 'true' && env.PLATFORM_ADMIN_PRODUCTION_ACK !== PRODUCTION_BOOTSTRAP_ACK) {
+      throw new Error(
+        `PLATFORM_ADMIN_PRODUCTION_ACK must equal ${PRODUCTION_BOOTSTRAP_ACK} when enabling platform administration in production.`,
+      );
     }
-    if (env.SMS_PROVIDER === 'MOCK') {
+    const smsProvider = (env.SMS_PROVIDER || 'MOCK').toUpperCase();
+    if (smsProvider === 'MOCK') {
       throw new Error('SMS_PROVIDER must not be MOCK in production.');
+    }
+    if (!['AAKASH', 'DISABLED'].includes(smsProvider)) {
+      throw new Error('SMS_PROVIDER must be AAKASH or DISABLED in production.');
+    }
+    if (smsProvider === 'AAKASH' && !env.AAKASH_SMS_AUTH_TOKEN?.trim()) {
+      throw new Error('AAKASH_SMS_AUTH_TOKEN is required when SMS_PROVIDER=AAKASH.');
     }
     const webhookSecret = required(env, 'NEPALPAY_WEBHOOK_SECRET');
     if (webhookSecret.length < 32) {

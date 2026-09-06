@@ -4,14 +4,49 @@ import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { MockSmsSender } from '../utils/notifications';
-import { getBillingPeriod } from '../utils/nepali';
+import { getAdmissionTenure, getBillingPeriod } from '../utils/nepali';
 import { canApprovePettyCashL1, canReleasePettyCash, hasBranchPermission, isTenantAdmin } from '../utils/access-control';
 import crypto from 'node:crypto';
-import { recurringInvoiceType } from '../utils/billing-rules';
+import { isInvoiceOverdue, recurringInvoiceType } from '../utils/billing-rules';
 import { createConnectIpsForm, validateAndConfirmConnectIps } from '../utils/connectips';
 import { parsePlainRecord, parseStrictKeys, parseStrictObject, readBoolean, readFiniteNumber, readTrimmedString } from '../utils/request-validation';
+import { activateAdmissionAndSendLogins } from '../utils/admission-logins';
+import { buildFinancialIntelligence } from '../utils/financial-intelligence';
+import { invoiceTypeLabel } from '../utils/invoice-document';
+import {
+  compensationStructure,
+  createPayrollRecords,
+  PayrollConfigurationError,
+  PayrollPeriodConflictError,
+} from '../services/payroll-service';
 
 const router = Router();
+
+type PaymentSettings = {
+  connectIpsEnabled: boolean;
+  staticQrEnabled: boolean;
+  staticQrImageUrl: string;
+  accountName: string;
+  accountNumber: string;
+  bankName: string;
+  instructions: string;
+};
+
+function paymentSettings(): PaymentSettings {
+  return {
+    connectIpsEnabled: process.env.CONNECTIPS_ENABLED === 'true',
+    staticQrEnabled: process.env.STATIC_PAYMENT_QR_ENABLED === 'true',
+    staticQrImageUrl: process.env.STATIC_PAYMENT_QR_IMAGE_URL || '',
+    accountName: process.env.STATIC_PAYMENT_ACCOUNT_NAME || '',
+    accountNumber: process.env.STATIC_PAYMENT_ACCOUNT_NUMBER || '',
+    bankName: process.env.STATIC_PAYMENT_BANK_NAME || '',
+    instructions: process.env.STATIC_PAYMENT_INSTRUCTIONS || '',
+  };
+}
+
+router.get('/payment-settings', authMiddleware, (_req: TenantRequest, res: Response) => {
+  return res.json(paymentSettings());
+});
 
 type PettyCashRequestItem = { name: string; quantity: number; unitAmount: number; totalAmount: number };
 
@@ -67,7 +102,7 @@ async function loadInvoicePaymentAccess(req: TenantRequest, invoiceId: string) {
     include: {
       student: {
         include: {
-          user: { include: { userRoles: true } },
+          user: true,
           studentParents: { include: { parent: true } },
         },
       },
@@ -76,13 +111,9 @@ async function loadInvoicePaymentAccess(req: TenantRequest, invoiceId: string) {
   if (!invoice) return null;
   const ownStudent = invoice.student.userId === req.user!.id;
   const ownParent = invoice.student.studentParents.some((link) => link.parent.userId === req.user!.id);
-  const branchIds = invoice.student.user.userRoles
-    .map((assignment) => assignment.branchId)
-    .filter((branchId): branchId is string => Boolean(branchId));
   const billingAccess = billingBranchScopes(req.user!);
-  const staffAccess = branchIds.some((branchId) =>
-    billingAccess.scopes.includes(branchId) || hasBranchPermission(req.user!, 'manage_students', branchId),
-  );
+  const staffAccess = billingAccess.scopes.includes(invoice.branchId)
+    || hasBranchPermission(req.user!, 'manage_students', invoice.branchId);
   return ownStudent || ownParent || billingAccess.isTenantAdmin || staffAccess ? invoice : null;
 }
 
@@ -90,7 +121,8 @@ async function loadStudentBillingAccess(req: TenantRequest, studentId: string) {
   const student = await prisma.student.findFirst({
     where: { id: studentId, user: { tenantId: req.tenantId! } },
     include: {
-      user: { include: { userRoles: true } },
+      grade: true,
+      user: { include: { userRoles: { include: { branch: true } } } },
       studentParents: { include: { parent: true } },
     },
   });
@@ -108,6 +140,8 @@ async function loadStudentBillingAccess(req: TenantRequest, studentId: string) {
 
 router.post('/connectips/initiate/:invoiceId', authMiddleware, async (req: TenantRequest, res: Response) => {
   try {
+    const settings = paymentSettings();
+    if (!settings.connectIpsEnabled) return res.status(503).json({ error: 'connectIPS is not enabled for this institution.' });
     const invoice = await loadInvoicePaymentAccess(req, req.params.invoiceId);
     if (!invoice) return res.status(404).json({ error: 'Invoice not found or unavailable to this account.' });
     if (invoice.status === 'PAID') return res.status(409).json({ error: 'Invoice is already paid.' });
@@ -123,6 +157,7 @@ router.post('/connectips/initiate/:invoiceId', authMiddleware, async (req: Tenan
       attempt = await prisma.paymentAttempt.create({
         data: {
           tenantId: req.tenantId!,
+          branchId: invoice.branchId,
           invoiceId: invoice.id,
           provider: 'CONNECTIPS',
           status: 'PENDING',
@@ -167,8 +202,12 @@ router.get('/connectips/return/success', async (req: TenantRequest, res: Respons
   try {
     const attempt = await validateAndConfirmConnectIps(txnId);
     if (!attempt) return res.status(404).json({ error: 'Payment attempt not found.' });
+    const appUrl = process.env.PAYMENT_FRONTEND_BASE_URL?.replace(/\/$/, '');
+    if (appUrl) return res.redirect(303, `${appUrl}/payment/result?txnId=${encodeURIComponent(attempt.txnId)}&status=${attempt.status.toLowerCase()}`);
     return res.json({ txnId: attempt.txnId, status: attempt.status });
   } catch {
+    const appUrl = process.env.PAYMENT_FRONTEND_BASE_URL?.replace(/\/$/, '');
+    if (appUrl) return res.redirect(303, `${appUrl}/payment/result?txnId=${encodeURIComponent(txnId)}&status=pending`);
     return res.status(502).json({ error: 'connectIPS validation is temporarily unavailable.' });
   }
 });
@@ -185,7 +224,89 @@ router.get('/connectips/return/failure', async (req: TenantRequest, res: Respons
     });
   }
   const current = await prisma.paymentAttempt.findUniqueOrThrow({ where: { id: attempt.id } });
+  const appUrl = process.env.PAYMENT_FRONTEND_BASE_URL?.replace(/\/$/, '');
+  if (appUrl) return res.redirect(303, `${appUrl}/payment/result?txnId=${encodeURIComponent(txnId)}&status=${current.status.toLowerCase()}`);
   return res.json({ txnId, status: current.status });
+});
+
+router.post('/manual-payment/:invoiceId', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const invoice = await loadInvoicePaymentAccess(req, req.params.invoiceId);
+  if (!invoice) return res.status(404).json({ error: 'Invoice not found or unavailable to this account.' });
+  if (invoice.status === 'PAID') return res.status(409).json({ error: 'Invoice is already paid.' });
+  if (!paymentSettings().staticQrEnabled) return res.status(503).json({ error: 'Manual QR payment is not enabled.' });
+  const shape = parseStrictKeys(req.body, ['referenceId', 'receiptProof']);
+  if (!shape.success) return res.status(400).json({ error: shape.error });
+  const referenceId = readTrimmedString(shape.data, 'referenceId', { required: true, maxLength: 80, pattern: /^[A-Za-z0-9._\/-]+$/, message: 'Enter a valid payment reference.' });
+  const receiptProof = readTrimmedString(shape.data, 'receiptProof', { required: true, maxLength: 1_500_000, pattern: /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/, message: 'Upload a PNG, JPEG, or WebP receipt under 1 MB.' });
+  if (!referenceId.success) return res.status(400).json({ error: referenceId.error });
+  if (!receiptProof.success) return res.status(400).json({ error: receiptProof.error });
+  const duplicate = await prisma.paymentAttempt.findFirst({ where: { tenantId: req.tenantId!, provider: 'BANK', referenceId: referenceId.data } });
+  if (duplicate) return res.status(409).json({ error: 'This payment reference was already submitted.' });
+  const txnId = `qr_${crypto.randomBytes(8).toString('hex')}`;
+  const attempt = await prisma.paymentAttempt.create({ data: { tenantId: req.tenantId!, branchId: invoice.branchId, invoiceId: invoice.id, provider: 'BANK', status: 'PENDING', txnId, referenceId: referenceId.data, amountPaisa: BigInt(Math.round(Number(invoice.netPayable) * 100)), receiptProof: receiptProof.data, receiptMimeType: receiptProof.data.slice(5, receiptProof.data.indexOf(';')), gatewayStatus: 'AWAITING_REVIEW', createdBy: req.user!.id } });
+  return res.status(201).json({ id: attempt.id, txnId, status: attempt.status, message: 'Receipt submitted for verification.' });
+});
+
+router.get('/manual-payments', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const access = billingBranchScopes(req.user);
+  if (!access.isTenantAdmin && access.scopes.length === 0) return res.status(403).json({ error: 'You do not have access to payment receipts.' });
+  const attempts = await prisma.paymentAttempt.findMany({ where: { tenantId: req.tenantId!, provider: 'BANK', status: { in: ['PENDING', 'SUCCESS', 'FAILED'] }, ...(access.isTenantAdmin ? {} : { branchId: { in: access.scopes } }) }, include: { invoice: { include: { student: { include: { user: true } } } } }, orderBy: { createdAt: 'desc' }, take: 100 });
+  return res.json({ attempts: attempts.map((attempt) => ({ id: attempt.id, txnId: attempt.txnId, referenceId: attempt.referenceId, amount: Number(attempt.amountPaisa) / 100, status: attempt.status, receiptProof: attempt.receiptProof, createdAt: attempt.createdAt, reviewedAt: attempt.reviewedAt, reviewRemarks: attempt.reviewRemarks, invoiceId: attempt.invoiceId, studentName: `${attempt.invoice.student.user.firstName} ${attempt.invoice.student.user.lastName}`.trim() })) });
+});
+
+router.get('/payment-attempts', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const access = billingBranchScopes(req.user);
+  if (!access.isTenantAdmin && access.scopes.length === 0) return res.status(403).json({ error: 'You do not have access to payment activity.' });
+  const attempts = await prisma.paymentAttempt.findMany({
+    where: { tenantId: req.tenantId!, provider: { in: ['CONNECTIPS', 'BANK'] }, ...(access.isTenantAdmin ? {} : { branchId: { in: access.scopes } }) },
+    include: { invoice: { include: { student: { include: { user: true } } } } },
+    orderBy: { createdAt: 'desc' },
+    take: 200,
+  });
+  return res.json({ attempts: attempts.map((attempt) => ({
+    id: attempt.id,
+    txnId: attempt.txnId,
+    provider: attempt.provider,
+    referenceId: attempt.referenceId,
+    amount: Number(attempt.amountPaisa) / 100,
+    status: attempt.status,
+    gatewayStatus: attempt.gatewayStatus,
+    gatewayMessage: attempt.gatewayMessage,
+    receiptProof: attempt.receiptProof,
+    createdAt: attempt.createdAt,
+    confirmedAt: attempt.confirmedAt,
+    failedAt: attempt.failedAt,
+    reviewedAt: attempt.reviewedAt,
+    reviewRemarks: attempt.reviewRemarks,
+    invoiceId: attempt.invoiceId,
+    invoiceStatus: attempt.invoice.status,
+    studentName: `${attempt.invoice.student.user.firstName} ${attempt.invoice.student.user.lastName}`.trim(),
+  })) });
+});
+
+router.post('/manual-payments/:id/decision', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const access = billingBranchScopes(req.user);
+  if (!access.isTenantAdmin && access.scopes.length === 0) return res.status(403).json({ error: 'You do not have access to review payment receipts.' });
+  const shape = parseStrictKeys(req.body, ['decision', 'remarks']);
+  if (!shape.success) return res.status(400).json({ error: shape.error });
+  const decision = readTrimmedString(shape.data, 'decision', { required: true, maxLength: 10, pattern: /^(APPROVE|REJECT)$/, message: 'Decision must be APPROVE or REJECT.' });
+  const remarks = readTrimmedString(shape.data, 'remarks', { required: false, maxLength: 500, message: 'Remarks are too long.' });
+  if (!decision.success) return res.status(400).json({ error: decision.error });
+  if (!remarks.success) return res.status(400).json({ error: remarks.error });
+  const attempt = await prisma.paymentAttempt.findFirst({ where: { id: req.params.id, tenantId: req.tenantId!, provider: 'BANK', ...(access.isTenantAdmin ? {} : { branchId: { in: access.scopes } }) }, include: { invoice: true } });
+  if (!attempt) return res.status(404).json({ error: 'Payment submission not found.' });
+  if (attempt.status !== 'PENDING') return res.status(409).json({ error: 'This payment submission was already reviewed.' });
+  if (decision.data === 'REJECT') { await prisma.paymentAttempt.update({ where: { id: attempt.id }, data: { status: 'FAILED', gatewayStatus: 'REJECTED', reviewRemarks: remarks.data, reviewedBy: req.user!.id, reviewedAt: new Date(), failedAt: new Date() } }); return res.json({ message: 'Payment receipt rejected.' }); }
+  const paidAt = new Date();
+  const admissionTenure = attempt.invoice.invoiceType === 'ADMISSION' ? await getAdmissionTenure(paidAt) : null;
+  await prisma.$transaction(async (tx) => {
+    const claimed = await tx.paymentAttempt.updateMany({ where: { id: attempt.id, status: 'PENDING' }, data: { status: 'SUCCESS', gatewayStatus: 'APPROVED', reviewRemarks: remarks.data, reviewedBy: req.user!.id, reviewedAt: paidAt, confirmedAt: paidAt } });
+    if (claimed.count !== 1) throw new Error('Payment was already reviewed.');
+    const paid = await tx.invoice.updateMany({ where: { id: attempt.invoiceId, tenantId: req.tenantId!, status: { in: ['UNPAID', 'OVERDUE', 'BLOCKED_OVERRIDE'] } }, data: { status: 'PAID', transactionId: attempt.referenceId, paymentDate: paidAt, ...(admissionTenure ? { billingCycleStart: admissionTenure.start, billingCycleEnd: admissionTenure.end } : {}) } });
+    if (paid.count !== 1) throw new Error('Invoice is already paid or unavailable.');
+  });
+  if (attempt.invoice.invoiceType === 'ADMISSION') await activateAdmissionAndSendLogins(req.tenantId!, attempt.invoice.studentId);
+  return res.json({ message: 'Payment approved and invoice marked paid.' });
 });
 
 router.get('/connectips/status/:txnId', authMiddleware, async (req: TenantRequest, res: Response) => {
@@ -209,7 +330,7 @@ const num = (v: any) => Number(v ?? 0);
 
 // An invoice counts as overdue if explicitly OVERDUE, or unpaid past its due date.
 function invoiceOverdue(inv: { status: string; dueDate: Date }): boolean {
-  return inv.status === 'OVERDUE' || (inv.status === 'UNPAID' && new Date(inv.dueDate) < new Date());
+  return isInvoiceOverdue(inv.status, inv.dueDate);
 }
 
 interface FeeSummary {
@@ -270,11 +391,8 @@ function addMonths(value: Date, count: number): Date {
 }
 
 function staffBaseSalary(staff: { contractType: string; salaryStructure: Prisma.JsonValue }): number {
-  const structure = (staff.salaryStructure ?? {}) as { basicSalary?: number; hourlyRate?: number; expectedMonthlyHours?: number };
-  if (staff.contractType === 'HOUR_RATE') {
-    return num(structure.hourlyRate) * num(structure.expectedMonthlyHours);
-  }
-  return num(structure.basicSalary);
+  const configured = compensationStructure(staff.contractType, staff.salaryStructure);
+  return configured.success ? configured.value.baseMonthlySalary ?? 0 : 0;
 }
 
 // Shared, persisted billing contract for Accountants, Branch Admins and Tenant Admins.
@@ -293,21 +411,28 @@ router.get('/billing-ledger', authMiddleware, async (req: TenantRequest, res: Re
           grade: true,
           user: { include: { userRoles: { include: { branch: true } } } },
           enrollments: { where: { status: 'ACTIVE' }, include: { course: true } },
-          invoices: { orderBy: { dueDate: 'desc' } },
+          invoices: {
+            where: access.isTenantAdmin ? {} : { branchId: { in: access.scopes } },
+            orderBy: { dueDate: 'desc' },
+          },
         },
       }),
       prisma.staffRecord.findMany({
         where: { user: { tenantId: req.tenantId!, ...branchFilter } },
         include: {
           user: { include: { userRoles: { include: { branch: true } } } },
-          payrolls: { orderBy: [{ year: 'desc' }, { month: 'desc' }] },
+          payrolls: {
+            where: access.isTenantAdmin ? {} : { branchId: { in: access.scopes } },
+            include: { branch: true },
+            orderBy: [{ year: 'desc' }, { month: 'desc' }],
+          },
         },
       }),
       prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { vatRate: true } }),
     ]);
 
     const now = new Date();
-    const studentRows = students.map((student) => {
+    const studentRows = await Promise.all(students.map(async (student) => {
       const assignment = student.user.userRoles.find((role) => role.branchId && (access.isTenantAdmin || access.scopes.includes(role.branchId)));
       const gradeFee = student.grade?.billingMode === 'GRADE' ? num(student.grade.monthlyFee) : 0;
       const courseFee = student.enrollments.reduce((sum, enrollment) => {
@@ -320,11 +445,23 @@ router.get('/billing-ledger', authMiddleware, async (req: TenantRequest, res: Re
       const courseStart = student.admissionDate;
       const courseEnd = addMonths(courseStart, 12);
       const forecastStart = now > courseStart ? now : courseStart;
-      const projections = Array.from({ length: 12 }, (_, index) => {
-        const cycleStart = new Date(forecastStart.getFullYear(), forecastStart.getMonth() + index + 1, 1);
-        const cycleEnd = new Date(cycleStart.getFullYear(), cycleStart.getMonth() + 1, 0);
-        return { cycleStart, cycleEnd, dueDate: new Date(cycleStart.getFullYear(), cycleStart.getMonth(), 10), amount: monthlyAmount };
-      }).filter((item) => item.cycleStart <= courseEnd);
+      const containingPeriod = await getBillingPeriod(forecastStart, 10);
+      let cycleCursor = forecastStart > now
+        ? containingPeriod.cycleStart
+        : new Date(containingPeriod.cycleEnd.getTime() + 86_400_000);
+      const projections: Array<{ cycleStart: Date; cycleEnd: Date; dueDate: Date; amount: number; billingPeriod: string }> = [];
+      while (projections.length < 12) {
+        const period = await getBillingPeriod(cycleCursor, 10);
+        if (period.cycleStart > courseEnd) break;
+        projections.push({
+          cycleStart: period.cycleStart,
+          cycleEnd: period.cycleEnd,
+          dueDate: period.dueDate,
+          amount: monthlyAmount,
+          billingPeriod: period.label,
+        });
+        cycleCursor = new Date(period.cycleEnd.getTime() + 86_400_000);
+      }
       return {
         studentId: student.id,
         studentName: `${student.user.firstName} ${student.user.lastName}`.trim(),
@@ -344,7 +481,7 @@ router.get('/billing-ledger', authMiddleware, async (req: TenantRequest, res: Re
         })),
         projections,
       };
-    });
+    }));
 
     const teacherRows = staff.map((record) => {
       const assignment = record.user.userRoles.find((role) => role.branchId && (access.isTenantAdmin || access.scopes.includes(role.branchId)));
@@ -361,7 +498,8 @@ router.get('/billing-ledger', authMiddleware, async (req: TenantRequest, res: Re
         branchName: assignment?.branch?.name ?? 'Unassigned',
         baseSalary,
         payrolls: record.payrolls.map((payroll) => ({
-          id: payroll.id, month: payroll.month, year: payroll.year, baseSalary: payroll.baseSalary,
+          id: payroll.id, branchId: payroll.branchId, branchName: payroll.branch.name,
+          month: payroll.month, year: payroll.year, baseSalary: payroll.baseSalary,
           deductions: payroll.attendanceDeductions, bonuses: payroll.bonuses, netPayable: payroll.netPayable,
           status: payroll.status, settlementReference: payroll.settlementReference, paymentDate: payroll.paymentDate,
           createdAt: payroll.createdAt,
@@ -380,7 +518,7 @@ router.post('/billing-ledger/invoices', authMiddleware, async (req: TenantReques
   if (!access.isTenantAdmin && access.scopes.length === 0) {
     return res.status(403).json({ error: 'You do not have access to create billing records.' });
   }
-  const shape = parseStrictKeys(req.body, ['studentId', 'amount', 'discount', 'fine', 'invoiceType', 'billingCycleStart', 'billingCycleEnd', 'dueDate']);
+  const shape = parseStrictKeys(req.body, ['studentId', 'amount', 'discount', 'fine', 'invoiceType', 'periodAnchor']);
   if (!shape.success) return res.status(400).json({ error: shape.error });
   const studentId = readTrimmedString(shape.data, 'studentId', { required: true, maxLength: 128, message: 'A valid student is required.' });
   const amount = readFiniteNumber(shape.data, 'amount', { min: 0.01, max: 100_000_000, message: 'Amount must be greater than zero.' });
@@ -390,23 +528,32 @@ router.post('/billing-ledger/invoices', authMiddleware, async (req: TenantReques
   if (!studentId.success || !amount.success || !discount.success || !fine.success || !invoiceType.success || !['TUITION', 'SUBJECT', 'ACTIVITY'].includes(invoiceType.data)) {
     return res.status(400).json({ error: 'Valid student, amounts and invoice type are required.' });
   }
-  const cycleStart = new Date(String(shape.data.billingCycleStart));
-  const cycleEnd = new Date(String(shape.data.billingCycleEnd));
-  const dueDate = new Date(String(shape.data.dueDate));
-  if ([cycleStart, cycleEnd, dueDate].some((date) => Number.isNaN(date.getTime())) || cycleEnd < cycleStart) {
-    return res.status(400).json({ error: 'Valid billing cycle and due dates are required.' });
-  }
+  const periodAnchor = new Date(String(shape.data.periodAnchor));
+  if (Number.isNaN(periodAnchor.getTime())) return res.status(400).json({ error: 'A valid billing period anchor is required.' });
   const student = await loadStudentBillingAccess(req, studentId.data);
   if (!student) return res.status(404).json({ error: 'Student not found or outside your billing scope.' });
+  const accessBranchId = student.user.userRoles
+    .map((assignment) => assignment.branchId)
+    .find((candidate): candidate is string => Boolean(candidate) && (access.isTenantAdmin || access.scopes.includes(candidate)));
+  if (!accessBranchId) return res.status(404).json({ error: 'Student has no branch in your billing scope.' });
   const tenant = await prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { panNumber: true, vatRate: true } });
+  const billingPeriod = await getBillingPeriod(periodAnchor, 10);
   const netPayable = Math.round((amount.data - discount.data + fine.data) * 100) / 100;
   if (netPayable < 0) return res.status(400).json({ error: 'Discount cannot exceed the invoice total.' });
-  const invoice = await prisma.invoice.create({ data: {
-    tenantId: req.tenantId!, studentId: student.id, invoiceType: invoiceType.data as 'TUITION' | 'SUBJECT' | 'ACTIVITY',
-    amount: amount.data, discount: discount.data, fine: fine.data, netPayable, billingCycleStart: cycleStart,
-    billingCycleEnd: cycleEnd, dueDate, status: 'UNPAID', panNumberSnapshot: tenant?.panNumber ?? '', vatRateSnapshot: tenant?.vatRate ?? 0,
-  } });
-  return res.status(201).json({ message: 'Invoice created in the shared ledger.', invoice });
+  try {
+    const invoice = await prisma.invoice.create({ data: {
+      tenantId: req.tenantId!, branchId: accessBranchId, studentId: student.id, invoiceType: invoiceType.data as 'TUITION' | 'SUBJECT' | 'ACTIVITY',
+      amount: amount.data, discount: discount.data, fine: fine.data, netPayable, billingCycleStart: billingPeriod.cycleStart,
+      billingCycleEnd: billingPeriod.cycleEnd, dueDate: billingPeriod.dueDate, status: 'UNPAID', panNumberSnapshot: tenant?.panNumber ?? '', vatRateSnapshot: tenant?.vatRate ?? 0,
+      lineItemsSnapshot: [{ label: invoiceTypeLabel(invoiceType.data), amount: amount.data }],
+    } });
+    return res.status(201).json({ message: 'Invoice created in the shared ledger.', invoice });
+  } catch (error: any) {
+    if (error?.code === 'P2002') {
+      return res.status(409).json({ error: 'This student already has an invoice of this type for the selected BS billing cycle.' });
+    }
+    return res.status(500).json({ error: 'Failed to create the invoice.' });
+  }
 });
 
 router.post('/billing-ledger/payrolls', authMiddleware, async (req: TenantRequest, res: Response) => {
@@ -414,15 +561,14 @@ router.post('/billing-ledger/payrolls', authMiddleware, async (req: TenantReques
   if (!access.isTenantAdmin && access.scopes.length === 0) {
     return res.status(403).json({ error: 'You do not have access to create payroll records.' });
   }
-  const shape = parseStrictKeys(req.body, ['staffRecordId', 'month', 'year', 'baseSalary', 'bonuses', 'deductions']);
+  const shape = parseStrictKeys(req.body, ['staffRecordId', 'month', 'year', 'bonuses', 'deductions']);
   if (!shape.success) return res.status(400).json({ error: shape.error });
   const staffRecordId = readTrimmedString(shape.data, 'staffRecordId', { required: true, maxLength: 128, message: 'A valid teacher is required.' });
   const month = readFiniteNumber(shape.data, 'month', { min: 1, max: 12, message: 'Month must be between 1 and 12.' });
   const year = readFiniteNumber(shape.data, 'year', { min: 2000, max: 2100, message: 'Year must be valid.' });
-  const baseSalary = readFiniteNumber(shape.data, 'baseSalary', { min: 0, max: 100_000_000, message: 'Base salary must be zero or greater.' });
   const bonuses = readFiniteNumber(shape.data, 'bonuses', { min: 0, max: 100_000_000, message: 'Bonuses must be zero or greater.' });
   const deductions = readFiniteNumber(shape.data, 'deductions', { min: 0, max: 100_000_000, message: 'Deductions must be zero or greater.' });
-  if (!staffRecordId.success || !month.success || !year.success || !baseSalary.success || !bonuses.success || !deductions.success || !Number.isInteger(month.data) || !Number.isInteger(year.data)) {
+  if (!staffRecordId.success || !month.success || !year.success || !bonuses.success || !deductions.success || !Number.isInteger(month.data) || !Number.isInteger(year.data)) {
     return res.status(400).json({ error: 'Valid teacher and payroll amounts are required.' });
   }
   const record = await prisma.staffRecord.findFirst({
@@ -433,14 +579,38 @@ router.post('/billing-ledger/payrolls', authMiddleware, async (req: TenantReques
         ...(access.isTenantAdmin ? {} : { userRoles: { some: { branchId: { in: access.scopes } } } }),
       },
     },
+    include: { user: { include: { userRoles: true } } },
   });
   if (!record) return res.status(404).json({ error: 'Teacher not found or outside your billing scope.' });
-  const exists = await prisma.payroll.findFirst({ where: { tenantId: req.tenantId!, staffRecordId: record.id, month: month.data, year: year.data } });
-  if (exists) return res.status(409).json({ error: 'Payroll already exists for this teacher and month.' });
-  const netPayable = Math.round((baseSalary.data + bonuses.data - deductions.data) * 100) / 100;
-  if (netPayable < 0) return res.status(400).json({ error: 'Deductions cannot exceed salary plus bonuses.' });
-  const payroll = await prisma.payroll.create({ data: { tenantId: req.tenantId!, staffRecordId: record.id, month: month.data, year: year.data, baseSalary: baseSalary.data, bonuses: bonuses.data, attendanceDeductions: deductions.data, netPayable, status: 'PENDING' } });
-  return res.status(201).json({ message: 'Payroll created in the shared ledger.', payroll });
+  const eligibleBranchIds = [...new Set(record.user.userRoles
+    .map((role) => role.branchId)
+    .filter((branchId): branchId is string => Boolean(branchId) && (access.isTenantAdmin || access.scopes.includes(branchId))))];
+  if (eligibleBranchIds.length !== 1) {
+    return res.status(422).json({ error: 'Payroll requires exactly one branch assignment in your billing scope.' });
+  }
+  try {
+    const [payroll] = await createPayrollRecords({
+      tenantId: req.tenantId!,
+      branchId: eligibleBranchIds[0],
+      staffRecordIds: [record.id],
+      month: month.data,
+      year: year.data,
+      bonuses: bonuses.data,
+      deductions: deductions.data,
+    });
+    return res.status(201).json({ message: 'Payroll created in the shared ledger.', payroll });
+  } catch (error) {
+    if (error instanceof PayrollConfigurationError) {
+      return res.status(422).json({ error: error.message, incompleteStaff: error.staff });
+    }
+    if (error instanceof PayrollPeriodConflictError) {
+      return res.status(409).json({ error: error.message, existingStaff: error.staff });
+    }
+    if (error instanceof Error && error.message === 'Deductions cannot exceed salary plus bonuses.') {
+      return res.status(400).json({ error: error.message });
+    }
+    return res.status(500).json({ error: 'Failed to create payroll.' });
+  }
 });
 
 // One scoped contract powers the Accountant workspace. It deliberately omits
@@ -457,7 +627,7 @@ router.get('/accountant-workspace', authMiddleware, async (req: TenantRequest, r
 
   const invoiceWhere: Prisma.InvoiceWhereInput = {
     tenantId: req.tenantId!,
-    ...(tenantWide ? {} : { student: { user: { userRoles: { some: { branchId: { in: billing.scopes } } } } } }),
+    ...(tenantWide ? {} : { branchId: { in: billing.scopes } }),
   };
   const expenseWhere: Prisma.ExpenseWhereInput = {
     tenantId: req.tenantId!,
@@ -473,7 +643,7 @@ router.get('/accountant-workspace', authMiddleware, async (req: TenantRequest, r
     const monthStart = new Date();
     monthStart.setDate(1);
     monthStart.setHours(0, 0, 0, 0);
-    const [branches, invoices, requests, monthlyRequests, expenses, payrolls, tenant] = await Promise.all([
+    const [branches, invoices, requests, monthlyRequests, expenses, payrolls, tenant, pendingPaymentReviews] = await Promise.all([
       prisma.branch.findMany({
         where: { tenantId: req.tenantId!, ...(tenantWide ? {} : { id: { in: branchIds } }) },
         select: { id: true, name: true },
@@ -506,6 +676,7 @@ router.get('/accountant-workspace', authMiddleware, async (req: TenantRequest, r
       prisma.expense.findMany({ where: expenseWhere, orderBy: { date: 'desc' }, take: 500 }),
       prisma.payroll.findMany({ where: payrollWhere, take: 500 }),
       prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { pettyCashCapNpr: true } }),
+      prisma.paymentAttempt.count({ where: { tenantId: req.tenantId!, provider: 'BANK', status: 'PENDING', ...(tenantWide ? {} : { branchId: { in: billing.scopes } }) } }),
     ]);
 
     const invoiceSummary = summarizeInvoices(invoices);
@@ -531,6 +702,7 @@ router.get('/accountant-workspace', authMiddleware, async (req: TenantRequest, r
         invoiceCount: invoiceSummary.invoiceCount,
         openPettyCash: requests.filter((item) => item.status !== 'CLOSED' && item.status !== 'REJECTED').length,
         awaitingReceipt: requests.filter((item) => item.status === 'RELEASED').length,
+        pendingPaymentReviews,
       },
       pettyCash: requests.map((item) => ({
         id: item.id,
@@ -578,13 +750,23 @@ router.get('/accountant-workspace', authMiddleware, async (req: TenantRequest, r
   }
 });
 
-// Tenant-wide fee overview: collected, outstanding, overdue, current BS period.
+// Fee overview scoped to the caller's authorized billing branches. Tenant Admins
+// receive the institution-wide aggregate; branch roles only receive their branch.
 router.get(
   '/overview',
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
+    const { isTenantAdmin, scopes } = billingBranchScopes(req.user);
+    if (!isTenantAdmin && scopes.length === 0) {
+      return res.status(403).json({ error: 'You do not have access to fee totals.' });
+    }
     try {
-      const invoices = await prisma.invoice.findMany({ where: { tenantId: req.tenantId! } });
+      const invoices = await prisma.invoice.findMany({
+        where: {
+          tenantId: req.tenantId!,
+          ...(!isTenantAdmin ? { branchId: { in: scopes } } : {}),
+        },
+      });
       const summary = summarizeInvoices(invoices);
       const overdueStudentIds = new Set(invoices.filter(invoiceOverdue).map((i) => i.studentId));
       const period = await getBillingPeriod(new Date(), 10);
@@ -617,7 +799,9 @@ router.get(
         where: { user: { tenantId: req.tenantId! } },
         include: { user: { include: { userRoles: { include: { branch: true } } } } },
       });
-      const invoices = await prisma.invoice.findMany({ where: { tenantId: req.tenantId! } });
+      const invoices = await prisma.invoice.findMany({
+        where: { tenantId: req.tenantId!, ...(isTenantAdmin ? {} : { branchId: { in: scopes } }) },
+      });
 
       const byStudent = new Map<string, typeof invoices>();
       for (const inv of invoices) {
@@ -628,7 +812,7 @@ router.get(
 
       const rows = students
         .map((s) => {
-          const scopedRole = s.user.userRoles.find((ur) => ur.branchId);
+          const scopedRole = s.user.userRoles.find((ur) => ur.branchId && (isTenantAdmin || scopes.includes(ur.branchId)));
           const branchId = scopedRole?.branchId ?? null;
           const branchName = scopedRole?.branch?.name ?? null;
           const summary = summarizeInvoices(byStudent.get(s.id) ?? []);
@@ -660,13 +844,57 @@ router.get(
     try {
       const student = await loadStudentBillingAccess(req, req.params.studentId);
       if (!student) return res.status(404).json({ error: 'Student fee record not found or unavailable.' });
-      const invoices = await prisma.invoice.findMany({
-        where: { studentId: student.id, tenantId: req.tenantId! },
-        orderBy: { dueDate: 'desc' },
-      });
+      const ownStudent = student.userId === req.user!.id;
+      const ownParent = student.studentParents.some((link) => link.parent.userId === req.user!.id);
+      const billingAccess = billingBranchScopes(req.user!);
+      const invoiceScope = ownStudent || ownParent || billingAccess.isTenantAdmin
+        ? {}
+        : { branchId: { in: billingAccess.scopes } };
+      const [invoices, loginDeliveries, tenant] = await Promise.all([
+        prisma.invoice.findMany({
+          where: { studentId: student.id, tenantId: req.tenantId!, ...invoiceScope },
+          include: { branch: { select: { name: true } } },
+          orderBy: { dueDate: 'desc' },
+        }),
+        prisma.$queryRaw<Array<{
+          recipient: 'STUDENT' | 'PARENT';
+          status: 'PENDING' | 'SENT' | 'FAILED';
+          failureReason: string | null;
+          attemptCount: number;
+          lastAttemptAt: Date | null;
+          sentAt: Date | null;
+        }>>`
+          SELECT "recipient", "status", "failureReason", "attemptCount", "lastAttemptAt", "sentAt"
+          FROM "AdmissionLoginDelivery"
+          WHERE "tenantId" = ${req.tenantId!} AND "studentId" = ${student.id}
+          ORDER BY "recipient" ASC
+        `,
+        prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { name: true, panNumber: true } }),
+      ]);
+      const normalizedInvoices = await Promise.all(invoices.map(async (invoice) => {
+        if (invoice.invoiceType !== 'ADMISSION' || invoice.status !== 'PAID' || !invoice.paymentDate) return invoice;
+        const tenure = await getAdmissionTenure(invoice.paymentDate);
+        return { ...invoice, billingCycleStart: tenure.start, billingCycleEnd: tenure.end };
+      }));
       return res.json({
-        invoices: invoices.map((i) => ({
+        admissionStatus: student.admissionStatus,
+        loginDeliveries,
+        invoices: normalizedInvoices.map((i) => ({
           id: i.id,
+          invoiceType: i.invoiceType,
+          institutionName: tenant?.name ?? 'Institution',
+          panNumber: i.panNumberSnapshot || tenant?.panNumber || '',
+          vatRate: num(i.vatRateSnapshot),
+          studentName: `${student.user.firstName} ${student.user.lastName}`.trim(),
+          admissionNumber: student.admissionNumber,
+          gradeName: student.grade?.name ?? null,
+          issuedAt: i.createdAt,
+          transactionId: i.transactionId,
+          lines: Array.isArray(i.lineItemsSnapshot)
+            ? (i.lineItemsSnapshot as Array<{ label?: unknown; amount?: unknown }>).map((line) => ({ label: String(line.label || 'Charge'), amount: num(line.amount) }))
+            : [{ label: invoiceTypeLabel(i.invoiceType), amount: num(i.amount) }],
+          discount: num(i.discount),
+          fine: num(i.fine),
           netPayable: num(i.netPayable),
           status: i.status,
           overdue: invoiceOverdue(i),
@@ -674,6 +902,7 @@ router.get(
           billingCycleStart: i.billingCycleStart,
           billingCycleEnd: i.billingCycleEnd,
           paymentDate: i.paymentDate,
+          branchName: i.branch.name,
         })),
       });
     } catch (error: any) {
@@ -700,7 +929,13 @@ router.post(
       },
     });
     if (!input.success) return res.status(400).json({ error: input.error });
-    const transactionId = input.data.transactionId || 'CASH';
+    // The UI sends the generic label "CASH" for manual collection. Invoice
+    // references are unique in the ledger, so turn that label into a unique
+    // receipt reference instead of reusing the same value for every payment.
+    const requestedReference = input.data.transactionId;
+    const transactionId = !requestedReference || requestedReference.toUpperCase() === 'CASH'
+      ? `CASH-${crypto.randomUUID()}`
+      : requestedReference;
     try {
       const invoice = await prisma.invoice.findUnique({
         where: { id },
@@ -709,23 +944,22 @@ router.post(
       if (!invoice || invoice.tenantId !== req.tenantId) {
         return res.status(404).json({ error: 'Invoice not found in your institution.' });
       }
-      const studentBranchIds = invoice.student.user.userRoles
-        .map((assignment) => assignment.branchId)
-        .filter((branchId): branchId is string => Boolean(branchId));
       const billingAccess = billingBranchScopes(req.user!);
       if (
         !billingAccess.isTenantAdmin &&
-        !studentBranchIds.some((branchId) => billingAccess.scopes.includes(branchId))
+        !billingAccess.scopes.includes(invoice.branchId)
       ) {
         return res.status(403).json({ error: 'You cannot record payments for this student branch.' });
       }
       if (invoice.status === 'PAID') {
         return res.status(400).json({ error: 'This invoice is already paid.' });
       }
+      const paidAt = new Date();
+      const admissionTenure = invoice.invoiceType === 'ADMISSION' ? await getAdmissionTenure(paidAt) : null;
       const updated = await prisma.$transaction(async (tx) => {
         const transition = await tx.invoice.updateMany({
           where: { id, tenantId: req.tenantId!, status: { not: 'PAID' } },
-          data: { status: 'PAID', paymentDate: new Date(), transactionId },
+          data: { status: 'PAID', paymentDate: paidAt, transactionId, ...(admissionTenure ? { billingCycleStart: admissionTenure.start, billingCycleEnd: admissionTenure.end } : {}) },
         });
         if (transition.count !== 1) return null;
         const paid = await tx.invoice.findUniqueOrThrow({ where: { id } });
@@ -740,8 +974,23 @@ router.post(
       if (!updated) {
         return res.status(409).json({ error: 'Invoice payment was already processed by another request.' });
       }
-      return res.json({ message: 'Payment recorded.', invoice: { id: updated.id, status: updated.status, paymentDate: updated.paymentDate } });
+      let loginDelivery: Awaited<ReturnType<typeof activateAdmissionAndSendLogins>> | null = null;
+      if (updated.invoiceType === 'ADMISSION') {
+        loginDelivery = await activateAdmissionAndSendLogins(req.tenantId!, updated.studentId);
+      }
+      return res.json({
+        message: updated.invoiceType === 'ADMISSION'
+          ? loginDelivery?.delivered
+            ? 'Payment recorded. Student and parent login IDs were sent by SMS.'
+            : `Payment recorded, but login SMS delivery failed. ${loginDelivery?.failures.join(' ') || 'Retry from Admissions.'}`
+          : 'Payment recorded.',
+        invoice: { id: updated.id, status: updated.status, paymentDate: updated.paymentDate, transactionId: updated.transactionId },
+        loginDelivery,
+      });
     } catch (error: any) {
+      if (error?.code === 'P2002') {
+        return res.status(409).json({ error: 'That payment reference has already been used. Try marking the invoice as paid again.' });
+      }
       return res.status(500).json({ error: 'Failed to record payment.', details: error.message });
     }
   }
@@ -753,8 +1002,12 @@ router.post(
 router.post(
   '/generate-invoices',
   authMiddleware,
-  hasPermission('manage_billing'),
   async (req: TenantRequest, res: Response) => {
+    const { isTenantAdmin, scopes } = billingBranchScopes(req.user);
+    if (!isTenantAdmin && scopes.length === 0) {
+      return res.status(403).json({ error: 'You do not have access to generate invoices.' });
+    }
+    const scopedUserRoles = isTenantAdmin ? {} : { userRoles: { some: { branchId: { in: scopes } } } };
     try {
       const period = await getBillingPeriod(new Date(), 10);
       const tenantConfig = await prisma.tenant.findUnique({ where: { id: req.tenantId! } });
@@ -762,25 +1015,44 @@ router.post(
 
       // Monthly bill per student = their grade's base tuition (all subjects) +
       // net fees of their active extra-activity enrolments.
-      const fees = new Map<string, { studentId: string; invoiceType: 'TUITION' | 'SUBJECT' | 'ACTIVITY'; amount: number }>();
-      const addFee = (studentId: string, invoiceType: 'TUITION' | 'SUBJECT' | 'ACTIVITY', amount: number) => {
+      const fees = new Map<string, { studentId: string; branchId: string; invoiceType: 'TUITION' | 'SUBJECT' | 'ACTIVITY'; amount: number; lines: Array<{ label: string; amount: number }> }>();
+      const addFee = (studentId: string, branchId: string, invoiceType: 'TUITION' | 'SUBJECT' | 'ACTIVITY', amount: number, label: string) => {
         const key = `${studentId}:${invoiceType}`;
         const current = fees.get(key);
-        fees.set(key, { studentId, invoiceType, amount: (current?.amount ?? 0) + amount });
+        fees.set(key, {
+          studentId,
+          branchId,
+          invoiceType,
+          amount: (current?.amount ?? 0) + amount,
+          lines: [...(current?.lines ?? []), { label, amount: Math.round(amount * 100) / 100 }],
+        });
       };
 
       // 1. Grade base tuition for every student who has a graded level.
       const students = await prisma.student.findMany({
         where: {
-          user: { tenantId: req.tenantId!, status: 'ACTIVE' },
+          user: { tenantId: req.tenantId!, status: 'ACTIVE', ...scopedUserRoles },
           admissionStatus: 'ACTIVE',
           gradeId: { not: null },
+          enrollments: { some: { status: 'ACTIVE', OR: [{ validUntil: null }, { validUntil: { gt: new Date() } }] } },
         },
-        include: { grade: { select: { monthlyFee: true, billingMode: true } } },
+        include: {
+          grade: { select: { name: true, monthlyFee: true, billingMode: true } },
+          enrollments: {
+            where: {
+              status: 'ACTIVE',
+              OR: [{ validUntil: null }, { validUntil: { gt: new Date() } }],
+              course: { tenantId: req.tenantId!, ...(!isTenantAdmin ? { branchId: { in: scopes } } : {}) },
+            },
+            include: { course: { select: { branchId: true } } },
+            take: 1,
+          },
+        },
       });
       for (const s of students) {
-        if (s.grade?.billingMode === 'GRADE' && s.grade.monthlyFee > 0) {
-          addFee(s.id, 'TUITION', s.grade.monthlyFee);
+        const branchId = s.enrollments[0]?.course.branchId;
+        if (branchId && s.grade?.billingMode === 'GRADE' && s.grade.monthlyFee > 0) {
+          addFee(s.id, branchId, 'TUITION', s.grade.monthlyFee, `${s.grade.name} tuition package`);
         }
       }
 
@@ -788,8 +1060,12 @@ router.post(
       const enrollments = await prisma.enrollment.findMany({
         where: {
           status: 'ACTIVE',
-          student: { admissionStatus: 'ACTIVE', user: { status: 'ACTIVE' } },
-          course: { tenantId: req.tenantId! },
+          OR: [{ validUntil: null }, { validUntil: { gt: new Date() } }],
+          student: {
+            admissionStatus: 'ACTIVE',
+            user: { status: 'ACTIVE', ...scopedUserRoles },
+          },
+          course: { tenantId: req.tenantId!, ...(!isTenantAdmin ? { branchId: { in: scopes } } : {}) },
         },
         include: { course: true, student: { include: { grade: true } } },
       });
@@ -802,7 +1078,7 @@ router.post(
         const fee = (e.course.feeStructure ?? {}) as { monthlyBase?: number };
         const base = Number(fee.monthlyBase || 0);
         const net = e.course.isTaxExempt ? base : base * (1 + Number(e.course.taxPercentage || 13) / 100);
-        addFee(e.studentId, invoiceType, net);
+        addFee(e.studentId, e.course.branchId, invoiceType, net, e.course.name);
       }
 
       // Students already invoiced for this cycle.
@@ -820,13 +1096,15 @@ router.post(
       for (const [key, charge] of fees) {
         if (alreadyBilled.has(key) || charge.amount <= 0) continue;
         const net = charge.amount;
-        await prisma.invoice.create({
-          data: {
+        try {
+          await prisma.invoice.create({ data: {
             tenantId: req.tenantId!,
+            branchId: charge.branchId,
             studentId: charge.studentId,
             invoiceType: charge.invoiceType,
             panNumberSnapshot: tenantConfig.panNumber,
             vatRateSnapshot: tenantConfig.vatRate,
+            lineItemsSnapshot: charge.lines,
             amount: Math.round(net * 100) / 100,
             discount: 0,
             fine: 0,
@@ -835,9 +1113,13 @@ router.post(
             billingCycleEnd: period.cycleEnd,
             dueDate: period.dueDate,
             status: 'UNPAID',
-          },
-        });
-        created += 1;
+          } });
+          created += 1;
+        } catch (error: any) {
+          // The database constraint is the final guard when two billing runs
+          // overlap after both have read the same pre-existing invoice set.
+          if (error?.code !== 'P2002') throw error;
+        }
       }
 
       return res.json({ message: `Generated ${created} invoice(s) for ${period.label}.`, created, billingPeriod: period.label, skipped: fees.size - created });
@@ -884,9 +1166,12 @@ router.get(
 router.get(
   '/billing-period',
   authMiddleware,
-  async (_req: TenantRequest, res: Response) => {
+  async (req: TenantRequest, res: Response) => {
     try {
-      const period = await getBillingPeriod(new Date(), 10);
+      const anchorValue = typeof req.query.anchor === 'string' ? req.query.anchor : '';
+      const anchor = anchorValue ? new Date(anchorValue) : new Date();
+      if (Number.isNaN(anchor.getTime())) return res.status(400).json({ error: 'A valid billing period anchor is required.' });
+      const period = await getBillingPeriod(anchor, 10);
       return res.json({
         label: period.label,
         bsYear: period.bsYear,
@@ -909,6 +1194,9 @@ router.get(
   authMiddleware,
   hasPermission('view_reports'),
   async (req: TenantRequest, res: Response) => {
+    if (!isTenantAdmin(req.user!)) {
+      return res.status(403).json({ error: 'Institution-wide P&L is available only to the Tenant Admin.' });
+    }
     try {
       const now = new Date();
       const cycleStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -960,40 +1248,46 @@ router.get(
   authMiddleware,
   hasPermission('view_reports'),
   async (req: TenantRequest, res: Response) => {
+    if (!isTenantAdmin(req.user!)) {
+      return res.status(403).json({ error: 'Institution-wide ledger export is available only to the Tenant Admin.' });
+    }
     try {
-      // Analyze expense history and generate anomalous expense logs
-      // Rule-based and pattern-based suggestions:
-      // - "Last month rent was recorded. No rent entry yet for this month."
-      // - "Utility expense typically logged by 5th. None recorded yet."
-      // - "This month salary is 30% higher than last 3-month average."
-      // - Budget checks.
-      const alerts = [
-        {
-          type: 'MISSING_EXPENSE_ALERT',
-          severity: 'HIGH',
-          message: 'Last month rent (NPR 45,000) was recorded on the 1st. No rent entry has been registered yet for this billing cycle.',
-        },
-        {
-          type: 'PATTERN_REMINDER',
-          severity: 'MEDIUM',
-          message: 'Internet & electricity utility expenses are typically logged by the 5th of the month. None recorded yet.',
-        },
-        {
-          type: 'ANOMALY_DETECTION',
-          severity: 'WARNING',
-          message: 'This month simulated payroll total (NPR 185,000) is 30% higher than the last 3-month average. Please verify hours log.',
-        },
-      ];
-
-      const budgetPlanningPrompt = 'Based on current enrollment of 150 students, projected monthly gross income is NPR 762,500. Estimated fixed costs (rent, utilities, standard staff basic) are NPR 250,000. Projected operational surplus before variables: NPR 512,500.';
-
-      return res.status(200).json({
-        alerts,
-        budgetAnalysis: {
-          projectedSurplusNpr: 512500,
-          promptText: budgetPlanningPrompt,
-        },
+      const now = new Date();
+      const historyStart = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+      const historyEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const payrollPeriods = Array.from({ length: 4 }, (_, index) => {
+        const period = new Date(now.getFullYear(), now.getMonth() - index, 1);
+        return { year: period.getFullYear(), month: period.getMonth() + 1 };
       });
+      const [expenses, payrolls, enrollments] = await Promise.all([
+        prisma.expense.findMany({
+          where: { tenantId: req.tenantId!, date: { gte: historyStart, lt: historyEnd } },
+          select: { category: true, amount: true, date: true },
+        }),
+        prisma.payroll.findMany({
+          where: {
+            tenantId: req.tenantId!,
+            OR: payrollPeriods,
+          },
+          select: { netPayable: true, month: true, year: true },
+        }),
+        prisma.enrollment.findMany({
+          where: { status: 'ACTIVE', course: { tenantId: req.tenantId! } },
+          include: { course: { select: { feeStructure: true } } },
+        }),
+      ]);
+      const projectedIncomeNpr = enrollments.reduce((sum, enrollment) => {
+        const fee = enrollment.course.feeStructure as { monthlyBase?: number };
+        return sum + Number(fee?.monthlyBase || 0);
+      }, 0);
+
+      return res.status(200).json(buildFinancialIntelligence({
+        now,
+        expenses,
+        payrolls: payrolls.map((item) => ({ ...item, netPayable: Number(item.netPayable) })),
+        projectedIncomeNpr,
+        activeEnrollments: enrollments.length,
+      }));
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to generate financial intelligence suggestions.' });
     }
@@ -1078,6 +1372,10 @@ router.post(
           return res.status(200).json({ message: 'Payment was already recorded.', invoiceId: invoiceId.data });
         }
 
+        const admissionDelivery = invoice.invoiceType === 'ADMISSION'
+          ? await activateAdmissionAndSendLogins(req.tenantId!, invoice.studentId)
+          : null;
+
         const smsSender = new MockSmsSender();
         await smsSender.sendSms(
           '98510XXXXX',
@@ -1085,7 +1383,11 @@ router.post(
         );
 
         return res.status(200).json({
-          message: 'Payment confirmed and enrollment unblocked.',
+          message: admissionDelivery
+            ? admissionDelivery.delivered
+              ? 'Payment confirmed and admission login IDs were sent by SMS.'
+              : 'Payment confirmed, but admission login SMS delivery failed.'
+            : 'Payment confirmed and enrollment unblocked.',
           payment: {
             invoiceId: invoiceId.data,
             transactionId: transactionId.data,
@@ -1527,7 +1829,7 @@ router.get(
       const totalExpenses = expenses.reduce((sum: number, exp: any) => sum + Number(exp.amount), 0);
 
       const payrolls = await prisma.payroll.findMany({
-        where: { tenantId: req.tenantId!, status: 'PAID' },
+        where: { tenantId: req.tenantId!, status: 'MANUALLY_PAID' },
       });
       const totalPaidPayrolls = payrolls.reduce((sum: number, pay: any) => sum + Number(pay.netPayable), 0);
 

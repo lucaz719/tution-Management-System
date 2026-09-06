@@ -1,3 +1,4 @@
+import { calendarAccessWhere } from '../services/calendar-access';
 import { Router, Response } from 'express';
 import prisma from '../utils/db';
 import bcrypt from 'bcryptjs';
@@ -13,7 +14,13 @@ import {
 } from '../utils/roles';
 import { UserPayload } from '@tms/types';
 import { canReleaseAdmissionLogins } from '../utils/billing-rules';
-import { parseStrictKeys, parseStrictObject, readTrimmedString } from '../utils/request-validation';
+import { activateAdmissionAndSendLogins } from '../utils/admission-logins';
+import { studentBillingSummary } from '../utils/student-billing-summary';
+import { invoiceLineItems } from '../utils/invoice-document';
+import { normalizeSchedule } from '../utils/schedule';
+import { parseStrictKeys, parseStrictObject, readFiniteNumber, readTrimmedString } from '../utils/request-validation';
+import { salaryStructureFor, type SupportedContractType } from '../services/payroll-service';
+import { getAdmissionTenure } from '../utils/nepali';
 
 const router = Router();
 
@@ -57,6 +64,8 @@ interface CreateUserResult {
   temporaryPassword: string;
 }
 
+const STAFF_ROLE_NAMES: CanonicalRoleName[] = ['Teacher', 'Accountant', 'Receptionist', 'Janitor'];
+
 // Shared creation core: creates the User, assigns the role scoped to a branch
 // (or tenant-wide for Branch Admin managers), and creates the matching domain
 // record (StaffRecord / Student / Parent).
@@ -72,6 +81,7 @@ async function provisionUser(params: {
   linkedStudentId?: string | null;
   status?: 'ACTIVE' | 'INACTIVE';
   admissionStatus?: 'PENDING_PAYMENT' | 'READY_FOR_LOGIN' | 'ACTIVE';
+  compensation?: { contractType: SupportedContractType; amount: number };
 }): Promise<CreateUserResult> {
   const temporaryPassword = generateTempPassword();
   const passwordHash = await bcrypt.hash(temporaryPassword, 10);
@@ -104,14 +114,15 @@ async function provisionUser(params: {
       data: { userId: created.id, roleId, branchId: params.branchId },
     });
 
-    if (['Teacher', 'Accountant', 'Receptionist', 'Janitor'].includes(params.roleName)) {
+    if (STAFF_ROLE_NAMES.includes(params.roleName)) {
+      if (!params.compensation) throw new Error('Compensation is required when creating staff.');
       await tx.staffRecord.create({
         data: {
           userId: created.id,
           joiningDate: new Date(),
           designation: params.roleName,
-          contractType: 'FIXED',
-          salaryStructure: {},
+          contractType: params.compensation.contractType,
+          salaryStructure: salaryStructureFor(params.compensation.contractType, params.compensation.amount),
         },
       });
     } else if (params.roleName === 'Student') {
@@ -157,6 +168,39 @@ function validateNewUserBody(body: any): { firstName: string; lastName: string; 
   };
 }
 
+function validateAdmissionDetails(body: unknown) {
+  return parseStrictObject(body, {
+    fields: {
+      admittedAt: { required: true, maxLength: 40, message: 'Admission date and time are required.' },
+      dateOfBirth: { required: true, maxLength: 10, pattern: /^\d{4}-\d{2}-\d{2}$/, message: 'A valid student date of birth is required.' },
+      gender: { required: true, maxLength: 30, message: 'Student gender is required.' },
+      bloodGroup: { required: false, maxLength: 10, message: 'Blood group is too long.' },
+      nationality: { required: true, maxLength: 80, message: 'Student nationality is required.' },
+      permanentAddress: { required: true, maxLength: 500, message: 'Student permanent address is required.' },
+      temporaryAddress: { required: false, maxLength: 500, message: 'Student temporary address is too long.' },
+      school: { required: false, maxLength: 200, message: 'School name is too long.' },
+      medicalNotes: { required: false, maxLength: 2000, message: 'Medical notes are too long.' },
+      fatherName: { required: true, maxLength: 200, message: "Father's full name is required." },
+      fatherPhone: { required: true, maxLength: 30, pattern: /^[0-9+()\-\s]+$/, message: "A valid father's phone number is required." },
+      fatherEmail: { required: false, maxLength: 254, pattern: /^$|^[^\s@]+@[^\s@]+\.[^\s@]+$/, normalize: normalizeEmail, message: "Father's email is invalid." },
+      fatherOccupation: { required: false, maxLength: 150, message: "Father's occupation is too long." },
+      motherName: { required: true, maxLength: 200, message: "Mother's full name is required." },
+      motherPhone: { required: true, maxLength: 30, pattern: /^[0-9+()\-\s]+$/, message: "A valid mother's phone number is required." },
+      motherEmail: { required: false, maxLength: 254, pattern: /^$|^[^\s@]+@[^\s@]+\.[^\s@]+$/, normalize: normalizeEmail, message: "Mother's email is invalid." },
+      motherOccupation: { required: false, maxLength: 150, message: "Mother's occupation is too long." },
+      optionalParentName: { required: false, maxLength: 200, message: "Optional parent's name is too long." },
+      optionalParentPhone: { required: false, maxLength: 30, pattern: /^$|^[0-9+()\-\s]+$/, message: "Optional parent's phone number is invalid." },
+      optionalParentEmail: { required: false, maxLength: 254, pattern: /^$|^[^\s@]+@[^\s@]+\.[^\s@]+$/, normalize: normalizeEmail, message: "Optional parent's email is invalid." },
+      optionalParentOccupation: { required: false, maxLength: 150, message: "Optional parent's occupation is too long." },
+      optionalParentRelationship: { required: false, maxLength: 80, message: "Optional parent's relationship is too long." },
+      primaryParent: { required: true, maxLength: 30, pattern: /^(Father|Mother|Optional parent)$/, message: 'Select which recorded parent receives account credentials.' },
+      emergencyContactName: { required: true, maxLength: 200, message: 'Emergency contact name is required.' },
+      emergencyContactPhone: { required: true, maxLength: 30, pattern: /^[0-9+()\-\s]+$/, message: 'A valid emergency contact phone is required.' },
+      emergencyContactRelationship: { required: true, maxLength: 80, message: 'Emergency contact relationship is required.' },
+    },
+  });
+}
+
 // --- Caller capabilities: drives what the People UI can do ---
 router.get('/me', authMiddleware, async (req: TenantRequest, res: Response) => {
   const user = req.user as UserPayload;
@@ -185,39 +229,49 @@ router.get('/me', authMiddleware, async (req: TenantRequest, res: Response) => {
   }
 });
 
-// Admission atomically creates active Student/Parent accounts, links the family,
-// creates the admission invoice, and returns one-time credentials.
+// Admission creates inactive Student/Parent accounts and a branch-priced invoice.
+// Logins are activated and delivered by SMS only after that invoice is paid.
 router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Response) => {
-  const admissionShape = parseStrictKeys(req.body, ['branchId', 'gradeId', 'classId', 'student', 'parent']);
+  const admissionShape = parseStrictKeys(req.body, ['branchId', 'gradeId', 'classId', 'classIds', 'student', 'parent', 'admissionDetails']);
   if (!admissionShape.success) return res.status(400).json({ error: admissionShape.error });
   const caller = req.user as UserPayload;
   const tenantAdmin = isTenantAdmin(caller);
   const scopes = branchAdminScopes(caller);
   const branchId = typeof admissionShape.data.branchId === 'string' ? admissionShape.data.branchId.trim() : '';
   const gradeId = typeof admissionShape.data.gradeId === 'string' ? admissionShape.data.gradeId.trim() : '';
-  const classId = typeof admissionShape.data.classId === 'string' ? admissionShape.data.classId.trim() : '';
+  const legacyClassId = typeof admissionShape.data.classId === 'string' ? admissionShape.data.classId.trim() : '';
+  const classIds = Array.from(new Set(Array.isArray(admissionShape.data.classIds) ? admissionShape.data.classIds.filter((value): value is string => typeof value === 'string' && Boolean(value.trim())).map((value) => value.trim()) : legacyClassId ? [legacyClassId] : []));
   if (!tenantAdmin && !scopes.includes(branchId)) {
     return res.status(403).json({ error: 'Only the Tenant Admin or assigned Branch Admin may create admissions.' });
   }
 
   const studentFields = validateNewUserBody(admissionShape.data.student);
   const parentFields = validateNewUserBody(admissionShape.data.parent);
-  if (!branchId || !gradeId || !classId || !studentFields || !parentFields) {
+  const admissionDetails = validateAdmissionDetails(admissionShape.data.admissionDetails);
+  if (!branchId || !gradeId || classIds.length > 20 || !studentFields || !parentFields || !admissionDetails.success) {
     return res.status(400).json({
-      error: 'branchId, gradeId, regular class, and complete student and parent identity details are required.',
+      error: admissionDetails.success ? 'Branch, grade, and complete student and primary guardian identity details are required.' : admissionDetails.error,
     });
   }
 
-  const [branch, grade, regularClass, existing] = await Promise.all([
+  const [branch, grade, regularClasses, existing] = await Promise.all([
     prisma.branch.findFirst({ where: { id: branchId, tenantId: req.tenantId! } }),
     prisma.grade.findFirst({ where: { id: gradeId, tenantId: req.tenantId! } }),
-    prisma.class.findFirst({ where: { id: classId, branchId, course: { tenantId: req.tenantId!, gradeId, type: 'REGULAR' } }, include: { course: true } }),
+    prisma.class.findMany({ where: { id: { in: classIds }, branchId, course: { tenantId: req.tenantId!, gradeId, type: 'REGULAR', isExtraActivity: false } }, include: { course: true } }),
     prisma.user.findFirst({
       where: { email: { in: [studentFields.email, parentFields.email] } },
       select: { email: true },
     }),
   ]);
-  if (!branch || !grade || !regularClass) return res.status(404).json({ error: 'Branch, grade, or matching regular class was not found in your institution.' });
+  if (!branch || !grade || regularClasses.length !== classIds.length) return res.status(404).json({ error: 'Branch, grade, or a matching regular class was not found in your institution.' });
+  if (grade.billingMode === 'GRADE' && regularClasses.length) return res.status(400).json({ error: 'Regular admissions are grade-based. Enroll extra classes separately after admission.' });
+  if (grade.billingMode === 'SUBJECT') {
+    if (!regularClasses.length) return res.status(400).json({ error: 'Choose at least one subject class for a subject-billed grade.' });
+    if (new Set(regularClasses.map((item) => item.courseId)).size !== regularClasses.length) return res.status(400).json({ error: 'Choose only one class for each subject.' });
+    const missingPrice = regularClasses.find((item) => Number((item.course.feeStructure as { monthlyBase?: number })?.monthlyBase ?? 0) <= 0);
+    if (missingPrice) return res.status(409).json({ error: `${missingPrice.course.name} needs a monthly price before admission.` });
+  }
+  const regularClass = regularClasses[0];
   if (studentFields.email === parentFields.email) {
     return res.status(400).json({ error: 'Student and parent must use different email addresses.' });
   }
@@ -234,8 +288,25 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
     bcrypt.hash(parentPassword, 10),
   ]);
   const now = new Date();
+  const admittedAt = new Date(admissionDetails.data.admittedAt);
+  if (Number.isNaN(admittedAt.getTime())) {
+    return res.status(400).json({ error: 'A valid admission date and time are required.' });
+  }
+  const admissionNumber = `ADM-${admittedAt.toISOString().slice(0, 10).replaceAll('-', '')}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+  const savedAdmissionRecord = {
+    ...admissionDetails.data,
+    primaryGuardian: {
+      name: `${parentFields.firstName} ${parentFields.lastName}`.trim(),
+      email: parentFields.email,
+      phone: parentFields.phone,
+      relationship: admissionDetails.data.primaryParent,
+    },
+    admittedBy: { id: req.user!.id, name: `${req.user!.firstName} ${req.user!.lastName}`.trim() },
+    admittedAt: admittedAt.toISOString(),
+  };
   const dueDate = new Date(now);
   dueDate.setDate(dueDate.getDate() + 7);
+  const admissionTenure = await getAdmissionTenure(now);
 
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -248,7 +319,7 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
           lastName: studentFields.lastName,
           phone: studentFields.phone,
           passwordHash: studentPasswordHash,
-          status: 'ACTIVE',
+          status: 'INACTIVE',
         },
       });
       await tx.account.create({
@@ -259,12 +330,14 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
         data: {
           userId: studentUser.id,
           gradeId,
-          admissionDate: now,
-          emergencyContact: studentFields.phone || parentFields.phone,
-          admissionStatus: 'ACTIVE',
+          admissionNumber,
+          admissionDate: admittedAt,
+          emergencyContact: admissionDetails.data.emergencyContactPhone,
+          admissionRecord: savedAdmissionRecord,
+          admissionStatus: branch.admissionFee > 0 ? 'PENDING_PAYMENT' : 'READY_FOR_LOGIN',
         },
       });
-      await tx.enrollment.create({ data: { studentId: student.id, courseId: regularClass.courseId, classId: regularClass.id, status: 'ACTIVE', admissionDate: now } });
+      await tx.enrollment.createMany({ data: regularClasses.map((item) => ({ studentId: student.id, courseId: item.courseId, classId: item.id, status: 'BLOCKED' as const, admissionDate: admittedAt })) });
 
       const parentUser = await tx.user.create({
         data: {
@@ -275,7 +348,7 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
           lastName: parentFields.lastName,
           phone: parentFields.phone,
           passwordHash: parentPasswordHash,
-          status: 'ACTIVE',
+          status: 'INACTIVE',
         },
       });
       await tx.account.create({
@@ -290,36 +363,56 @@ router.post('/admissions', authMiddleware, async (req: TenantRequest, res: Respo
         data: {
           tenantId: req.tenantId!,
           studentId: student.id,
+          branchId,
           invoiceType: 'ADMISSION',
           panNumberSnapshot: tenant.panNumber,
           vatRateSnapshot: tenant.vatRate,
-          amount: grade.admissionFee,
-          netPayable: grade.admissionFee,
-          billingCycleStart: now,
-          billingCycleEnd: now,
+          lineItemsSnapshot: [{ label: 'One-time admission fee', amount: Number(branch.admissionFee) }],
+          amount: branch.admissionFee,
+          netPayable: branch.admissionFee,
+          billingCycleStart: admissionTenure.start,
+          billingCycleEnd: admissionTenure.end,
           dueDate,
-          status: grade.admissionFee > 0 ? 'UNPAID' : 'PAID',
+          status: branch.admissionFee > 0 ? 'UNPAID' : 'PAID',
+          paymentDate: branch.admissionFee > 0 ? null : now,
         },
       });
-      return { student, parent, invoice };
+      return { student, parent, invoice, tenant };
     });
 
+    const delivery = branch.admissionFee === 0
+      ? await activateAdmissionAndSendLogins(req.tenantId!, result.student.id)
+      : null;
     return res.status(201).json({
-      message: 'Admission completed. Student and parent accounts are ready to use.',
+      message: branch.admissionFee > 0
+        ? 'Admission saved. Login IDs will be sent by SMS after payment.'
+        : delivery?.delivered
+          ? 'Admission completed and login IDs were sent by SMS.'
+          : 'Admission completed, but SMS delivery failed. Retry login delivery.',
       admission: {
         studentId: result.student.id,
         parentId: result.parent.id,
         branchId,
         gradeId,
-        classId: regularClass.id,
+        classId: regularClass?.id ?? null,
+        classIds: regularClasses.map((item) => item.id),
+        admissionNumber,
+        admittedAt: admittedAt.toISOString(),
         status: result.student.admissionStatus,
         invoiceId: result.invoice.id,
         admissionFee: result.invoice.netPayable,
+        record: {
+          institutionName: result.tenant.name,
+          branchName: branch.name,
+          branchAddress: branch.address,
+          gradeName: grade.name,
+          className: regularClasses.length ? regularClasses.map((item) => `${item.course.name} · ${item.name}`).join(', ') : 'Regular grade admission',
+          student: { ...studentFields, ...admissionDetails.data },
+          primaryGuardian: savedAdmissionRecord.primaryGuardian,
+          admittedBy: savedAdmissionRecord.admittedBy,
+        },
       },
-      credentials: {
-        student: { email: studentFields.email, temporaryPassword: studentPassword },
-        parent: { email: parentFields.email, temporaryPassword: parentPassword },
-      },
+      loginDelivery: delivery,
     });
   } catch (error: any) {
     if (error.code === 'P2002') return res.status(409).json({ error: 'Student or parent email already exists.' });
@@ -345,36 +438,21 @@ router.post('/admissions/:studentId/issue-logins', authMiddleware, async (req: T
   if (!canReleaseAdmissionLogins(student.admissionStatus, student.invoices[0]?.status)) {
     return res.status(409).json({ error: 'Admission payment must be recorded before logins can be issued.' });
   }
-  const parentUser = student.studentParents[0]?.parent.user;
-  if (!parentUser) return res.status(409).json({ error: 'A linked parent account is required before issuing logins.' });
-
-  const studentPassword = generateTempPassword();
-  const parentPassword = generateTempPassword();
-  const [studentHash, parentHash] = await Promise.all([
-    bcrypt.hash(studentPassword, 10),
-    bcrypt.hash(parentPassword, 10),
-  ]);
-  const activated = await prisma.$transaction(async (tx) => {
-    const transition = await tx.student.updateMany({
-      where: { id: student.id, admissionStatus: 'READY_FOR_LOGIN' },
-      data: { admissionStatus: 'ACTIVE' },
-    });
-    if (transition.count !== 1) return false;
-    await tx.user.update({ where: { id: student.userId }, data: { status: 'ACTIVE', passwordHash: studentHash } });
-    await tx.account.updateMany({ where: { userId: student.userId, providerId: 'credential' }, data: { password: studentHash } });
-    await tx.user.update({ where: { id: parentUser.id }, data: { status: 'ACTIVE', passwordHash: parentHash } });
-    await tx.account.updateMany({ where: { userId: parentUser.id, providerId: 'credential' }, data: { password: parentHash } });
-    return true;
-  });
-  if (!activated) {
-    return res.status(409).json({ error: 'Admission logins were already issued by another request.' });
+  try {
+    const delivery = await activateAdmissionAndSendLogins(req.tenantId!, student.id);
+    if (!delivery.delivered) {
+      // This is an expected external-provider rejection, not an unexpected
+      // server fault. A 4xx dependency status preserves the safe provider
+      // reason; the API security boundary intentionally redacts all 5xx bodies.
+      return res.status(424).json({
+        error: `SMS delivery failed. ${delivery.failures.join(' ') || 'Check both phone numbers and retry.'}`,
+        delivery,
+      });
+    }
+    return res.json({ message: 'Admission activated and login IDs were sent by SMS.', delivery });
+  } catch (error) {
+    return res.status(409).json({ error: error instanceof Error ? error.message : 'Unable to issue admission logins.' });
   }
-
-  return res.json({
-    message: 'Admission activated. Deliver these one-time credentials through a secure channel.',
-    student: { email: student.user.email, temporaryPassword: studentPassword },
-    parent: { email: parentUser.email, temporaryPassword: parentPassword },
-  });
 });
 
 // --- List users in the caller's tenant (branch admins see only their branch) ---
@@ -431,6 +509,7 @@ router.get('/', authMiddleware, async (req: TenantRequest, res: Response) => {
 async function studentFeeSummary(studentId: string) {
   const invoices = await prisma.invoice.findMany({
     where: { studentId },
+    include: { branch: { select: { name: true } } },
     orderBy: { dueDate: 'desc' },
   });
   const num = (v: any) => Number(v ?? 0);
@@ -451,6 +530,18 @@ async function studentFeeSummary(studentId: string) {
       status: i.status,
       dueDate: i.dueDate,
       paymentDate: i.paymentDate,
+      invoiceType: i.invoiceType,
+      amount: num(i.amount),
+      discount: num(i.discount),
+      fine: num(i.fine),
+      panNumberSnapshot: i.panNumberSnapshot,
+      vatRateSnapshot: num(i.vatRateSnapshot),
+      lineItems: invoiceLineItems(i.lineItemsSnapshot, i.invoiceType, i.amount),
+      transactionId: i.transactionId,
+      createdAt: i.createdAt,
+      billingCycleStart: i.billingCycleStart,
+      billingCycleEnd: i.billingCycleEnd,
+      branchName: i.branch.name,
     })),
   };
 }
@@ -470,7 +561,7 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
         },
         grade: true,
         enrollments: {
-          where: { status: { in: ['ACTIVE', 'BLOCKED'] } },
+          where: { status: { in: ['ACTIVE', 'BLOCKED'] }, OR: [{ validUntil: null }, { validUntil: { gt: new Date() } }] },
           include: {
             course: true,
             class: {
@@ -487,7 +578,7 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
           orderBy: { date: 'desc' },
           take: 60,
         },
-        invoices: { orderBy: { dueDate: 'desc' }, take: 12 },
+        invoices: { include: { branch: { select: { name: true } } }, orderBy: { dueDate: 'desc' }, take: 12 },
         certificates: { include: { template: true }, orderBy: { issuedDate: 'desc' } },
       },
     });
@@ -510,10 +601,7 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
     const branchIds = Array.from(new Set(student.enrollments.map((enrollment) => enrollment.class.branchId)));
     const [calendarRows, leaveRows, scoreRows] = await Promise.all([
       prisma.academicEvent.findMany({
-        where: {
-          tenantId: req.tenantId!,
-          OR: [{ branchId: null }, ...(branchIds.length ? [{ branchId: { in: branchIds } }] : [])],
-        },
+        where: await calendarAccessWhere(req.user!, req.tenantId!, { viewerRole: 'Student' }),
         orderBy: { startDate: 'asc' },
         take: 100,
       }),
@@ -554,7 +642,7 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
     const weekday = new Intl.DateTimeFormat('en', { weekday: 'long', timeZone: 'Asia/Kathmandu' }).format(new Date());
     const normalizedWeekday = weekday.toLowerCase();
     const todaySessions = student.enrollments.flatMap((enrollment) => {
-      const schedule = Array.isArray(enrollment.class.schedule) ? enrollment.class.schedule as Array<Record<string, unknown>> : [];
+      const schedule = normalizeSchedule(enrollment.class.schedule);
       return schedule
         .filter((slot) => {
           const day = typeof slot.day === 'string' ? slot.day.toLowerCase() : '';
@@ -562,25 +650,25 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
         })
         .map((slot, index) => ({
           id: `${enrollment.classId}-${index}`,
-          time: typeof slot.start === 'string' ? slot.start : '—',
-          endTime: typeof slot.end === 'string' ? slot.end : '—',
+          time: slot.startTime,
+          endTime: slot.endTime,
           subject: enrollment.course.name,
           teacher: enrollment.class.assignedTeacher
             ? `${enrollment.class.assignedTeacher.firstName} ${enrollment.class.assignedTeacher.lastName}`
             : 'Teacher not assigned',
-          room: enrollment.class.name,
+          room: slot.room || enrollment.class.name,
           type: courseTypeLabel(enrollment.course.type),
         }));
     }).sort((a, b) => a.time.localeCompare(b.time));
     const weeklySessions = student.enrollments.flatMap((enrollment) => {
-      const schedule = Array.isArray(enrollment.class.schedule) ? enrollment.class.schedule as Array<Record<string, unknown>> : [];
+      const schedule = normalizeSchedule(enrollment.class.schedule);
       return schedule.map((slot, index) => ({
         id: `${enrollment.classId}-${index}`, day: String(slot.day || ''),
-        time: typeof slot.start === 'string' ? slot.start : typeof slot.startTime === 'string' ? slot.startTime : '—',
-        endTime: typeof slot.end === 'string' ? slot.end : typeof slot.endTime === 'string' ? slot.endTime : '—',
+        time: slot.startTime,
+        endTime: slot.endTime,
         subject: enrollment.course.name,
         teacher: enrollment.class.assignedTeacher ? `${enrollment.class.assignedTeacher.firstName} ${enrollment.class.assignedTeacher.lastName}` : 'Teacher not assigned',
-        room: typeof slot.room === 'string' && slot.room ? slot.room : enrollment.class.name,
+        room: slot.room || enrollment.class.name,
         className: enrollment.class.name, type: courseTypeLabel(enrollment.course.type),
       }));
     });
@@ -673,14 +761,38 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
 
     const invoices = student.invoices.map((invoice) => ({
       id: invoice.id,
+      invoiceType: invoice.invoiceType,
+      paymentDate: invoice.paymentDate ? formatDate(invoice.paymentDate) : null,
       cycle: invoice.billingCycleStart.toLocaleDateString('en', { month: 'long', year: 'numeric', timeZone: 'Asia/Kathmandu' }),
       dueDate: formatDate(invoice.dueDate),
       state: invoiceState(invoice.status, invoice.dueDate),
       qrAvailable: invoice.status !== 'PAID',
       paymentReference: invoice.transactionId ?? invoice.id,
       netPayable: Number(invoice.netPayable),
+      document: {
+        id: invoice.id,
+        invoiceType: invoice.invoiceType,
+        status: invoice.status,
+        institutionName: student.user.tenant.name,
+        panNumber: invoice.panNumberSnapshot,
+        vatRate: Number(invoice.vatRateSnapshot),
+        studentName: `${student.user.firstName} ${student.user.lastName}`,
+        admissionNumber: student.admissionNumber,
+        gradeName: student.grade?.name ?? null,
+        branchName: invoice.branch.name,
+        issuedAt: invoice.createdAt,
+        dueDate: invoice.dueDate,
+        paymentDate: invoice.paymentDate,
+        billingCycleStart: invoice.billingCycleStart,
+        billingCycleEnd: invoice.billingCycleEnd,
+        transactionId: invoice.transactionId,
+        lines: invoiceLineItems(invoice.lineItemsSnapshot, invoice.invoiceType, invoice.amount),
+        discount: Number(invoice.discount),
+        fine: Number(invoice.fine),
+        netPayable: Number(invoice.netPayable),
+      },
       lines: [
-        { label: `${invoice.invoiceType.charAt(0)}${invoice.invoiceType.slice(1).toLowerCase()} dues`, amount: Number(invoice.amount) },
+        ...invoiceLineItems(invoice.lineItemsSnapshot, invoice.invoiceType, invoice.amount),
         ...(Number(invoice.discount) ? [{ label: 'Discount', amount: -Number(invoice.discount) }] : []),
         ...(Number(invoice.fine) ? [{ label: 'Fine', amount: Number(invoice.fine) }] : []),
       ],
@@ -705,6 +817,7 @@ router.get('/me/student-portal', authMiddleware, async (req: TenantRequest, res:
       issuedDate: formatDate(certificate.issuedDate),
       fileName: certificate.pdfUrl.split('/').pop() || `${certificate.certificateId}.pdf`,
       pdfUrl: `/certificates/${encodeURIComponent(certificate.certificateId)}/download`,
+      htmlUrl: (certificate.template.layoutConfig as { renderMode?: string }).renderMode === 'HTML' ? `/certificates/${encodeURIComponent(certificate.certificateId)}/html` : undefined,
     }));
 
     const notifications = [
@@ -837,7 +950,21 @@ router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Respo
       where: { id: req.params.id, tenantId: req.tenantId! },
       include: {
         userRoles: { include: { role: true, branch: true } },
-        student: { include: { grade: { select: { name: true, monthlyFee: true } } } },
+        tenant: { select: { name: true } },
+        student: {
+          include: {
+            grade: { select: { name: true, monthlyFee: true, billingMode: true } },
+            studentParents: {
+              include: {
+                parent: {
+                  include: {
+                    user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true, status: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
         parent: true,
         staffRecord: true,
       },
@@ -862,6 +989,7 @@ router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Respo
       phone: user.phone,
       status: user.status,
       createdAt: user.createdAt,
+      institutionName: user.tenant.name,
       roles: user.userRoles.map((ur) => ({ role: ur.role.name, branchName: ur.branch?.name ?? null })),
     };
 
@@ -872,40 +1000,57 @@ router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Respo
       const enrollments = await prisma.enrollment.findMany({
         where: { studentId: user.student.id },
         include: {
-          course: { select: { name: true, feeStructure: true, isTaxExempt: true, taxPercentage: true } },
-          class: { select: { name: true } },
+          course: { select: { id: true, name: true, feeStructure: true, isTaxExempt: true, isExtraActivity: true, taxPercentage: true } },
+          class: { select: { id: true, name: true } },
         },
         orderBy: { createdAt: 'desc' },
       });
-      // Live recurring monthly fee = grade tuition (all subjects) + active extra
-      // activity enrolments.
-      const gradeTuition = user.student.grade?.monthlyFee ?? 0;
-      const extrasFee = enrollments
-        .filter((e) => e.status === 'ACTIVE')
-        .reduce((sum, e) => {
-          const base = Number((e.course.feeStructure as { monthlyBase?: number })?.monthlyBase || 0);
-          return sum + (e.course.isTaxExempt ? base : base * (1 + Number(e.course.taxPercentage || 13) / 100));
-        }, 0);
-      const monthlyFee = gradeTuition + extrasFee;
+      const billing = studentBillingSummary(user.student.grade, enrollments);
+      const fees = await studentFeeSummary(user.student.id);
+      const academicEnrollments = enrollments.filter((enrollment) => !enrollment.course.isExtraActivity);
+      const validFrom = academicEnrollments.map((enrollment) => enrollment.validFrom).find(Boolean) ?? null;
+      const validUntil = academicEnrollments.map((enrollment) => enrollment.validUntil).find(Boolean) ?? null;
+      const enrollmentAccess = {
+        status: !validFrom || !validUntil ? 'PENDING' : validUntil.getTime() <= Date.now() ? 'EXPIRED' : 'ACTIVE',
+        validFrom,
+        validUntil,
+      };
+      const gradeTuition = user.student.grade?.billingMode === 'GRADE' ? Number(user.student.grade.monthlyFee ?? 0) : 0;
       const attendance = await prisma.studentAttendance.groupBy({
         by: ['status'],
         where: { studentId: user.student.id },
         _count: { _all: true },
       });
       detail.student = {
+        admissionNumber: user.student.admissionNumber,
         admissionDate: user.student.admissionDate,
+        admissionRecord: user.student.admissionRecord,
         emergencyContact: user.student.emergencyContact,
         studentId: user.student.id,
         grade: user.student.grade?.name ?? null,
         gradeTuition,
-        monthlyFee: Math.round(monthlyFee * 100) / 100,
+        monthlyFee: billing.recurringTotal,
+        billing,
+        enrollmentAccess,
+        guardians: user.student.studentParents.map((link) => ({
+          userId: link.parent.user.id,
+          name: `${link.parent.user.firstName} ${link.parent.user.lastName}`,
+          email: link.parent.user.email,
+          phone: link.parent.user.phone,
+          status: link.parent.user.status,
+        })),
         enrollments: enrollments.map((e) => ({
           id: e.id,
           courseName: e.course.name,
           className: e.class.name,
           status: e.status,
+          accessStatus: e.validUntil && e.validUntil.getTime() <= Date.now() ? 'EXPIRED' : e.status,
+          validFrom: e.validFrom,
+          validUntil: e.validUntil,
+          category: e.course.isExtraActivity ? 'ACTIVITY' : 'ACADEMIC',
+          fee: billing.lines.find((line) => line.enrollmentId === e.id)?.amount ?? 0,
         })),
-        fees: await studentFeeSummary(user.student.id),
+        fees,
         attendance: attendance.reduce<Record<string, number>>((acc, a) => {
           acc[a.status] = a._count._all;
           return acc;
@@ -979,6 +1124,7 @@ router.get('/:id/profile', authMiddleware, async (req: TenantRequest, res: Respo
         designation: user.staffRecord.designation,
         contractType: user.staffRecord.contractType,
         joiningDate: user.staffRecord.joiningDate,
+        salaryStructure: user.staffRecord.salaryStructure,
       };
     }
 
@@ -1248,7 +1394,7 @@ router.post('/', authMiddleware, async (req: TenantRequest, res: Response) => {
     return res.status(403).json({ error: 'You do not have permission to create users.' });
   }
 
-  const requestShape = parseStrictKeys(req.body, ['firstName', 'lastName', 'email', 'phone', 'role', 'branchId', 'gradeId']);
+  const requestShape = parseStrictKeys(req.body, ['firstName', 'lastName', 'email', 'phone', 'role', 'branchId', 'gradeId', 'studentId', 'contractType', 'baseMonthlySalary', 'hourlyRate']);
   if (!requestShape.success) return res.status(400).json({ error: requestShape.error });
   const fields = validateNewUserBody({
     firstName: requestShape.data.firstName,
@@ -1272,6 +1418,24 @@ router.post('/', authMiddleware, async (req: TenantRequest, res: Response) => {
   }
   if (roleName === 'Branch Admin') {
     return res.status(400).json({ error: 'Use the branch-manager endpoint to create Branch Admins.' });
+  }
+
+  let compensation: { contractType: SupportedContractType; amount: number } | undefined;
+  if (STAFF_ROLE_NAMES.includes(roleName)) {
+    const contractType = typeof requestShape.data.contractType === 'string' ? requestShape.data.contractType.trim() : '';
+    if (contractType !== 'FIXED' && contractType !== 'HOUR_RATE') {
+      return res.status(400).json({ error: 'Staff contractType must be FIXED or HOUR_RATE.' });
+    }
+    const field = contractType === 'FIXED' ? 'baseMonthlySalary' : 'hourlyRate';
+    const amount = readFiniteNumber(requestShape.data, field, {
+      min: 0.01,
+      max: 100_000_000,
+      message: contractType === 'FIXED'
+        ? 'Base monthly salary must be greater than zero.'
+        : 'Hourly rate must be greater than zero.',
+    });
+    if (!amount.success) return res.status(400).json({ error: amount.error });
+    compensation = { contractType, amount: amount.data };
   }
 
   const branchId = typeof requestShape.data.branchId === 'string' ? requestShape.data.branchId.trim() : '';
@@ -1330,6 +1494,7 @@ router.post('/', authMiddleware, async (req: TenantRequest, res: Response) => {
       branchId,
       gradeId,
       linkedStudentId,
+      compensation,
     });
 
     return res.status(201).json({
@@ -1579,7 +1744,7 @@ async function loadManageableUser(req: TenantRequest, id: string) {
 
   const user = await prisma.user.findFirst({
     where: { id, tenantId: req.tenantId! },
-    include: { userRoles: true, student: true },
+    include: { userRoles: true, student: true, staffRecord: true },
   });
   if (!user) return { error: 404 as const };
 
@@ -1603,6 +1768,24 @@ router.put('/:id', authMiddleware, async (req: TenantRequest, res: Response) => 
   if (typeof req.body?.phone === 'string') data.phone = req.body.phone.trim();
   if (['ACTIVE', 'INACTIVE', 'SUSPENDED'].includes(req.body?.status)) data.status = req.body.status;
 
+  let compensationUpdate: { contractType: SupportedContractType; salaryStructure: ReturnType<typeof salaryStructureFor> } | null = null;
+  if (user.staffRecord && ['contractType', 'baseMonthlySalary', 'hourlyRate'].some((field) => field in (req.body ?? {}))) {
+    const contractType = typeof req.body.contractType === 'string' ? req.body.contractType.trim() : user.staffRecord.contractType;
+    if (contractType !== 'FIXED' && contractType !== 'HOUR_RATE') {
+      return res.status(400).json({ error: 'Staff contractType must be FIXED or HOUR_RATE.' });
+    }
+    const field = contractType === 'FIXED' ? 'baseMonthlySalary' : 'hourlyRate';
+    const amount = readFiniteNumber(req.body, field, {
+      min: 0.01,
+      max: 100_000_000,
+      message: contractType === 'FIXED'
+        ? 'Base monthly salary must be greater than zero.'
+        : 'Hourly rate must be greater than zero.',
+    });
+    if (!amount.success) return res.status(400).json({ error: amount.error });
+    compensationUpdate = { contractType, salaryStructure: salaryStructureFor(contractType, amount.data) };
+  }
+
   // Grade reassignment (students only): string sets, null clears.
   let gradeUpdate: { gradeId: string | null } | null = null;
   if (user.student && 'gradeId' in (req.body ?? {})) {
@@ -1615,7 +1798,7 @@ router.put('/:id', authMiddleware, async (req: TenantRequest, res: Response) => 
     }
   }
 
-  if (Object.keys(data).length === 0 && !gradeUpdate) {
+  if (Object.keys(data).length === 0 && !gradeUpdate && !compensationUpdate) {
     return res.status(400).json({ error: 'Nothing to update.' });
   }
 
@@ -1624,6 +1807,9 @@ router.put('/:id', authMiddleware, async (req: TenantRequest, res: Response) => 
   try {
     if (Object.keys(data).length > 0) await prisma.user.update({ where: { id: user.id }, data });
     if (gradeUpdate && user.student) await prisma.student.update({ where: { id: user.student.id }, data: gradeUpdate });
+    if (compensationUpdate && user.staffRecord) {
+      await prisma.staffRecord.update({ where: { id: user.staffRecord.id }, data: compensationUpdate });
+    }
 
     // Promotion reconciliation: moving to a new grade completes active enrolments
     // in courses tied to a *different* graded level, so monthly billing (which is

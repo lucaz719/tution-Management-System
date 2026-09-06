@@ -8,6 +8,61 @@ import { canAccessBranch, hasBranchPermission, isTenantAdmin } from '../utils/ac
 
 const router = Router();
 
+// Approval queues are read from the persisted leave workflow. Branch admins
+// see requests for branches they manage; tenant admins see institution-wide
+// records, including Long Sick requests awaiting Level 2 approval.
+router.get('/', authMiddleware, async (req: TenantRequest, res: Response) => {
+  try {
+    const tenantAdmin = isTenantAdmin(req.user!);
+    const branchIds = req.user!.roles
+      .filter((role: any) => role.branchId && hasBranchPermission(req.user!, 'approve_leave_l1', role.branchId))
+      .map((role: any) => role.branchId as string);
+    if (!tenantAdmin && branchIds.length === 0) {
+      return res.status(403).json({ error: 'You do not have access to a leave approval queue.' });
+    }
+
+    const requestedLevel = String(req.query.level || '').toUpperCase();
+    const statusFilter: LeaveStatus[] | undefined = requestedLevel === 'L2'
+      ? ['APPROVED_LEVEL1', 'APPROVED_LEVEL2', 'REJECTED']
+      : requestedLevel === 'L1'
+        ? ['PENDING', 'APPROVED_LEVEL1', 'APPROVED_LEVEL2', 'REJECTED']
+        : undefined;
+    const leaves = await prisma.leave.findMany({
+      where: {
+        tenantId: req.tenantId!,
+        ...(tenantAdmin ? {} : { branchId: { in: branchIds } }),
+        ...(requestedLevel === 'L2' ? { leaveType: 'LONG_SICK' } : {}),
+        ...(statusFilter ? { status: { in: statusFilter } } : {}),
+      },
+      include: {
+        user: { select: { firstName: true, lastName: true } },
+        branch: { select: { name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+
+    return res.json({
+      leaves: leaves.map((leave) => ({
+        id: leave.id,
+        staffName: `${leave.user.firstName} ${leave.user.lastName}`.trim(),
+        branchId: leave.branchId,
+        branchName: leave.branch.name,
+        leaveType: leave.leaveType,
+        startDate: leave.startDate,
+        endDate: leave.endDate,
+        reason: leave.reason,
+        status: leave.status,
+        remarks: leave.remarks,
+        approvedBy: leave.approvedBy,
+        createdAt: leave.createdAt,
+      })),
+    });
+  } catch {
+    return res.status(500).json({ error: 'Failed to load leave requests.' });
+  }
+});
+
 // 1. Submit a Leave / Early Out Request (Staff/Parent)
 router.post(
   '/request',
@@ -16,11 +71,24 @@ router.post(
     const { leaveType, startDate, endDate, reason, branchId, studentId } = req.body;
     const requesterUserId = req.user!.id;
     const tenantId = req.tenantId!;
+    const allowedLeaveTypes: LeaveType[] = ['CASUAL', 'SICK', 'LONG_SICK', 'EARLY_OUT'];
 
     if (!leaveType || !startDate || !endDate || !reason || !branchId) {
       return res.status(400).json({
         error: 'Missing required parameters: leaveType, startDate, endDate, reason, branchId.',
       });
+    }
+    if (!allowedLeaveTypes.includes(leaveType as LeaveType)) {
+      return res.status(400).json({ error: 'Select a valid leave type.' });
+    }
+    const parsedStart = new Date(startDate);
+    const parsedEnd = new Date(endDate);
+    if (Number.isNaN(parsedStart.getTime()) || Number.isNaN(parsedEnd.getTime()) || parsedEnd < parsedStart) {
+      return res.status(400).json({ error: 'Leave end date must be on or after the start date.' });
+    }
+    const normalizedReason = String(reason).trim();
+    if (!normalizedReason || normalizedReason.length > 2000) {
+      return res.status(400).json({ error: 'Provide a reason no longer than 2,000 characters.' });
     }
     try {
       const [tenantPolicy, branch, targetStudent] = await Promise.all([
@@ -53,15 +121,27 @@ router.post(
         return res.status(403).json({ error: 'You cannot submit leave for this branch.' });
       }
       const leaveSubjectUserId = targetStudent?.userId ?? requesterUserId;
+      const overlapping = await prisma.leave.findFirst({
+        where: {
+          tenantId,
+          branchId,
+          userId: leaveSubjectUserId,
+          status: { in: ['PENDING', 'APPROVED_LEVEL1', 'APPROVED_LEVEL2'] },
+          startDate: { lte: parsedEnd },
+          endDate: { gte: parsedStart },
+        },
+        select: { id: true },
+      });
+      if (overlapping) return res.status(409).json({ error: 'A pending or approved leave request already covers these dates.' });
       const leave = await prisma.leave.create({
         data: {
           tenantId,
           branchId,
           userId: leaveSubjectUserId,
           leaveType: leaveType as LeaveType,
-          startDate: new Date(startDate),
-          endDate: new Date(endDate),
-          reason,
+          startDate: parsedStart,
+          endDate: parsedEnd,
+          reason: normalizedReason,
           status: 'PENDING' as LeaveStatus,
           policySnapshot: {
             leavePolicy: tenantPolicy.leavePolicy ?? {},

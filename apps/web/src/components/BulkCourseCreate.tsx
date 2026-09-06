@@ -1,10 +1,18 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from './ui/Button';
 import { StatusBadge } from './ui/StatusBadge';
 import { useToast } from './ui/Toast';
 import { api } from '../services/api';
 
-interface GradeOption { id: string; name: string; sortOrder: number }
+interface GradeOption { id: string; name: string; sortOrder: number; billingMode: 'GRADE' | 'SUBJECT' }
+
+const billingModeFor = (grade: GradeOption): 'GRADE' | 'SUBJECT' => {
+  if (/^UKG$/i.test(grade.name.trim())) return 'GRADE';
+  const level = Number(grade.name.trim().match(/^(?:Class|Grade)\s*(\d{1,2})$/i)?.[1]);
+  if (level >= 1 && level <= 10) return 'GRADE';
+  if (level === 11 || level === 12) return 'SUBJECT';
+  return grade.billingMode;
+};
 
 interface BulkCourseCreateProps {
   branches: Array<{ id: string; name: string }>;
@@ -16,10 +24,11 @@ interface BulkCourseCreateProps {
 // Quick-select bands over the standard Nepali ladder, matched by name so
 // tenants with custom grades simply don't light up the shortcut.
 const BANDS: Array<{ label: string; names: string[] }> = [
-  { label: 'Pre-primary', names: ['Nursery', 'LKG', 'UKG'] },
+  { label: 'UKG', names: ['UKG'] },
   { label: 'Primary (1–5)', names: ['Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5'] },
   { label: 'Basic (6–8)', names: ['Class 6', 'Class 7', 'Class 8'] },
-  { label: 'Secondary (9–12)', names: ['Class 9', 'Class 10', 'Class 11', 'Class 12'] },
+  { label: 'Secondary (9–10)', names: ['Class 9', 'Class 10'] },
+  { label: 'Higher secondary (11–12)', names: ['Class 11', 'Class 12'] },
 ];
 
 const DEFAULT_SUBJECTS = 'English, Nepali, Mathematics, Science, Social Studies, Computer';
@@ -36,6 +45,12 @@ export function BulkCourseCreate({ branches, grades, onClose, onCreated }: BulkC
   const [isSaving, setIsSaving] = useState(false);
   const [results, setResults] = useState<BulkResult[] | null>(null);
   const [labels, setLabels] = useState<string[]>([]);
+
+  useEffect(() => {
+    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', close);
+    return () => window.removeEventListener('keydown', close);
+  }, [onClose]);
 
   const sortedGrades = useMemo(() => [...grades].sort((a, b) => a.sortOrder - b.sortOrder), [grades]);
 
@@ -64,20 +79,22 @@ export function BulkCourseCreate({ branches, grades, onClose, onCreated }: BulkC
   };
 
   const total = selectedGrades.size * subjects.length;
+  const selectedSubjectBillingGrades = sortedGrades.filter((grade) => selectedGrades.has(grade.id) && billingModeFor(grade) === 'SUBJECT');
 
   const submit = async () => {
     if (!branchId) return showToast('Select a branch.', 'error');
     if (selectedGrades.size === 0) return showToast('Select at least one grade.', 'error');
     if (subjects.length === 0) return showToast('Enter at least one subject.', 'error');
-    const fee = Number(monthlyBase);
-    if (!Number.isFinite(fee) || fee < 0) return showToast('Enter a valid monthly fee.', 'error');
+    if (selectedSubjectBillingGrades.length && !monthlyBase.trim()) return showToast('Enter the monthly fee for Class 11–12 subjects.', 'error');
+    const fee = selectedSubjectBillingGrades.length ? Number(monthlyBase) : 0;
+    if (!Number.isFinite(fee) || fee < 0) return showToast('Enter a valid subject fee.', 'error');
 
     const items: Array<{ name: string; gradeId: string; monthlyBase: number; isTaxExempt: boolean; type: string }> = [];
     const itemLabels: string[] = [];
     for (const grade of sortedGrades) {
       if (!selectedGrades.has(grade.id)) continue;
       for (const subject of subjects) {
-        items.push({ name: `${subject} — ${grade.name}`, gradeId: grade.id, monthlyBase: fee, isTaxExempt, type: 'REGULAR' });
+        items.push({ name: `${subject} — ${grade.name}`, gradeId: grade.id, monthlyBase: billingModeFor(grade) === 'SUBJECT' ? fee : 0, isTaxExempt, type: 'REGULAR' });
         itemLabels.push(`${subject} — ${grade.name}`);
       }
     }
@@ -100,12 +117,12 @@ export function BulkCourseCreate({ branches, grades, onClose, onCreated }: BulkC
 
   return (
     <>
-      <div className="people-drawer-overlay" onClick={onClose} />
+      <button type="button" className="people-drawer-overlay" onClick={onClose} aria-label="Close bulk subject form" />
       <aside className="people-drawer" role="dialog" aria-modal="true" style={{ width: '560px' }}>
         <div className="people-drawer-head">
           <div>
-            <h2>Bulk Add Grade Courses</h2>
-            <p>Pick grades and subjects — one course is created for every combination.</p>
+            <h2>Add subjects by grade</h2>
+            <p>Package grades include subjects at no extra cost. Class 11–12 use the subject fee.</p>
           </div>
           <button type="button" className="people-drawer-close" onClick={onClose} aria-label="Close">
             <span className="material-symbols-outlined">close</span>
@@ -177,10 +194,11 @@ export function BulkCourseCreate({ branches, grades, onClose, onCreated }: BulkC
 
               <div className="people-field-row">
                 <div className="people-field">
-                  <label>Monthly fee per course (NPR)</label>
-                  <input value={monthlyBase} onChange={(e) => setMonthlyBase(e.target.value)} placeholder="1500" inputMode="numeric" required />
+                  <label htmlFor="bulk-subject-fee">Monthly subject fee (NPR)</label>
+                  <input id="bulk-subject-fee" value={monthlyBase} onChange={(e) => setMonthlyBase(e.target.value)} placeholder="1500" inputMode="numeric" pattern="[0-9]*" required={selectedSubjectBillingGrades.length > 0} disabled={selectedSubjectBillingGrades.length === 0} />
+                  <small>{selectedSubjectBillingGrades.length ? `Applied only to ${selectedSubjectBillingGrades.map((grade) => grade.name).join(', ')}.` : 'Selected grades use one package fee, so subjects are included.'}</small>
                 </div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13.5px', fontWeight: 600, color: 'var(--text)', cursor: 'pointer', alignSelf: 'end', paddingBottom: '10px' }}>
+                <label style={{ display: selectedSubjectBillingGrades.length ? 'flex' : 'none', alignItems: 'center', gap: '10px', fontSize: '13.5px', fontWeight: 600, color: 'var(--text)', cursor: 'pointer', alignSelf: 'end', paddingBottom: '10px' }}>
                   <input type="checkbox" checked={isTaxExempt} onChange={(e) => setIsTaxExempt(e.target.checked)} />
                   Tax-exempt
                 </label>

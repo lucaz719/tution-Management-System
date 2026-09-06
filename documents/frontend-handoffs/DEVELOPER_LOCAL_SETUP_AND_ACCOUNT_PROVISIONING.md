@@ -190,17 +190,15 @@ Both must report `true`. If `.env.docker` was changed after the API started, rec
 docker compose --env-file .env.docker up --build -d --force-recreate api web
 ```
 
-### Current Super Admin web limitation
+### Super Admin browser workflow
 
-Do not try to use the browser Super Admin dashboard for provisioning in the current revision.
+Sign in with the seeded Super Admin account and open `/platform/overview`. The focused bootstrap form creates the institution, the client's Tenant Admin account, and the first branch in one transaction. Store the one-time credentials before closing the success dialog.
 
-The backend seed and onboarding APIs support `Super Admin`, and Super Admin page components exist, but the current web `UserRole` union and router do not register `SUPER_ADMIN` or `/super-admin/*`. A Super Admin browser login therefore redirects incorrectly instead of opening the control center.
-
-Use the authenticated PowerShell API session in the next sections. Fixing and registering the Super Admin web routes is a separate frontend task; it is not required to begin Tenant Admin work.
+The PowerShell request/approval flow below remains available for legacy fixtures and API troubleshooting, but it is no longer required for normal provisioning.
 
 ## 8. Submit a real tenant onboarding request
 
-There is currently no public production-ready onboarding-request page. The authenticated `/setup/tenant` wizard only simulates saving and must not be used for this step.
+This legacy request flow is optional. Prefer the authenticated Super Admin bootstrap form for a new client workspace.
 
 Open a new PowerShell terminal and submit a unique request:
 

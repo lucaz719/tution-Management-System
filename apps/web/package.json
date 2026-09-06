@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "better-auth": "^1.6.23",
+    "nepali-date-library": "^1.1.16",
     "qrcode": "^1.5.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

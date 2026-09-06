@@ -1,11 +1,10 @@
+import { AcademicCalendarView } from '../components/calendar/AcademicCalendarView';
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import QRCode from 'qrcode';
 import {
   invoiceTotal,
   resultPercentage,
   type AttendanceState,
-  type EventKind,
   type FeeState,
   type StudentPortalDataset,
   type SubjectInsight,
@@ -13,6 +12,9 @@ import {
 import { loadNepalPayPayload, loadStudentPortal, studentFileUrl } from '../features/student/studentPortalService';
 import { errorMessage } from '../services/api/client';
 import { ChangePasswordForm } from '../components/ChangePasswordForm';
+import { toDualDateLabel } from '../utils/nepaliDate';
+import { InvoiceDocumentDialog } from '../components/InvoiceDocument';
+import { PaymentCheckoutDialog } from '../components/PaymentCheckoutDialog';
 import '../features/student/studentPortal.css';
 
 type StudentView =
@@ -156,12 +158,7 @@ function DashboardView({ go }: { go: (view: StudentView) => void }) {
         <button type="button" onClick={() => go('calendar')}>{icon('event')}<span><small>Next event</small><strong>{nextEvent ? `${nextEvent.day} ${nextEvent.month}` : 'None'}</strong></span>{icon('arrow_forward')}</button>
       </section>
 
-      <section className="student-card">
-        <SectionHeader title="Upcoming events" description="Your next academic and fee dates." action="Open calendar" onAction={() => go('calendar')} />
-        <div className="student-event-strip">
-          {events.slice(0, 3).map((event) => <article key={event.id}><div><strong>{event.day}</strong><span>{event.month}</span></div><span><b>{event.title}</b><small>{event.kind}</small></span></article>)}
-        </div>
-      </section>
+      <AcademicCalendarView viewerRole="Student" upcoming calendarPath="/student/calendar" />
     </div>
   );
 }
@@ -297,82 +294,25 @@ function feeTone(state: FeeState) {
 function FeesView() {
   const { invoices, studentProfile } = useStudentData();
   const [showQr, setShowQr] = useState(false);
-  const [qrImage, setQrImage] = useState('');
-  const [qrError, setQrError] = useState('');
-  const [qrLoading, setQrLoading] = useState(false);
-  const [paymentReference, setPaymentReference] = useState('');
-  const dialogRef = useRef<HTMLElement>(null);
+  const [bill, setBill] = useState<(typeof invoices)[number] | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const current = invoices.find((invoice) => invoice.state !== 'Paid') ?? invoices[0];
   const total = current ? invoiceTotal(current) : 0;
 
-  useEffect(() => {
-    if (!showQr) return;
-    const dialog = dialogRef.current;
-    const trigger = triggerRef.current;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    dialog?.querySelector<HTMLElement>('button')?.focus();
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      trigger?.focus();
-    };
-  }, [showQr]);
-
-  const handleDialogKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
-    if (event.key === 'Escape') {
-      setShowQr(false);
-      return;
-    }
-    if (event.key !== 'Tab') return;
-    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>('button, [href], [tabindex]:not([tabindex="-1"])');
-    if (!focusable?.length) return;
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  };
-
-  const openQr = async () => {
-    if (!current?.qrAvailable) return;
-    setShowQr(true);
-    setQrLoading(true);
-    setQrError('');
-    setQrImage('');
-    try {
-      const payload = await loadNepalPayPayload(current.id);
-      setPaymentReference(payload.invoiceId);
-      setQrImage(await QRCode.toDataURL(payload.qrString, {
-        width: 360,
-        margin: 2,
-        errorCorrectionLevel: 'M',
-        color: { dark: '#002D72', light: '#FFFFFF' },
-      }));
-    } catch (error) {
-      setQrError(errorMessage(error));
-    } finally {
-      setQrLoading(false);
-    }
-  };
-
   if (!current) return <div className="student-view"><section className="student-card"><EmptyState title="No invoices issued" message="Your billing cycles will appear here when the institution issues them." iconName="payments" /></section></div>;
   return (
     <div className="student-view">
-      <section className="student-fee-hero"><div><StatusPill label={studentProfile.blocked ? 'Blocked' : current.state} iconName={studentProfile.blocked ? 'lock' : 'payments'} tone={studentProfile.blocked ? 'gold' : feeTone(current.state)} /><span>Current outstanding</span><strong>{money(total)}</strong><p>{current.cycle} · Due {current.dueDate}</p></div><button ref={triggerRef} type="button" disabled={!current.qrAvailable || qrLoading} aria-busy={qrLoading} onClick={() => void openQr()}>{icon('qr_code_2')}{qrLoading ? 'Generating QR…' : current.qrAvailable ? 'Show Nepal Pay QR' : 'Already paid'}</button></section>
+      <section className="student-fee-hero"><div><StatusPill label={studentProfile.blocked ? 'Blocked' : current.state} iconName={studentProfile.blocked ? 'lock' : 'payments'} tone={studentProfile.blocked ? 'gold' : feeTone(current.state)} /><span>{current.state === 'Paid' ? 'Latest payment' : 'Current outstanding'}</span><strong>{money(total)}</strong><p>{current.invoiceType === 'ADMISSION' ? 'One-time admission fee' : current.cycle}{current.state === 'Paid' && current.paymentDate ? ` · Paid ${toDualDateLabel(current.paymentDate)}` : ` · Due ${toDualDateLabel(current.dueDate)}`}</p></div><button ref={triggerRef} type="button" onClick={() => current.state === 'Paid' ? setBill(current) : setShowQr(true)}>{icon(current.state === 'Paid' ? 'receipt_long' : 'payments')}{current.state === 'Paid' ? 'View paid bill' : 'Pay now'}</button></section>
       <section className="student-card">
         <SectionHeader title="Payment calendar" description="Status uses text and icons as well as colour." />
-        <div className="student-payment-calendar">{invoices.map((invoice) => <article key={invoice.id} className={`is-${feeTone(invoice.state)}`}><div><strong>{invoice.cycle}</strong><span>Due {invoice.dueDate}</span></div><StatusPill label={invoice.state} iconName={invoice.state === 'Paid' ? 'check_circle' : invoice.state === 'Overdue' ? 'error' : 'schedule'} tone={feeTone(invoice.state)} /><b>{money(invoiceTotal(invoice))}</b></article>)}</div>
+        <div className="student-payment-calendar">{invoices.map((invoice) => <article key={invoice.id} className={`is-${feeTone(invoice.state)}`}><div><strong>{invoice.invoiceType === 'ADMISSION' ? 'Admission fee' : invoice.cycle}</strong><span>{invoice.state === 'Paid' && invoice.paymentDate ? `Paid ${toDualDateLabel(invoice.paymentDate)}` : `Due ${toDualDateLabel(invoice.dueDate)}`}</span></div><StatusPill label={invoice.state} iconName={invoice.state === 'Paid' ? 'check_circle' : invoice.state === 'Overdue' ? 'error' : 'schedule'} tone={feeTone(invoice.state)} /><b>{money(invoiceTotal(invoice))}</b><button type="button" className="student-text-button" onClick={() => setBill(invoice)}>{icon('receipt_long')}View bill</button></article>)}</div>
       </section>
       <div className="student-fees-layout">
         <section className="student-card"><SectionHeader title={`${current.cycle} invoice`} description="Current billing-cycle breakdown." /><div className="student-invoice-lines">{current.lines.map((line) => <div key={line.label}><span>{line.label}</span><strong className={line.amount < 0 ? 'is-discount' : ''}>{line.amount < 0 ? '−' : ''}{money(line.amount)}</strong></div>)}<div className="student-invoice-total"><span>Net payable</span><strong>{money(total)}</strong></div></div></section>
-        <aside className="student-card student-payment-help">{icon('verified_user')}<h3>Before you pay</h3><p>Confirm the merchant name, invoice reference, and exact amount in your payment app.</p><dl><div><dt>Invoice reference</dt><dd>{current.paymentReference ?? current.id}</dd></div><div><dt>Amount</dt><dd>{money(total)}</dd></div></dl></aside>
+        <aside className="student-card student-payment-help">{icon('verified_user')}<h3>Before you pay</h3><p>Confirm the merchant name, invoice reference, and exact amount in your payment app.</p><dl><div><dt>Invoice reference</dt><dd>{current.paymentReference ?? current.id}</dd></div><div><dt>Due date</dt><dd>{toDualDateLabel(current.dueDate)}</dd></div><div><dt>Amount</dt><dd>{money(total)}</dd></div></dl></aside>
       </div>
-      {showQr ? <div className="student-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowQr(false); }}><section ref={dialogRef} tabIndex={-1} onKeyDown={handleDialogKeyDown} role="dialog" aria-modal="true" aria-labelledby="qr-title" aria-describedby="qr-description" className="student-modal"><button type="button" className="student-modal__close" aria-label="Close Nepal Pay QR" onClick={() => setShowQr(false)}>{icon('close')}</button><span className="student-eyebrow">NEPAL PAY</span><h2 id="qr-title">Scan to pay {money(total)}</h2><p>{current.cycle} · {paymentReference || current.id}</p>{qrLoading ? <div className="student-qr student-qr--loading" aria-label="Generating Nepal Pay QR" aria-busy="true" /> : qrError ? <div className="student-qr-error" role="alert">{icon('error')}<span>{qrError}</span><button type="button" onClick={() => void openQr()}>Try again</button></div> : qrImage ? <div className="student-qr"><img src={qrImage} width="360" height="360" alt={`Nepal Pay QR for invoice ${current.id}, amount ${money(total)}`} /></div> : null}<small id="qr-description">This QR is generated from the invoice’s live Nepal Pay payload. Verify the amount before confirming.</small><button type="button" className="student-primary-button" onClick={() => setShowQr(false)}>Done</button></section></div> : null}
+      {showQr ? <PaymentCheckoutDialog invoiceId={current.id} payerName={studentProfile.name} description={`${current.cycle} · ${current.paymentReference ?? current.id}`} amount={total} loadDynamicQr={() => loadNepalPayPayload(current.id)} onClose={() => setShowQr(false)} /> : null}
+      {bill ? <InvoiceDocumentDialog data={bill.document} onClose={() => setBill(null)} onPay={bill.state === 'Paid' ? undefined : () => { setBill(null); setShowQr(true); }} /> : null}
     </div>
   );
 }
@@ -404,45 +344,12 @@ function CertificatesView() {
     <div className="student-view">
       {message ? <div className="student-success-note" role="status">{icon('download_done')}<span>{message}</span><button type="button" aria-label="Dismiss download message" onClick={() => setMessage('')}>{icon('close')}</button></div> : null}
       <div className="student-live-note">{icon('verified')}<span><strong>Certificates remain available.</strong> Issued documents do not expire from your history.</span></div>
-      <section className="student-card"><SectionHeader title="Certificate history" description={`${certificates.length} issued documents`} />{certificates.length ? <div className="student-certificate-list">{certificates.map((certificate) => <article key={certificate.id}><span className="student-icon-box student-icon-box--info">{icon('workspace_premium')}</span><div><h3>{certificate.title}</h3><p>{certificate.course} · Issued {certificate.issuedDate}</p><small>{certificate.id}</small></div>{certificate.pdfUrl ? <a className="student-download-link" href={studentFileUrl(certificate.pdfUrl)} onClick={() => setMessage(`${certificate.fileName} download started.`)}>{icon('download')}Download PDF</a> : <button type="button" disabled>{icon('download')}PDF unavailable</button>}</article>)}</div> : <EmptyState title="No certificates issued" message="Certificates will remain here after they are issued." iconName="workspace_premium" />}</section>
+      <section className="student-card"><SectionHeader title="Certificate history" description={`${certificates.length} issued documents`} />{certificates.length ? <div className="student-certificate-list">{certificates.map((certificate) => <article key={certificate.id}><span className="student-icon-box student-icon-box--info">{icon('workspace_premium')}</span><div><h3>{certificate.title}</h3><p>{certificate.course} · Issued {certificate.issuedDate}</p><small>{certificate.id}</small></div><span className="student-certificate-actions">{certificate.htmlUrl ? <a className="student-download-link" href={studentFileUrl(certificate.htmlUrl)} target="_blank" rel="noreferrer">{icon('code')}View HTML</a> : null}{certificate.pdfUrl ? <a className="student-download-link" href={studentFileUrl(certificate.pdfUrl)} onClick={() => setMessage(`${certificate.fileName} download started.`)}>{icon('download')}Download PDF</a> : <button type="button" disabled>{icon('download')}PDF unavailable</button>}</span></article>)}</div> : <EmptyState title="No certificates issued" message="Certificates will remain here after they are issued." iconName="workspace_premium" />}</section>
     </div>
   );
 }
 
-function eventTone(kind: EventKind) {
-  return kind === 'Holiday' ? 'success' : kind === 'Exam' ? 'error' : kind === 'Fee due' ? 'warning' : 'info';
-}
-
-function CalendarView() {
-  const { events } = useStudentData();
-  const today = useMemo(() => { const date = new Date(); date.setHours(0, 0, 0, 0); return date; }, []);
-  const parseEventDate = (value: string) => { const date = new Date(value); date.setHours(0, 0, 0, 0); return date; };
-  const upcoming = useMemo(() => events.map((event) => ({ ...event, parsedDate: parseEventDate(event.date) })).filter((event) => !Number.isNaN(event.parsedDate.getTime()) && event.parsedDate >= today).sort((a, b) => a.parsedDate.getTime() - b.parsedDate.getTime()), [events, today]);
-  const [visibleMonth, setVisibleMonth] = useState(() => { const first = upcoming[0]?.parsedDate ?? today; return new Date(first.getFullYear(), first.getMonth(), 1); });
-  const [selectedDate, setSelectedDate] = useState(() => (upcoming[0]?.parsedDate ?? today).toDateString());
-  const monthCells = useMemo(() => {
-    const firstWeekday = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), 1).getDay();
-    return Array.from({ length: 42 }, (_, index) => new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), index - firstWeekday + 1));
-  }, [visibleMonth]);
-  const eventsForDay = (date: Date) => upcoming.filter((event) => event.parsedDate.toDateString() === date.toDateString());
-  const selectedEvents = upcoming.filter((event) => event.parsedDate.toDateString() === selectedDate);
-  const moveMonth = (amount: number) => setVisibleMonth((month) => new Date(month.getFullYear(), month.getMonth() + amount, 1));
-  return (
-    <div className="student-view">
-      <div className="student-calendar-legend">{(['Holiday', 'Exam', 'Ceremony', 'Fee due'] as EventKind[]).map((kind) => <StatusPill key={kind} label={kind} iconName={kind === 'Holiday' ? 'celebration' : kind === 'Exam' ? 'edit_note' : kind === 'Ceremony' ? 'emoji_events' : 'payments'} tone={eventTone(kind)} />)}</div>
-      <div className="student-calendar-layout">
-        <section className="student-card student-digital-calendar" aria-label="Academic month calendar">
-          <header><div><span className="student-eyebrow">ACADEMIC YEAR</span><h2>{visibleMonth.toLocaleDateString('en', { month: 'long', year: 'numeric' })}</h2></div><div><button type="button" aria-label="Previous month" onClick={() => moveMonth(-1)}>{icon('chevron_left')}</button><button type="button" onClick={() => setVisibleMonth(new Date(today.getFullYear(), today.getMonth(), 1))}>Today</button><button type="button" aria-label="Next month" onClick={() => moveMonth(1)}>{icon('chevron_right')}</button></div></header>
-          <div className="student-calendar-weekdays" aria-hidden="true">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => <span key={day}>{day}</span>)}</div>
-          <div className="student-calendar-grid">{monthCells.map((date) => { const dayEvents = eventsForDay(date); const isOutside = date.getMonth() !== visibleMonth.getMonth(); const isToday = date.toDateString() === today.toDateString(); const isSelected = date.toDateString() === selectedDate; return <button type="button" key={date.toISOString()} className={`${isOutside ? 'is-outside' : ''} ${isToday ? 'is-today' : ''} ${isSelected ? 'is-selected' : ''}`} aria-pressed={isSelected} aria-label={`${date.toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric' })}${dayEvents.length ? `, ${dayEvents.length} event${dayEvents.length === 1 ? '' : 's'}` : ''}`} onClick={() => { setSelectedDate(date.toDateString()); if (isOutside) setVisibleMonth(new Date(date.getFullYear(), date.getMonth(), 1)); }}><span>{date.getDate()}</span><i>{dayEvents.slice(0, 3).map((event) => <b key={event.id} className={`is-${eventTone(event.kind)}`} title={event.title} />)}</i></button>; })}</div>
-          <div className="student-selected-events"><h3>{new Date(selectedDate).toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric' })}</h3>{selectedEvents.length ? selectedEvents.map((event) => <article key={event.id}><StatusPill label={event.kind} iconName="event" tone={eventTone(event.kind)} /><div><strong>{event.title}</strong><p>{event.details}</p></div></article>) : <p>No events scheduled for this date.</p>}</div>
-        </section>
-        <aside className="student-card student-upcoming-panel"><SectionHeader title="Upcoming events" description={`${upcoming.length} published date${upcoming.length === 1 ? '' : 's'} ahead`} />{upcoming.length ? <div className="student-calendar-list">{upcoming.map((event) => <button type="button" key={event.id} onClick={() => { setVisibleMonth(new Date(event.parsedDate.getFullYear(), event.parsedDate.getMonth(), 1)); setSelectedDate(event.parsedDate.toDateString()); }}><div className={`student-date-block is-${eventTone(event.kind)}`}><strong>{event.day}</strong><span>{event.month}</span></div><div><StatusPill label={event.kind} iconName="event" tone={eventTone(event.kind)} /><h3>{event.title}</h3><p>{event.details}</p></div>{icon('chevron_right')}</button>)}</div> : <EmptyState title="No upcoming events" message="Published academic and fee dates will appear here." iconName="date_range" />}</aside>
-      </div>
-    </div>
-  );
-}
-
+function CalendarView() { return <AcademicCalendarView viewerRole="Student" />; }
 function NotificationsView({ go, readIds, markAllRead, markRead }: { go: (view: StudentView) => void; readIds: Set<string>; markAllRead: () => void; markRead: (id: string) => void }) {
   const { notifications } = useStudentData();
   return (
@@ -495,7 +402,7 @@ export function StudentPortal() {
   }, [location.pathname, reloadKey]);
 
   useEffect(() => {
-    if (view !== 'syllabus') return;
+    if (view !== 'syllabus' && view !== 'results') return;
     const interval = window.setInterval(() => setReloadKey((value) => value + 1), 10_000);
     const refreshOnFocus = () => { if (document.visibilityState === 'visible') setReloadKey((value) => value + 1); };
     document.addEventListener('visibilitychange', refreshOnFocus);

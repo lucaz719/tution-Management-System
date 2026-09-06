@@ -5,6 +5,8 @@ import { useToast } from './ui/Toast';
 import { StudentAnalytics } from './StudentAnalytics';
 import { api } from '../services/api';
 import { toBsLabel } from '../utils/nepaliDate';
+import { InvoiceDocumentDialog, type InvoiceDocumentData } from './InvoiceDocument';
+import { StudentProfileDrawerContent } from './StudentProfileDrawerContent';
 
 interface UserProfileDrawerProps {
   userId: string;
@@ -12,24 +14,30 @@ interface UserProfileDrawerProps {
   onChanged?: () => void;
 }
 
-interface Profile {
+export interface Profile {
   id: string;
   name: string;
   email: string;
   phone: string;
   status: string;
   createdAt: string;
+  institutionName: string;
   roles: Array<{ role: string; branchName: string | null }>;
   detail: {
     student?: {
+      admissionNumber: string | null;
       admissionDate: string;
+      admissionRecord: Record<string, any> | null;
       emergencyContact: string;
       studentId: string;
       grade: string | null;
       gradeTuition: number;
       monthlyFee: number;
-      enrollments: Array<{ id: string; courseName: string; className: string; status: string; extraFee?: number; billingHistory?: { paid: number; due: number } }>;
-      fees: { totalBilled: number; totalPaid: number; totalDue: number; overdueCount: number; invoices: Array<{ id: string; netPayable: number; status: string; dueDate: string }> };
+      guardians: Array<{ userId: string; name: string; email: string; phone: string; status: string }>;
+      enrollments: Array<{ id: string; courseName: string; className: string; status: string; accessStatus: string; validFrom: string | null; validUntil: string | null; category: 'ACADEMIC' | 'ACTIVITY'; fee: number; billingHistory?: { paid: number; due: number } }>;
+      billing: { billingMode: 'GRADE' | 'SUBJECT' | null; setupStatus: 'READY' | 'INCOMPLETE'; blockers: string[]; recurringTotal: number; lines: Array<{ type: 'GRADE' | 'SUBJECT' | 'ACTIVITY'; sourceId: string; enrollmentId?: string; label: string; className?: string; amount: number; status: string }> };
+      enrollmentAccess: { status: 'PENDING' | 'ACTIVE' | 'EXPIRED'; validFrom: string | null; validUntil: string | null };
+      fees: { totalBilled: number; totalPaid: number; totalDue: number; overdueCount: number; invoices: Array<{ id: string; invoiceType: 'ADMISSION' | 'TUITION' | 'SUBJECT' | 'ACTIVITY'; amount: number; discount: number; fine: number; panNumberSnapshot: string; vatRateSnapshot: number; lineItems: Array<{ label: string; amount: number }>; transactionId: string | null; createdAt: string; netPayable: number; status: string; dueDate: string; paymentDate: string | null; billingCycleStart: string; billingCycleEnd: string; branchName: string }> };
       futureBilling?: { projectedAnnualFee: number; nextInvoiceDate: string };
       attendance: Record<string, number>;
     };
@@ -44,12 +52,16 @@ interface Profile {
       payroll?: { totalPaid: number; lastMonthPaid: number; nextMonthProjected: number; extraClassesPayroll?: number; history: Array<{ month: string; amount: number; status: string }> };
       timetable?: Array<{ id: string; day: string; time: string; subject: string; room: string }>;
     };
-    staff?: { designation: string; contractType: string; joiningDate: string; performanceScore?: number; hrAlerts?: Array<{ type: string; message: string; severity: 'warning' | 'error' | 'info' }> };
+    staff?: { designation: string; contractType: 'FIXED' | 'HOUR_RATE'; joiningDate: string; salaryStructure: { baseMonthlySalary?: number; hourlyRate?: number }; performanceScore?: number; hrAlerts?: Array<{ type: string; message: string; severity: 'warning' | 'error' | 'info' }> };
   };
 }
 
 function initials(name: string): string {
   return name.split(' ').filter(Boolean).map((p) => p[0]?.toUpperCase()).join('').slice(0, 2) || '??';
+}
+
+function hasStudentDetail(profile: Profile): boolean {
+  return Boolean(profile.detail.student);
 }
 
 function money(n: number): string {
@@ -78,7 +90,7 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [grades, setGrades] = useState<Array<{ id: string; name: string }>>([]);
-  const [form, setForm] = useState({ firstName: '', lastName: '', phone: '', gradeName: '' });
+  const [form, setForm] = useState({ firstName: '', lastName: '', phone: '', gradeName: '', contractType: 'FIXED' as 'FIXED' | 'HOUR_RATE', compensationAmount: '' });
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [activities, setActivities] = useState<Array<{ id: string; name: string; classes: Array<{ id: string; name: string }> }>>([]);
@@ -86,6 +98,7 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
   const [enrollClass, setEnrollClass] = useState('');
   const [resetModalOpen, setResetModalOpen] = useState(false);
   const [tempPassword, setTempPassword] = useState('');
+  const [selectedInvoice, setSelectedInvoice] = useState<InvoiceDocumentData | null>(null);
 
   const openEnroll = async () => {
     setEnrollOpen(true);
@@ -119,6 +132,7 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
 
   const reload = () => {
     setIsLoading(true);
+    setErrorMsg('');
     api.people.getProfile(userId)
       .then((data) => setProfile(data as Profile))
       .catch((error: unknown) => setErrorMsg(error instanceof Error ? error.message : 'Failed to load profile.'))
@@ -129,6 +143,7 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
     let active = true;
     setIsLoading(true);
     setErrorMsg('');
+    setProfile(null);
     api.people.getProfile(userId)
       .then((data) => { if (active) setProfile(data as Profile); })
       .catch((error: unknown) => { if (active) setErrorMsg(error instanceof Error ? error.message : 'Failed to load profile.'); })
@@ -136,10 +151,24 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
     return () => { active = false; };
   }, [userId]);
 
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) onClose(); };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [busy, onClose]);
+
   const startEdit = () => {
     if (!profile) return;
     const [firstName, ...rest] = profile.name.split(' ');
-    setForm({ firstName, lastName: rest.join(' '), phone: profile.phone, gradeName: profile.detail.student?.grade ?? '' });
+    const staff = profile.detail.staff;
+    setForm({
+      firstName,
+      lastName: rest.join(' '),
+      phone: profile.phone,
+      gradeName: profile.detail.student?.grade ?? '',
+      contractType: staff?.contractType ?? 'FIXED',
+      compensationAmount: String(staff?.contractType === 'HOUR_RATE' ? staff.salaryStructure.hourlyRate ?? '' : staff?.salaryStructure.baseMonthlySalary ?? ''),
+    });
     if (isStudent && grades.length === 0) api.grades.list().then((g) => setGrades(g as Array<{ id: string; name: string }>)).catch(() => {});
     setEditing(true);
   };
@@ -147,12 +176,23 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
   const saveEdit = async () => {
     setBusy(true);
     try {
-      const changes: { firstName: string; lastName: string; phone: string; gradeId?: string | null } = {
+      const changes: { firstName: string; lastName: string; phone: string; gradeId?: string | null; contractType?: 'FIXED' | 'HOUR_RATE'; baseMonthlySalary?: number; hourlyRate?: number } = {
         firstName: form.firstName.trim(), lastName: form.lastName.trim(), phone: form.phone.trim(),
       };
       if (isStudent) {
         const g = grades.find((x) => x.name === form.gradeName);
         changes.gradeId = form.gradeName ? (g?.id ?? null) : null;
+      }
+      if (profile?.detail.staff) {
+        const amount = Number(form.compensationAmount);
+        if (!Number.isFinite(amount) || amount <= 0) {
+          showToast(form.contractType === 'FIXED' ? 'Enter a base monthly salary greater than zero.' : 'Enter an hourly rate greater than zero.', 'error');
+          setBusy(false);
+          return;
+        }
+        changes.contractType = form.contractType;
+        if (form.contractType === 'FIXED') changes.baseMonthlySalary = amount;
+        else changes.hourlyRate = amount;
       }
       const result = await api.people.update(userId, changes);
       if (result.droppedEnrollments && result.droppedEnrollments > 0) {
@@ -168,10 +208,10 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
     } finally { setBusy(false); }
   };
 
-  const toggleActive = async () => {
+  const toggleActive = async (confirmationHandled = false) => {
     if (!profile) return;
     const reactivate = profile.status !== 'ACTIVE';
-    if (!reactivate && !window.confirm(`Deactivate ${profile.name}? They lose access and active enrolments are dropped.`)) return;
+    if (!reactivate && !confirmationHandled && !window.confirm(`Deactivate ${profile.name}? They lose access and active enrolments are dropped.`)) return;
     setBusy(true);
     try {
       if (reactivate) await api.people.update(userId, { status: 'ACTIVE' });
@@ -184,9 +224,9 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
     } finally { setBusy(false); }
   };
 
-  const handleResetPassword = async () => {
+  const handleResetPassword = async (confirmationHandled = false) => {
     if (!profile) return;
-    if (!window.confirm(`Are you sure you want to reset the password for ${profile.name}?`)) return;
+    if (!confirmationHandled && !window.confirm(`Are you sure you want to reset the password for ${profile.name}?`)) return;
     setBusy(true);
     try {
       const response = await api.people.resetPassword(userId);
@@ -212,15 +252,15 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
 
   return (
     <>
-      <div className="people-drawer-overlay" onClick={onClose} />
-      <aside className="people-drawer" role="dialog" aria-modal="true" style={{ width: '460px' }}>
+      <button type="button" className="people-drawer-overlay" onClick={onClose} aria-label="Close student profile" />
+      <aside className="people-drawer" role="dialog" aria-modal="true" aria-labelledby="profile-drawer-title" style={{ width: '520px' }}>
         <div className="people-drawer-head">
           <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
             <div className="people-avatar" style={{ width: '46px', height: '46px', fontSize: '15px' }}>
               {profile ? initials(profile.name) : '…'}
             </div>
             <div>
-              <h2 style={{ fontSize: '18px' }}>{profile?.name ?? 'Loading…'}</h2>
+              <h2 id="profile-drawer-title" style={{ fontSize: '18px' }}>{profile?.name ?? 'Loading…'}</h2>
               <p style={{ marginTop: '2px' }}>{profile?.email}</p>
             </div>
           </div>
@@ -230,10 +270,32 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
         </div>
 
         <div className="people-drawer-body">
-          {errorMsg ? <StatusBadge variant="error">{errorMsg}</StatusBadge> : null}
           {isLoading ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '14px', textAlign: 'center', padding: '30px 0' }}>Loading profile…</p>
+            <div className="student-profile-skeleton" aria-label="Loading student profile" aria-busy="true"><i /><i /><i /><i /></div>
+          ) : errorMsg ? (
+            <div className="student-profile-load-error" role="alert"><span className="material-symbols-outlined" aria-hidden="true">cloud_off</span><strong>Couldn’t load this profile</strong><p>{errorMsg}</p><Button variant="outline" onClick={reload}>Try again</Button></div>
           ) : profile ? (
+            hasStudentDetail(profile) ? (
+              <StudentProfileDrawerContent
+                profile={profile}
+                student={profile.detail.student!}
+                busy={busy}
+                editing={editing}
+                grades={grades}
+                form={form}
+                setForm={setForm}
+                onStartEdit={startEdit}
+                onCancelEdit={() => setEditing(false)}
+                onSaveEdit={saveEdit}
+                onAnalytics={() => setShowAnalytics(true)}
+                onResetPassword={() => handleResetPassword(true)}
+                onToggleActive={() => toggleActive(true)}
+                onViewInvoice={setSelectedInvoice}
+                onRefresh={reload}
+                onChanged={onChanged}
+                showToast={showToast}
+              />
+            ) : (
             <>
               {/* Identity */}
               <div>
@@ -252,6 +314,18 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                       <input value={form.lastName} onChange={(e) => setForm((f) => ({ ...f, lastName: e.target.value }))} placeholder="Last name" style={editInput} />
                     </div>
                     <input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="Phone" style={editInput} />
+                    {profile.detail.staff ? (
+                      <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: 8 }}>
+                        <legend style={{ fontSize: 12, fontWeight: 700 }}>Compensation</legend>
+                        <label htmlFor="profile-contract-type" style={{ fontSize: 12, color: 'var(--text-muted)' }}>Contract type</label>
+                        <select id="profile-contract-type" value={form.contractType} onChange={(e) => setForm((f) => ({ ...f, contractType: e.target.value as 'FIXED' | 'HOUR_RATE', compensationAmount: '' }))} style={editInput}>
+                          <option value="FIXED">Fixed monthly salary</option>
+                          <option value="HOUR_RATE">Hourly, from confirmed session minutes</option>
+                        </select>
+                        <label htmlFor="profile-compensation-amount" style={{ fontSize: 12, color: 'var(--text-muted)' }}>{form.contractType === 'FIXED' ? 'Base monthly salary (NPR)' : 'Hourly rate (NPR)'}</label>
+                        <input id="profile-compensation-amount" type="text" inputMode="decimal" pattern="[0-9]+(?:\.[0-9]{1,2})?" value={form.compensationAmount} onChange={(e) => setForm((f) => ({ ...f, compensationAmount: e.target.value }))} placeholder={form.contractType === 'FIXED' ? '32000' : '500'} style={editInput} required />
+                      </fieldset>
+                    ) : null}
                     {isStudent ? (
                       <select value={form.gradeName} onChange={(e) => setForm((f) => ({ ...f, gradeName: e.target.value }))} style={editInput}>
                         <option value="">No grade</option>
@@ -271,6 +345,7 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                       <>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Designation</span><span>{profile.detail.staff.designation}</span></div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>Contract</span><span>{profile.detail.staff.contractType}</span></div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-muted)' }}>{profile.detail.staff.contractType === 'FIXED' ? 'Base monthly salary' : 'Hourly rate'}</span><span>{profile.detail.staff.contractType === 'FIXED' && profile.detail.staff.salaryStructure.baseMonthlySalary ? money(profile.detail.staff.salaryStructure.baseMonthlySalary) : profile.detail.staff.contractType === 'HOUR_RATE' && profile.detail.staff.salaryStructure.hourlyRate ? `${money(profile.detail.staff.salaryStructure.hourlyRate)}/hour` : 'Setup incomplete'}</span></div>
                         {profile.detail.staff.performanceScore !== undefined && (
                           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                             <span style={{ color: 'var(--text-muted)' }}>Performance Score</span>
@@ -342,31 +417,77 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
               {/* Student → fees + enrollments + attendance */}
               {profile.detail.student ? (
                 <>
+                  <details className="student-profile-disclosure">
+                    <summary><span><strong>Admission record</strong><small>{profile.detail.student.admissionNumber ?? 'No admission number'} · {new Date(profile.detail.student.admissionDate).toLocaleDateString('en-NP')}</small></span><span className="material-symbols-outlined" aria-hidden="true">expand_more</span></summary>
+                    {profile.detail.student.admissionRecord ? (() => {
+                      const record = profile.detail.student!.admissionRecord!;
+                      const values: Array<[string, unknown]> = [
+                        ['Admission number', profile.detail.student!.admissionNumber],
+                        ['Admission date and time', new Date(profile.detail.student!.admissionDate).toLocaleString('en-NP')],
+                        ['Date of birth', record.dateOfBirth], ['Gender', record.gender], ['Blood group', record.bloodGroup],
+                        ['Nationality', record.nationality], ['School', record.school], ['Permanent address', record.permanentAddress],
+                        ['Temporary address', record.temporaryAddress], ['Medical/accessibility notes', record.medicalNotes],
+                        ['Father', record.fatherName], ["Father's phone", record.fatherPhone], ["Father's email", record.fatherEmail], ["Father's occupation", record.fatherOccupation],
+                        ['Mother', record.motherName], ["Mother's phone", record.motherPhone], ["Mother's email", record.motherEmail], ["Mother's occupation", record.motherOccupation],
+                        ['Optional parent / guardian', record.optionalParentName], ['Relationship', record.optionalParentRelationship], ['Optional parent phone', record.optionalParentPhone], ['Optional parent email', record.optionalParentEmail], ['Optional parent occupation', record.optionalParentOccupation],
+                        ['Primary parent account', record.primaryParent], ['Emergency contact', record.emergencyContactName], ['Emergency phone', record.emergencyContactPhone], ['Emergency relationship', record.emergencyContactRelationship],
+                        ['Admitted by', record.admittedBy?.name],
+                      ];
+                      return <dl style={{ ...rowCard, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px 16px', margin: 0 }}>{values.filter(([, value]) => value).map(([label, value]) => <div key={label}><dt style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</dt><dd style={{ margin: '4px 0 0', fontSize: 13.5, overflowWrap: 'anywhere' }}>{String(value)}</dd></div>)}</dl>;
+                    })() : <div style={rowCard}><p style={{ color: 'var(--text-muted)', fontSize: 13 }}>No detailed admission record was saved for this student.</p></div>}
+                  </details>
+                  <div>
+                    <div style={sectionTitle}>Parents and guardians</div>
+                    <div className="student-guardian-list">
+                      {profile.detail.student.guardians.map((guardian) => (
+                        <div key={guardian.userId}>
+                          <span><strong>{guardian.name}</strong><small>{guardian.email}</small><small>{guardian.phone || 'No phone recorded'}</small></span>
+                          <StatusBadge variant={guardian.status === 'ACTIVE' ? 'success' : 'warning'}>{guardian.status}</StatusBadge>
+                        </div>
+                      ))}
+                      {!profile.detail.student.guardians.length ? <p>No parent or guardian account is linked.</p> : null}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={sectionTitle}>Academic placement</div>
+                    <div className="student-academic-list">
+                      {profile.detail.student.enrollments.filter((enrollment) => enrollment.category === 'ACADEMIC').map((enrollment) => (
+                        <div key={enrollment.id}><span><strong>{enrollment.courseName}</strong><small>{enrollment.className}{enrollment.validUntil ? ` · Valid until ${toBsLabel(enrollment.validUntil)} BS` : ''}</small></span><span><StatusBadge variant={enrollment.accessStatus === 'ACTIVE' ? 'success' : 'warning'}>{enrollment.accessStatus}</StatusBadge>{profile.detail.student!.billing.billingMode === 'SUBJECT' ? <b>{money(enrollment.fee)}/mo</b> : <b>Included</b>}</span></div>
+                      ))}
+                      {!profile.detail.student.enrollments.some((enrollment) => enrollment.category === 'ACADEMIC') ? <p>No academic class placement has been configured.</p> : null}
+                    </div>
+                  </div>
                   <div>
                     <div style={sectionTitle}>Fees</div>
-                    <div style={{ ...rowCard, marginBottom: '10px' }}>
+                    {(() => {
+                      const admissionInvoice = profile.detail.student!.fees.invoices.find((invoice) => invoice.invoiceType === 'ADMISSION');
+                      const access = profile.detail.student!.enrollmentAccess;
+                      return <div className="student-admission-payment">
+                        <div><span className="material-symbols-outlined" aria-hidden="true">verified_user</span><span><strong>Admission payment</strong><small>One-time fee · separate from monthly tuition</small></span></div>
+                        <div className="student-admission-payment__amount"><strong>{admissionInvoice ? money(admissionInvoice.netPayable) : 'Not invoiced'}</strong><StatusBadge variant={admissionInvoice?.status === 'PAID' ? 'success' : 'warning'}>{admissionInvoice?.status ?? 'PENDING'}</StatusBadge></div>
+                        <dl>
+                          <div><dt>Paid on</dt><dd>{admissionInvoice?.paymentDate ? `${toBsLabel(admissionInvoice.paymentDate)} BS` : 'Awaiting payment'}</dd></div>
+                          <div><dt>Academic enrolment</dt><dd>{access.status === 'ACTIVE' ? 'Valid for one year' : access.status === 'EXPIRED' ? 'Expired' : 'Starts after payment'}</dd></div>
+                          <div><dt>Valid from</dt><dd>{access.validFrom ? `${toBsLabel(access.validFrom)} BS` : '—'}</dd></div>
+                          <div><dt>Valid until</dt><dd>{access.validUntil ? `${toBsLabel(access.validUntil)} BS` : '—'}</dd></div>
+                        </dl>
+                      </div>;
+                    })()}
+                    <div className={`student-billing-card${profile.detail.student.billing.setupStatus === 'INCOMPLETE' ? ' is-incomplete' : ''}`}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 600 }}>Recurring monthly fee</span>
-                        <span style={{ fontSize: '16px', fontWeight: 700, color: 'var(--color-primary)' }}>{money(profile.detail.student.monthlyFee)}/mo</span>
+                        <span><strong>Monthly billing plan</strong><small>{profile.detail.student.billing.billingMode === 'SUBJECT' ? 'Selected-subject billing' : 'Grade package billing'}</small></span>
+                        <span><strong>{profile.detail.student.billing.setupStatus === 'READY' ? `${money(profile.detail.student.monthlyFee)}/mo` : 'Setup incomplete'}</strong><StatusBadge variant={profile.detail.student.billing.setupStatus === 'READY' ? 'success' : 'warning'}>{profile.detail.student.billing.setupStatus}</StatusBadge></span>
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-muted)', marginTop: '6px' }}>
-                        <span>{profile.detail.student.grade ?? 'No grade'} tuition</span>
-                        <span>{money(profile.detail.student.gradeTuition)}</span>
-                      </div>
-                      {profile.detail.student.monthlyFee > profile.detail.student.gradeTuition ? (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-muted)', marginTop: '3px' }}>
-                          <span>Extra activities</span>
-                          <span>{money(profile.detail.student.monthlyFee - profile.detail.student.gradeTuition)}</span>
-                        </div>
-                      ) : null}
+                      {profile.detail.student.billing.blockers.map((blocker) => <p key={blocker} role="alert">{blocker}</p>)}
+                      <div className="student-billing-lines">{profile.detail.student.billing.lines.map((line) => <div key={`${line.type}-${line.sourceId}`}><span><b>{line.label}</b><small>{line.type === 'GRADE' ? 'Includes regular subjects' : line.className}</small></span><strong>{money(line.amount)}</strong></div>)}</div>
                     </div>
                     <div style={{ display: 'flex', gap: '8px' }}>
-                      <FeeStat label="Billed" value={money(profile.detail.student.fees.totalBilled)} />
-                      <FeeStat label="Paid" value={money(profile.detail.student.fees.totalPaid)} tone="paid" />
-                      <FeeStat label="Due" value={money(profile.detail.student.fees.totalDue)} tone="due" />
+                      <FeeStat label="All invoiced" value={money(profile.detail.student.fees.totalBilled)} />
+                      <FeeStat label="All paid" value={money(profile.detail.student.fees.totalPaid)} tone="paid" />
+                      <FeeStat label="Outstanding" value={money(profile.detail.student.fees.totalDue)} tone="due" />
                     </div>
 
-                    {profile.detail.student.futureBilling ? (
+                    {profile.detail.student.billing.setupStatus === 'READY' && profile.detail.student.futureBilling ? (
                       <div style={{ ...rowCard, marginTop: '10px', background: 'rgba(21, 96, 189, 0.04)' }}>
                         <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 600 }}>1-Year Future Billing Projection</div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
@@ -374,7 +495,7 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Next Invoice: {profile.detail.student.futureBilling.nextInvoiceDate}</span>
                         </div>
                       </div>
-                    ) : (
+                    ) : profile.detail.student.billing.setupStatus === 'READY' ? (
                       <div style={{ ...rowCard, marginTop: '10px', background: 'rgba(21, 96, 189, 0.04)' }}>
                         <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 600 }}>1-Year Future Billing Projection</div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
@@ -382,16 +503,16 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Calculated automatically</span>
                         </div>
                       </div>
-                    )}
+                    ) : null}
                     {profile.detail.student.fees.invoices.length > 0 ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
                         {profile.detail.student.fees.invoices.map((inv) => (
                           <div key={inv.id} style={{ ...rowCard, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <div>
-                              <div style={{ fontSize: '13.5px', fontWeight: 700 }}>{money(inv.netPayable)}</div>
-                              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Due {toBsLabel(inv.dueDate)} BS</div>
+                              <div style={{ fontSize: '13.5px', fontWeight: 700 }}>{inv.invoiceType === 'ADMISSION' ? 'One-time admission fee' : inv.invoiceType === 'SUBJECT' ? 'Monthly subject tuition' : inv.invoiceType === 'ACTIVITY' ? 'Optional activity fee' : 'Monthly grade tuition'}</div>
+                              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{money(inv.netPayable)} · {inv.status === 'PAID' && inv.paymentDate ? `Paid ${toBsLabel(inv.paymentDate)} BS` : `Due ${toBsLabel(inv.dueDate)} BS`}</div>
                             </div>
-                            <StatusBadge variant={inv.status === 'PAID' ? 'success' : inv.status === 'OVERDUE' ? 'error' : 'warning'}>{inv.status}</StatusBadge>
+                            <div className="student-invoice-actions"><StatusBadge variant={inv.status === 'PAID' ? 'success' : inv.status === 'OVERDUE' ? 'error' : 'warning'}>{inv.status}</StatusBadge><button type="button" onClick={() => setSelectedInvoice({ id: inv.id, invoiceType: inv.invoiceType, status: inv.status, institutionName: profile.institutionName, panNumber: inv.panNumberSnapshot, vatRate: inv.vatRateSnapshot, studentName: profile.name, admissionNumber: profile.detail.student!.admissionNumber, gradeName: profile.detail.student!.grade, branchName: inv.branchName, issuedAt: inv.createdAt, dueDate: inv.dueDate, paymentDate: inv.paymentDate, billingCycleStart: inv.billingCycleStart, billingCycleEnd: inv.billingCycleEnd, transactionId: inv.transactionId, lines: inv.lineItems, discount: inv.discount, fine: inv.fine, netPayable: inv.netPayable })}><span className="material-symbols-outlined" aria-hidden="true">receipt_long</span>View bill</button></div>
                           </div>
                         ))}
                       </div>
@@ -399,7 +520,7 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                   </div>
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                      <span style={sectionTitle as React.CSSProperties}>Extra activities ({profile.detail.student.enrollments.filter((e) => e.status === 'ACTIVE').length})</span>
+                      <span style={sectionTitle as React.CSSProperties}>Optional activities ({profile.detail.student.enrollments.filter((e) => e.category === 'ACTIVITY' && e.status === 'ACTIVE').length})</span>
                       {!enrollOpen ? (
                         <Button variant="outline" onClick={() => void openEnroll()} style={{ minHeight: '30px', height: '30px', padding: '4px 12px', fontSize: '12.5px' }}>
                           <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>add</span> Enroll
@@ -429,10 +550,10 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                       </div>
                     ) : null}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      {profile.detail.student.enrollments.length === 0 ? (
+                      {profile.detail.student.enrollments.filter((e) => e.category === 'ACTIVITY').length === 0 ? (
                         <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>No extra activities. Grade tuition covers all subjects.</p>
                       ) : (
-                        profile.detail.student.enrollments.map((e) => (
+                        profile.detail.student.enrollments.filter((e) => e.category === 'ACTIVITY').map((e) => (
                           <div key={e.id} style={{ ...rowCard, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
                             <div>
                               <div style={{ fontSize: '13.5px', fontWeight: 700 }}>{e.courseName}</div>
@@ -517,8 +638,8 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                   <div style={{ marginTop: '16px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                       <div style={sectionTitle as React.CSSProperties}>Timetable</div>
-                      <Button variant="outline" onClick={() => showToast('Timetable add functionality mock', 'info')} style={{ minHeight: '30px', height: '30px', padding: '4px 12px', fontSize: '12.5px' }}>
-                        <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>add</span> Add Session
+                      <Button variant="outline" onClick={() => { window.location.assign(window.location.pathname.startsWith('/branch') ? '/branch/timetable' : '/tenant/timetables'); }} style={{ minHeight: '40px', padding: '4px 12px', fontSize: '12.5px' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>calendar_month</span> Manage Timetable
                       </Button>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -529,14 +650,7 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                               <div style={{ fontSize: '13.5px', fontWeight: 700 }}>{session.subject}</div>
                               <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{session.day} · {session.time} · Room {session.room}</div>
                             </div>
-                            <div style={{ display: 'flex', gap: '4px' }}>
-                              <button type="button" onClick={() => showToast('Timetable edit mock', 'info')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-primary)', display: 'grid', placeItems: 'center', padding: '4px' }}>
-                                <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>edit</span>
-                              </button>
-                              <button type="button" onClick={() => { if(window.confirm('Delete session?')) { showToast('Session deleted (mock)', 'success') } }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-error)', display: 'grid', placeItems: 'center', padding: '4px' }}>
-                                <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>delete</span>
-                              </button>
-                            </div>
+                            <StatusBadge variant="info">Scheduled</StatusBadge>
                           </div>
                         ))
                       ) : (
@@ -547,6 +661,7 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
                 </div>
               ) : null}
             </>
+            )
           ) : null}
         </div>
       </aside>
@@ -554,6 +669,8 @@ export function UserProfileDrawer({ userId, onClose, onChanged }: UserProfileDra
       {showAnalytics ? (
         <StudentAnalytics userId={userId} fetcher={api.people.getAnalytics} onClose={() => setShowAnalytics(false)} />
       ) : null}
+
+      {selectedInvoice ? <InvoiceDocumentDialog data={selectedInvoice} onClose={() => setSelectedInvoice(null)} /> : null}
 
       {resetModalOpen && tempPassword ? (
         <div className="auth-dialog-overlay" role="dialog" aria-modal="true" style={{ zIndex: 100000 }}>

@@ -1,5 +1,7 @@
 import { Router, Response } from 'express';
 import prisma from '../utils/db';
+import { normalizeSchedule } from '../utils/schedule';
+import { generateDailyTeacherSessions } from '../services/timetable-service';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware } from '../middleware/auth';
 import { UserPayload } from '@tms/types';
@@ -15,9 +17,9 @@ function dayBounds(date = new Date()) {
 
 async function ownedClass(classId: string, teacherId: string, tenantId: string) {
   return prisma.class.findFirst({
-    where: { id: classId, teacherId, course: { tenantId } },
+    where: { id: classId, teacherId, archivedAt: null, course: { tenantId } },
     include: {
-      course: true,
+      course: { include: { grade: true } },
       branch: true,
       enrollments: {
         where: { status: { in: ACTIVE_ENROLLMENTS } },
@@ -28,15 +30,32 @@ async function ownedClass(classId: string, teacherId: string, tenantId: string) 
   });
 }
 
+async function gradeBasedRoster(klass: { branchId: string; course: { gradeId: string | null; grade: { billingMode: string } | null } }, tenantId: string) {
+  if (!klass.course.gradeId || klass.course.grade?.billingMode !== 'GRADE') return [];
+  return prisma.student.findMany({
+    where: {
+      gradeId: klass.course.gradeId,
+      user: { tenantId, status: 'ACTIVE', userRoles: { some: { branchId: klass.branchId } } },
+    },
+    include: { user: true },
+    orderBy: { user: { firstName: 'asc' } },
+  });
+}
+
 router.get('/workspace', authMiddleware, async (req: TenantRequest, res: Response) => {
   const user = req.user as UserPayload;
   const { start, end } = dayBounds();
   try {
+    await generateDailyTeacherSessions({ tenantId: req.tenantId! });
+    const assignedClassIds = await prisma.class.findMany({
+      where: { teacherId: user.id, archivedAt: null, course: { tenantId: req.tenantId! } },
+      select: { id: true },
+    }).then((rows) => rows.map((row) => row.id));
     const [classes, stamps, sessions, staff, leaves, scores, resultDefinitions] = await Promise.all([
       prisma.class.findMany({
-        where: { teacherId: user.id, course: { tenantId: req.tenantId! } },
+        where: { teacherId: user.id, archivedAt: null, course: { tenantId: req.tenantId! } },
         include: {
-          course: true, branch: true,
+          course: { include: { grade: true } }, branch: true,
           enrollments: { where: { status: { in: ACTIVE_ENROLLMENTS } }, include: { student: { include: { user: true } } } },
           sessions: { orderBy: { date: 'desc' }, take: 30, include: { studentAttendance: true } },
           syllabi: { include: { chapters: { orderBy: { position: 'asc' }, include: { topics: { orderBy: { position: 'asc' }, include: { logs: { orderBy: { logDate: 'desc' }, take: 20 } } } } }, dailyLogs: { orderBy: { logDate: 'desc' }, take: 20 } } },
@@ -48,10 +67,25 @@ router.get('/workspace', authMiddleware, async (req: TenantRequest, res: Respons
       prisma.teacherSession.findMany({ where: { teacherId: user.id, date: { gte: start, lte: end } }, include: { class: { include: { course: true, branch: true } } }, orderBy: { createdAt: 'asc' } }),
       prisma.staffRecord.findFirst({ where: { userId: user.id }, include: { performanceScore: true, payrolls: { orderBy: [{ year: 'desc' }, { month: 'desc' }] } } }),
       prisma.leave.findMany({ where: { tenantId: req.tenantId!, userId: user.id }, include: { branch: true }, orderBy: { createdAt: 'desc' } }),
-      prisma.studentScore.findMany({ where: { tenantId: req.tenantId!, recordedBy: user.id }, include: { student: { include: { user: true } } }, orderBy: { createdAt: 'desc' }, take: 100 }),
-      prisma.resultDefinition.findMany({ where: { tenantId: req.tenantId!, isOpen: true, classId: { in: await prisma.class.findMany({ where: { teacherId: user.id, course: { tenantId: req.tenantId! } }, select: { id: true } }).then((rows) => rows.map((row) => row.id)) } }, orderBy: { testDate: 'desc' } }),
+      prisma.studentScore.findMany({
+        where: {
+          tenantId: req.tenantId!,
+          OR: [
+            { recordedBy: user.id },
+            { resultDefinition: { classId: { in: assignedClassIds } } },
+          ],
+        },
+        include: { student: { include: { user: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+      }),
+      prisma.resultDefinition.findMany({
+        where: { tenantId: req.tenantId!, isOpen: true, classId: { in: assignedClassIds } },
+        orderBy: { testDate: 'desc' },
+      }),
     ]);
     const lastStamp = stamps[0] ?? null;
+    const gradeRosters = new Map(await Promise.all(classes.map(async (klass) => [klass.id, await gradeBasedRoster(klass, req.tenantId!)] as const)));
     const checkedIn = Boolean(lastStamp && ['IN', 'RE_IN'].includes(lastStamp.stampType));
     const completedSessions = classes.flatMap((item) => item.sessions).filter((item) => ['PRESENT_CONFIRMED', 'PRESENT_UPDATE_PENDING'].includes(item.status));
     const confirmedSessions = completedSessions.filter((item) => item.dailyUpdateSubmitted);
@@ -84,16 +118,21 @@ router.get('/workspace', authMiddleware, async (req: TenantRequest, res: Respons
       stamps: stamps.map((stamp) => ({ ...stamp, branchName: stamp.branch.name })),
       todayClasses: sessions.map((session) => ({
         sessionId: session.id, classId: session.classId, className: session.class.name, courseName: session.class.course.name,
-        branch: session.class.branch, schedule: session.class.schedule, status: session.status,
+        branch: session.class.branch, schedule: normalizeSchedule(session.class.schedule), status: session.status,
         dailyUpdateSubmitted: session.dailyUpdateSubmitted, checkInTime: session.checkInTime, checkOutTime: session.checkOutTime,
       })),
       pendingUpdates: classes.flatMap((item) => item.sessions.filter((session) => !session.dailyUpdateSubmitted).map((session) => ({
         sessionId: session.id, classId: item.id, className: item.name, courseName: item.course.name, date: session.date,
       }))),
       classes: classes.map((item) => ({
-        id: item.id, name: item.name, subject: item.course.name, type: item.course.type, schedule: item.schedule,
+        id: item.id, name: item.name, subject: item.course.name, type: item.course.type, schedule: normalizeSchedule(item.schedule),
         branch: { id: item.branch.id, name: item.branch.name, address: item.branch.address, radiusMeters: item.branch.radiusMeters },
-        students: item.enrollments.map((enrollment) => ({ id: enrollment.student.id, name: `${enrollment.student.user.firstName} ${enrollment.student.user.lastName}`, status: enrollment.status })),
+        students: (() => {
+          const explicit = item.enrollments.map((enrollment) => ({ id: enrollment.student.id, name: `${enrollment.student.user.firstName} ${enrollment.student.user.lastName}`, status: enrollment.status }));
+          const known = new Set(explicit.map((student) => student.id));
+          const inherited = (gradeRosters.get(item.id) ?? []).filter((student) => !known.has(student.id)).map((student) => ({ id: student.id, name: `${student.user.firstName} ${student.user.lastName}`, status: 'ACTIVE' }));
+          return [...explicit, ...inherited].sort((a, b) => a.name.localeCompare(b.name));
+        })(),
         attendance: item.sessions.flatMap((session) => session.studentAttendance),
         syllabi: item.syllabi, homework: item.homework,
       })),
@@ -273,16 +312,17 @@ router.post('/results', authMiddleware, async (req: TenantRequest, res: Response
     const definition = await prisma.resultDefinition.findFirst({ where: { id: resultDefinitionId, tenantId: req.tenantId!, classId, isOpen: true } });
     if (!definition) return res.status(404).json({ error: 'This Branch Admin-created result is unavailable for the selected class.' });
     if (definition.title !== assessment.trim() || definition.subject !== subject.trim()) return res.status(422).json({ error: 'Result title and subject must match the selected result.' });
-    const allowed = new Set(klass.enrollments.map((item) => item.studentId));
-    const numeric = marks.map((item: any) => ({ studentId: String(item.studentId), score: Number(item.score) }));
+    const inheritedRoster = await gradeBasedRoster(klass, req.tenantId!);
+    const allowed = new Set([...klass.enrollments.map((item) => item.studentId), ...inheritedRoster.map((item) => item.id)]);
+    const numeric = marks.map((item: any) => ({ studentId: String(item.studentId), score: Number(item.score), resultSheetUrl: typeof item.resultSheetUrl === 'string' ? item.resultSheetUrl : '' }));
+    if (numeric.some((item: any) => !item.resultSheetUrl)) return res.status(422).json({ error: 'Upload an individual result sheet for every student before saving.' });
     if (numeric.some((item: any) => !allowed.has(item.studentId) || item.score < 0 || item.score > max || !Number.isFinite(item.score))) return res.status(422).json({ error: 'Each mark must belong to an enrolled student and be within the full marks.' });
     const sorted = numeric.map((item: any) => item.score).sort((a: number, b: number) => a - b);
-    const created = await prisma.$transaction(numeric.map((item: any) => prisma.studentScore.create({ data: {
-      tenantId: req.tenantId!, studentId: item.studentId, recordedBy: req.user!.id, subject: subject.trim(), assessment: assessment.trim(),
-      score: item.score, maximum: max, passMarks: pass, percentile: Math.round((sorted.filter((value: number) => value <= item.score).length / sorted.length) * 10000) / 100,
-      resultSheetUrl: typeof item.resultSheetUrl === 'string' && item.resultSheetUrl ? item.resultSheetUrl : null, testDate: testDate ? new Date(testDate) : new Date(), publishedAt: null,
-    } })));
-    return res.status(201).json({ message: 'Result draft saved. Share it when ready.', resultIds: created.map((item) => item.id) });
+    const saved = await prisma.$transaction(numeric.map((item: any) => {
+      const scoreData = { recordedBy: req.user!.id, subject: subject.trim(), assessment: assessment.trim(), score: item.score, maximum: max, passMarks: pass, percentile: Math.round((sorted.filter((value: number) => value <= item.score).length / sorted.length) * 10000) / 100, resultSheetUrl: item.resultSheetUrl, testDate: testDate ? new Date(testDate) : definition.testDate, publishedAt: null };
+      return prisma.studentScore.upsert({ where: { resultDefinitionId_studentId: { resultDefinitionId: definition.id, studentId: item.studentId } }, create: { tenantId: req.tenantId!, studentId: item.studentId, resultDefinitionId: definition.id, ...scoreData }, update: scoreData });
+    }));
+    return res.status(201).json({ message: 'Result drafts saved or updated. Share them when ready.', resultIds: saved.map((item) => item.id) });
   } catch (error: any) { return res.status(500).json({ error: 'Failed to save result draft.', details: error.message }); }
 });
 
@@ -292,6 +332,13 @@ router.post('/results/share', authMiddleware, async (req: TenantRequest, res: Re
   const update = await prisma.studentScore.updateMany({ where: { id: { in: ids }, tenantId: req.tenantId!, recordedBy: req.user!.id, publishedAt: null }, data: { publishedAt: new Date() } });
   if (!update.count) return res.status(409).json({ error: 'These results were already shared or are not yours.' });
   return res.json({ message: `${update.count} student result${update.count === 1 ? '' : 's'} shared.`, sharedCount: update.count });
+});
+
+router.delete('/results/:resultId', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const score = await prisma.studentScore.findFirst({ where: { id: req.params.resultId, tenantId: req.tenantId!, recordedBy: req.user!.id, publishedAt: null, resultDefinition: { class: { teacherId: req.user!.id } } } });
+  if (!score) return res.status(404).json({ error: 'An unpublished result draft owned by you was not found.' });
+  await prisma.studentScore.delete({ where: { id: score.id } });
+  return res.status(204).send();
 });
 
 router.post('/session/:sessionId/update', authMiddleware, async (req: TenantRequest, res: Response) => {

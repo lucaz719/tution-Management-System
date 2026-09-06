@@ -8,8 +8,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-tms}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+    expose:
+      - "5432"
     volumes:
       - tms_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -43,12 +43,17 @@ services:
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL must be set}
       WEB_ORIGIN: ${WEB_ORIGIN:?WEB_ORIGIN must be set}
       PLATFORM_ADMIN_ENABLED: ${PLATFORM_ADMIN_ENABLED:-false}
+      PLATFORM_ADMIN_PRODUCTION_ACK: ${PLATFORM_ADMIN_PRODUCTION_ACK:-}
       SMS_PROVIDER: ${SMS_PROVIDER:-MOCK}
+      AAKASH_SMS_AUTH_TOKEN: ${AAKASH_SMS_AUTH_TOKEN:-}
       NEPALPAY_WEBHOOK_SECRET: ${NEPALPAY_WEBHOOK_SECRET:?NEPALPAY_WEBHOOK_SECRET must be set}
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
       SEED_ADMIN_2FA: ${SEED_ADMIN_2FA:-false}
       CONNECTIPS_ENABLED: ${CONNECTIPS_ENABLED:-false}
+      CONNECTIPS_ENVIRONMENT: ${CONNECTIPS_ENVIRONMENT:-STAGING}
+      CONNECTIPS_PUBLIC_BASE_URL: ${CONNECTIPS_PUBLIC_BASE_URL:-}
+      PAYMENT_FRONTEND_BASE_URL: ${PAYMENT_FRONTEND_BASE_URL:-}
       CONNECTIPS_MERCHANT_ID: ${CONNECTIPS_MERCHANT_ID:-}
       CONNECTIPS_APP_ID: ${CONNECTIPS_APP_ID:-}
       CONNECTIPS_APP_NAME: ${CONNECTIPS_APP_NAME:-}
@@ -57,8 +62,14 @@ services:
       CONNECTIPS_VALIDATE_PASSWORD: ${CONNECTIPS_VALIDATE_PASSWORD:-}
       CONNECTIPS_GATEWAY_URL: ${CONNECTIPS_GATEWAY_URL:-https://uat.connectips.com/connectipswebgw/loginpage}
       CONNECTIPS_VALIDATE_URL: ${CONNECTIPS_VALIDATE_URL:-https://uat.connectips.com/connectipswebws/api/creditor/validatetxn}
-    ports:
-      - "${API_PORT:-3001}:3001"
+      STATIC_PAYMENT_QR_ENABLED: ${STATIC_PAYMENT_QR_ENABLED:-false}
+      STATIC_PAYMENT_QR_IMAGE_URL: ${STATIC_PAYMENT_QR_IMAGE_URL:-}
+      STATIC_PAYMENT_ACCOUNT_NAME: ${STATIC_PAYMENT_ACCOUNT_NAME:-}
+      STATIC_PAYMENT_ACCOUNT_NUMBER: ${STATIC_PAYMENT_ACCOUNT_NUMBER:-}
+      STATIC_PAYMENT_BANK_NAME: ${STATIC_PAYMENT_BANK_NAME:-}
+      STATIC_PAYMENT_INSTRUCTIONS: ${STATIC_PAYMENT_INSTRUCTIONS:-}
+    expose:
+      - "3001"
     depends_on:
       db:
         condition: service_healthy
@@ -75,14 +86,17 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 10s
 
   web:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        TMS_API_BASE_URL: ${TMS_API_BASE_URL:?TMS_API_BASE_URL must be set}
     restart: unless-stopped
-    ports:
-      - "${WEB_PORT:-5173}:80"
+    expose:
+      - "80"
     depends_on:
       api:
         condition: service_healthy

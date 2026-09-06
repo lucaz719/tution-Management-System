@@ -22,6 +22,7 @@ export interface AuthUser {
 
 export type AuthErrorCode =
   | 'INVALID_CREDENTIALS'
+  | 'SERVICE_UNAVAILABLE'
   | 'ACCOUNT_LOCKED'
   | 'EMAIL_NOT_FOUND'
   | 'OTP_INVALID'

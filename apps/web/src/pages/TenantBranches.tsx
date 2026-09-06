@@ -13,6 +13,7 @@ interface BranchItem {
   longitude: number;
   radiusMeters: number;
   gracePeriodMinutes: number;
+  admissionFee: number;
   createdAt: string;
   staffCount: number;
   courseCount: number;
@@ -25,6 +26,7 @@ interface BranchFormState {
   longitude: string;
   radiusMeters: string;
   gracePeriodMinutes: string;
+  admissionFee: string;
 }
 
 const EMPTY_FORM: BranchFormState = {
@@ -34,6 +36,7 @@ const EMPTY_FORM: BranchFormState = {
   longitude: '',
   radiusMeters: '100',
   gracePeriodMinutes: '15',
+  admissionFee: '0',
 };
 
 const inputStyle: React.CSSProperties = {
@@ -98,6 +101,7 @@ export function TenantBranches() {
       longitude: String(branch.longitude),
       radiusMeters: String(branch.radiusMeters),
       gracePeriodMinutes: String(branch.gracePeriodMinutes),
+      admissionFee: String(branch.admissionFee),
     });
     setEditingId(branch.id);
     setShowForm(true);
@@ -128,6 +132,7 @@ export function TenantBranches() {
         longitude,
         radiusMeters: Number(form.radiusMeters) || 100,
         gracePeriodMinutes: Number(form.gracePeriodMinutes) || 15,
+        admissionFee: Math.max(0, Math.round(Number(form.admissionFee) || 0)),
       };
 
       if (editingId) {
@@ -204,6 +209,22 @@ export function TenantBranches() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <label style={labelStyle}>Attendance Grace (minutes)</label>
                 <input style={inputStyle} value={form.gracePeriodMinutes} onChange={(e) => setField('gracePeriodMinutes', e.target.value)} inputMode="numeric" />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <label htmlFor="branch-admission-fee" style={labelStyle}>Admission Fee (NPR)</label>
+                <input
+                  id="branch-admission-fee"
+                  style={inputStyle}
+                  value={form.admissionFee}
+                  onChange={(e) => setField('admissionFee', e.target.value)}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  aria-describedby="branch-admission-fee-help"
+                  required
+                />
+                <small id="branch-admission-fee-help" style={{ color: 'var(--text-muted-foreground)' }}>
+                  Student and parent logins activate only after this branch-specific amount is paid.
+                </small>
               </div>
             </div>
             <p style={{ fontSize: '12px', color: 'rgba(44, 62, 80, 0.6)' }}>
@@ -293,6 +314,10 @@ export function TenantBranches() {
                 <div style={{ background: 'var(--color-surface)', padding: '10px', borderRadius: '8px' }}>
                   <span style={{ color: 'var(--text-muted-foreground)', display: 'block', fontSize: '11px' }}>Staff & Courses</span>
                   <strong>{branch.staffCount ?? 0} Staff · {branch.courseCount ?? 0} Courses</strong>
+                </div>
+                <div style={{ background: 'var(--color-surface)', padding: '10px', borderRadius: '8px', gridColumn: '1 / -1' }}>
+                  <span style={{ color: 'var(--text-muted-foreground)', display: 'block', fontSize: '11px' }}>Admission Fee</span>
+                  <strong>NPR {Number(branch.admissionFee ?? 0).toLocaleString()}</strong>
                 </div>
               </div>
 

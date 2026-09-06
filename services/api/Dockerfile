@@ -1,4 +1,4 @@
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 
 RUN apk add --no-cache openssl
 
@@ -16,7 +16,7 @@ RUN npm run build --workspace @tms/types \
     && npm run prisma:generate --workspace @tms/api \
     && npm run build --workspace @tms/api
 
-FROM node:20-alpine AS runtime
+FROM node:22-alpine AS runtime
 
 RUN apk add --no-cache openssl
 
@@ -33,4 +33,5 @@ COPY --from=build /app/services/api/public services/api/public
 
 WORKDIR /app/services/api
 EXPOSE 3001
+USER node
 CMD ["node", "dist/server.js"]
