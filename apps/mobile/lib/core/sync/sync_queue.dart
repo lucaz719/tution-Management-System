@@ -60,8 +60,8 @@ class DriftSyncQueueStore implements SyncQueueStore {
 
   @override
   Future<bool> insert(SyncOperation op) async {
-    try {
-      await db.into(db.syncQueue).insert(SyncQueueCompanion.insert(
+    final rowId = await db.into(db.syncQueue).insert(
+          SyncQueueCompanion.insert(
             idempotencyKey: op.idempotencyKey,
             ownerUserId: op.ownerUserId,
             method: op.method,
@@ -69,12 +69,10 @@ class DriftSyncQueueStore implements SyncQueueStore {
             bodyJson: Value(op.bodyJson),
             attempts: Value(op.attempts),
             createdAt: op.createdAt,
-          ));
-      return true;
-    } catch (_) {
-      // Unique-violation on idempotencyKey => duplicate enqueue, a no-op.
-      return false;
-    }
+          ),
+          mode: InsertMode.insertOrIgnore,
+        );
+    return rowId != 0;
   }
 
   @override
