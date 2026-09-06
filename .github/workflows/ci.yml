@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main, develop, staging, mobile-app]
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     name: Build, lint, schema, and authorization checks
@@ -76,7 +79,7 @@ jobs:
         run: flutter pub get
 
       - name: Analyze (errors only fail)
-        run: flutter analyze --no-fatal-warnings
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
 
       - name: Run tests
         run: flutter test
