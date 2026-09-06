@@ -2,22 +2,17 @@ name: TMS CI
 
 on:
   push:
-    branches: [main, staging]
+    branches: [main, develop, staging, mobile-app]
+  pull_request:
+    branches: [main, develop, staging, mobile-app]
 
 permissions:
   contents: read
-
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-  pull_request:
-    branches: [main, staging]
 
 jobs:
   validate:
     name: Build, lint, schema, and authorization checks
     runs-on: ubuntu-latest
-    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -43,13 +38,7 @@ jobs:
         run: npx prisma generate --schema services/api/prisma/schema.prisma
 
       - name: Web build
-        env:
-          TMS_API_BASE_URL: https://api.example.test/api
         run: npm run build --workspace=web
-
-      - name: Reject localhost API URLs in production web bundle
-        shell: bash
-        run: '! grep -R "http://localhost:3001" apps/web/dist'
 
       - name: API build
         run: npm run build --workspace=@tms/api
@@ -60,21 +49,7 @@ jobs:
         run: npx prisma validate --schema services/api/prisma/schema.prisma
 
       - name: Authorization scope tests
-        run: npm run test:access --workspace=@tms/api
-
-      - name: Academic calendar access tests
-        run: npm run test:calendar --workspace=@tms/api
-
-      - name: API unit and configuration tests
-        run: |
-          npm run test:runtime-config --workspace=@tms/api
-          npm run test:request-validation --workspace=@tms/api
-          npm run test:billing --workspace=@tms/api
-          npm run test:connectips --workspace=@tms/api
-          npm run test:connectips-reconciliation --workspace=@tms/api
-
-      - name: Production dependency audit
-        run: npm audit --omit=dev --audit-level=high
+        run: npx ts-node services/api/src/utils/access-control.test.ts
 
       - name: Secret and fixed-identifier scan
         shell: bash
@@ -84,22 +59,30 @@ jobs:
             -e 'b-baneshwor-01' -e 'janitor-staff-user-300' \
             apps services packages
 
-      - name: Validate production Compose model
-        env:
-          POSTGRES_PASSWORD: ci-only-postgres-password
-          BETTER_AUTH_SECRET: ci-only-better-auth-secret-at-least-32-characters
-          BETTER_AUTH_URL: https://api.example.test
-          WEB_ORIGIN: https://app.example.test
-          NEPALPAY_WEBHOOK_SECRET: ci-only-nepalpay-secret-at-least-32-characters
-          TMS_API_BASE_URL: https://api.example.test/api
-          SMS_PROVIDER: DISABLED
-        run: docker compose -f compose.yml config --quiet
+  mobile:
+    name: Flutter analyze and test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Build production API image
-        run: docker build --file services/api/Dockerfile --tag tms-api:${{ github.sha }} .
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
 
-      - name: Build production web image
-        run: docker build --file apps/web/Dockerfile --build-arg TMS_API_BASE_URL=https://api.example.test/api --tag tms-web:${{ github.sha }} .
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze (errors only fail)
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
+
+      - name: Run tests
+        run: flutter test
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

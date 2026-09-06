@@ -1,16 +1,22 @@
-# tms_mobile
+# TMS Mobile (Flutter)
 
-A new Flutter project.
+Role portals for Teacher, Student, Parent, Branch Admin, Tenant Admin, Janitor.
+Auth is Better Auth session cookies — no tokens or tenant/branch IDs from the client.
 
-## Getting Started
+## Environment builds
 
-This project is a starting point for a Flutter application.
+The API base URL is compile-time config (`--dart-define=API_BASE_URL`).
+Release builds refuse to run without an HTTPS URL.
 
-A few resources to get you started if this is your first Flutter project:
+| Target | Command |
+|---|---|
+| Local (Android emulator) | `flutter run --dart-define=API_BASE_URL=http://10.0.2.2:3001` |
+| Staging | `flutter build apk --dart-define=API_BASE_URL=https://api.staging.sanskardipshikshalaya.com.np` |
+| Production | `flutter build apk --dart-define=API_BASE_URL=https://api.tms.sanskardipshikshalaya.com.np` |
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+iOS simulator uses `http://localhost:3001`; physical devices need the machine LAN IP.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Checks
+
+`flutter analyze` (0 errors enforced), `flutter test` (26 tests).
+CI runs both on every push to main/develop/staging/mobile-app.

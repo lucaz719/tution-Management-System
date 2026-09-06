@@ -160,6 +160,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
     state = const AuthState(isLoading: false);
   }
 
+  /// Drop local session state without a network call (401/session-expired
+  /// path — the server already rejected the session). Drives router to /login.
+  void forceLogout() {
+    state = const AuthState(isLoading: false);
+  }
+
   /// Reset the failed-attempt counter (e.g. after a successful reset-password).
   void resetAttemptCount() {
     state = state.copyWith(attemptCount: 0);
