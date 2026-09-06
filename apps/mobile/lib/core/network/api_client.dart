@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
 
@@ -31,6 +32,7 @@ class ApiClient {
 
   late final Dio dio;
   bool _initialized = false;
+  static PersistCookieJar? _cookieJar;
 
   /// Initialize the client. Call once from main() before runApp.
   Future<void> init() async {
@@ -55,7 +57,13 @@ class ApiClient {
     ));
 
     if (!kIsWeb) {
-      dio.interceptors.add(CookieManager(CookieJar()));
+      // MOB-004: persist session cookies across restarts so the Better Auth
+      // session survives app relaunch. Web keeps an in-memory jar.
+      final supportDir = await getApplicationSupportDirectory();
+      _cookieJar = PersistCookieJar(
+        storage: FileStorage('${supportDir.path}/cookies'),
+      );
+      dio.interceptors.add(CookieManager(_cookieJar!));
     }
     dio.interceptors.add(_AuthInterceptor());
     _initialized = true;
@@ -75,6 +83,7 @@ class ApiClient {
 
   /// Clear all auth data (on logout or session expiry).
   static Future<void> clearAuth() async {
+    await _cookieJar?.deleteAll();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(userKey);
     await prefs.remove(tenantKey);
