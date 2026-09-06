@@ -200,6 +200,7 @@ model Tenant {
   studentRemarks            StudentRemark[]
   studentScores             StudentScore[]
   admissionLoginDeliveries  AdmissionLoginDelivery[]
+  branchPaymentSettings     BranchPaymentSettings[]
 }
 
 // 2. Branch / Center
@@ -225,6 +226,7 @@ model Branch {
   resourceLogs       ResourceLog[]
   maintenanceTasks   MaintenanceTask[]
   teacherAttendance  TeacherAttendance[]
+  paymentSettings    BranchPaymentSettings?
   // Phase 2 relations
   academicEvents     AcademicEvent[]
   certificates       Certificate[]
@@ -1329,4 +1331,26 @@ model PettyCashFunding {
   updatedAt DateTime @updatedAt
 
   @@index([tenantId, branchId, period, status])
+}
+
+// Branch-specific payment settings (e.g., static QR code per location)
+model BranchPaymentSettings {
+  id                  String   @id @default(uuid())
+  branchId            String   @unique
+  branch              Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  tenantId            String
+  tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  staticQrEnabled     Boolean  @default(false)
+  staticQrImageUrl    String?
+  accountName         String?
+  accountNumber       String?
+  bankName            String?
+  instructions        String?
+  
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  
+  @@index([tenantId])
+  @@index([branchId, tenantId])
 }

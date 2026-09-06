@@ -6,7 +6,7 @@ import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { MockSmsSender } from '../utils/notifications';
 import { getAdmissionTenure, getBillingPeriod } from '../utils/nepali';
-import { managedBranchIds, canApprovePettyCashL1, canReleasePettyCash, hasBranchPermission, isTenantAdmin } from '../utils/access-control';
+import { managedBranchIds, canApprovePettyCashL1, canReleasePettyCash, canAccessBranch, hasBranchPermission, isTenantAdmin } from '../utils/access-control';
 import crypto from 'node:crypto';
 import { isInvoiceOverdue, recurringInvoiceType } from '../utils/billing-rules';
 import { createConnectIpsForm, validateAndConfirmConnectIps } from '../utils/connectips';
@@ -15,6 +15,7 @@ import { activateAdmissionAndSendLogins } from '../utils/admission-logins';
 import { reconcileBranchBillingAccess } from '../services/billing-access';
 import { buildFinancialIntelligence } from '../utils/financial-intelligence';
 import { invoiceTypeLabel } from '../utils/invoice-document';
+import { getTenantPaymentSettings, getBranchPaymentSettings, upsertBranchPaymentSettings, deleteBranchPaymentSettings, getTenantBranchPaymentSettings } from '../services/branch-payment-settings';
 import {
   compensationStructure,
   createPayrollRecords,
@@ -34,30 +35,134 @@ async function deliverPaidAdmission(invoice: { invoiceType: string; tenantId: st
   return activateAdmissionAndSendLogins(invoice.tenantId, invoice.studentId);
 }
 
-type PaymentSettings = {
-  connectIpsEnabled: boolean;
-  staticQrEnabled: boolean;
-  staticQrImageUrl: string;
-  accountName: string;
-  accountNumber: string;
-  bankName: string;
-  instructions: string;
-};
+// GET /payment-settings - Fetch payment settings for tenant or specific branch
+router.get('/payment-settings', authMiddleware, async (req: TenantRequest, res: Response) => {
+  try {
+    const branchId = req.query.branchId as string | undefined;
+    
+    // If no branch specified, return tenant defaults
+    if (!branchId) {
+      return res.json(getTenantPaymentSettings());
+    }
+    
+    // Verify branch exists and belongs to tenant
+    const branch = await prisma.branch.findFirst({
+      where: { id: branchId, tenantId: req.tenantId },
+      select: { id: true },
+    });
+    
+    if (!branch) {
+      return res.status(404).json({ error: 'Branch not found' });
+    }
+    
+    // Return merged: branch-specific settings with tenant defaults as fallback
+    const settings = await getBranchPaymentSettings(req.tenantId!, branchId);
+    return res.json(settings);
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to fetch payment settings' });
+  }
+});
 
-function paymentSettings(): PaymentSettings {
-  return {
-    connectIpsEnabled: process.env.CONNECTIPS_ENABLED === 'true',
-    staticQrEnabled: process.env.STATIC_PAYMENT_QR_ENABLED === 'true',
-    staticQrImageUrl: process.env.STATIC_PAYMENT_QR_IMAGE_URL || '',
-    accountName: process.env.STATIC_PAYMENT_ACCOUNT_NAME || '',
-    accountNumber: process.env.STATIC_PAYMENT_ACCOUNT_NUMBER || '',
-    bankName: process.env.STATIC_PAYMENT_BANK_NAME || '',
-    instructions: process.env.STATIC_PAYMENT_INSTRUCTIONS || '',
-  };
-}
+// PUT /branches/:branchId/payment-settings - Update branch-specific payment settings
+router.put('/branches/:branchId/payment-settings', authMiddleware, async (req: TenantRequest, res: Response) => {
+  try {
+    const { branchId } = req.params as { branchId: string };
+    
+    if (!branchId) {
+      return res.status(400).json({ error: 'Branch ID is required' });
+    }
+    
+    // Verify access: tenant admin or branch admin for this branch
+    if (!canAccessBranch(req.user, branchId)) {
+      return res.status(403).json({ error: 'Insufficient permissions for this branch' });
+    }
+    
+    // Verify branch exists
+    const branch = await prisma.branch.findFirst({
+      where: { id: branchId, tenantId: req.tenantId },
+    });
+    
+    if (!branch) {
+      return res.status(404).json({ error: 'Branch not found' });
+    }
+    
+    // Parse and validate input
+    const { staticQrEnabled, staticQrImageUrl, accountName, accountNumber, bankName, instructions } = req.body;
+    
+    if (typeof staticQrEnabled !== 'boolean') {
+      return res.status(400).json({ error: 'staticQrEnabled must be boolean' });
+    }
+    
+    if (staticQrEnabled) {
+      if (!staticQrImageUrl?.toString().trim()) return res.status(400).json({ error: 'QR image URL is required when static QR is enabled' });
+      if (!accountName?.toString().trim()) return res.status(400).json({ error: 'Account name is required when static QR is enabled' });
+      if (!accountNumber?.toString().trim()) return res.status(400).json({ error: 'Account number is required when static QR is enabled' });
+      if (!bankName?.toString().trim()) return res.status(400).json({ error: 'Bank name is required when static QR is enabled' });
+    }
+    
+    // Upsert branch settings
+    const settings = await upsertBranchPaymentSettings(req.tenantId!, branchId, {
+      staticQrEnabled,
+      staticQrImageUrl: staticQrImageUrl?.toString() || null,
+      accountName: accountName?.toString() || null,
+      accountNumber: accountNumber?.toString() || null,
+      bankName: bankName?.toString() || null,
+      instructions: instructions?.toString() || null,
+    });
+    
+    return res.json({ message: 'Branch payment settings updated successfully', data: settings });
+  } catch (error: any) {
+    if (error.message.includes('All required fields')) {
+      return res.status(400).json({ error: error.message });
+    }
+    return res.status(500).json({ error: 'Failed to update payment settings' });
+  }
+});
 
-router.get('/payment-settings', authMiddleware, (_req: TenantRequest, res: Response) => {
-  return res.json(paymentSettings());
+// DELETE /branches/:branchId/payment-settings - Reset branch settings to tenant defaults
+router.delete('/branches/:branchId/payment-settings', authMiddleware, async (req: TenantRequest, res: Response) => {
+  try {
+    const { branchId } = req.params as { branchId: string };
+    
+    if (!branchId) {
+      return res.status(400).json({ error: 'Branch ID is required' });
+    }
+    
+    // Verify access
+    if (!canAccessBranch(req.user, branchId)) {
+      return res.status(403).json({ error: 'Insufficient permissions for this branch' });
+    }
+    
+    // Verify branch exists
+    const branch = await prisma.branch.findFirst({
+      where: { id: branchId, tenantId: req.tenantId },
+    });
+    
+    if (!branch) {
+      return res.status(404).json({ error: 'Branch not found' });
+    }
+    
+    // Delete branch-specific settings
+    await deleteBranchPaymentSettings(req.tenantId!, branchId);
+    
+    return res.json({ message: 'Branch payment settings deleted. Branch now uses tenant defaults.' });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to delete payment settings' });
+  }
+});
+
+// GET /admin/branches/payment-settings - Admin endpoint to list all branch settings for tenant
+router.get('/admin/branches/payment-settings', authMiddleware, async (req: TenantRequest, res: Response) => {
+  try {
+    if (!isTenantAdmin(req.user)) {
+      return res.status(403).json({ error: 'Tenant Admin access required' });
+    }
+    
+    const audit = await getTenantBranchPaymentSettings(req.tenantId!);
+    return res.json(audit);
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to fetch branch payment settings' });
+  }
 });
 
 type PettyCashRequestItem = { name: string; quantity: number; unitAmount: number; totalAmount: number };
@@ -152,7 +257,7 @@ async function loadStudentBillingAccess(req: TenantRequest, studentId: string) {
 
 router.post('/connectips/initiate/:invoiceId', authMiddleware, async (req: TenantRequest, res: Response) => {
   try {
-    const settings = paymentSettings();
+    const settings = getTenantPaymentSettings();
     if (!settings.connectIpsEnabled) return res.status(503).json({ error: 'connectIPS is not enabled for this institution.' });
     const invoice = await loadInvoicePaymentAccess(req, req.params.invoiceId);
     if (!invoice) return res.status(404).json({ error: 'Invoice not found or unavailable to this account.' });
@@ -245,7 +350,10 @@ router.post('/manual-payment/:invoiceId', authMiddleware, async (req: TenantRequ
   const invoice = await loadInvoicePaymentAccess(req, req.params.invoiceId);
   if (!invoice) return res.status(404).json({ error: 'Invoice not found or unavailable to this account.' });
   if (invoice.status === 'PAID') return res.status(409).json({ error: 'Invoice is already paid.' });
-  if (!paymentSettings().staticQrEnabled) return res.status(503).json({ error: 'Manual QR payment is not enabled.' });
+  
+  // Check if static QR is enabled for this branch
+  const paymentSettings = await getBranchPaymentSettings(req.tenantId!, invoice.branchId);
+  if (!paymentSettings.staticQrEnabled) return res.status(503).json({ error: 'Manual QR payment is not enabled for this branch.' });
   const shape = parseStrictKeys(req.body, ['referenceId', 'receiptProof']);
   if (!shape.success) return res.status(400).json({ error: shape.error });
   const referenceId = readTrimmedString(shape.data, 'referenceId', { required: true, maxLength: 80, pattern: /^[A-Za-z0-9._\/-]+$/, message: 'Enter a valid payment reference.' });
