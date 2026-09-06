@@ -40,19 +40,12 @@ class AuthState {
     if (isTwoFactorPending) return '/2fa';
 
     return switch (user!.role) {
-<<<<<<< HEAD
-      'TEACHER' => '/teacher/home',
-      'STUDENT' => '/student/home',
-      'PARENT' => '/parent/home',
-      'BRANCH_ADMIN' || 'TENANT_ADMIN' || 'SUPER_ADMIN' || 'STAFF' => '/admin/home',
-=======
       RoleCodes.tenantAdmin => '/tenant/home',
       RoleCodes.branchAdmin => '/branch/home',
       RoleCodes.janitor => '/janitor/home',
       RoleCodes.teacher => '/teacher/home',
       RoleCodes.student => '/student/home',
       RoleCodes.parent => '/parent/home',
->>>>>>> 3995412de992acdfbb82d49ddddf9c807882fc1b
       _ => '/login',
     };
   }

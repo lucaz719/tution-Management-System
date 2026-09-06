@@ -41,12 +41,8 @@ class AuthUser {
         ? json['user'] as Map<String, dynamic>
         : json;
 
-<<<<<<< HEAD
-    String role = 'TEACHER';
-=======
     // API may return a direct role code/name or a roles entry with roleName.
     String? rawRole;
->>>>>>> 3995412de992acdfbb82d49ddddf9c807882fc1b
     if (user['role'] is String) {
       rawRole = user['role'] as String;
     } else if (user['roles'] is List && (user['roles'] as List).isNotEmpty) {
@@ -116,8 +112,12 @@ class AuthService {
       final user = AuthUser(
         id: 'mock-${mock.role.toLowerCase()}-1',
         email: mock.email,
-        firstName: first.isNotEmpty ? first[0].toUpperCase() + first.substring(1) : mock.role,
-        lastName: last.isNotEmpty ? last[0].toUpperCase() + last.substring(1) : 'User',
+        firstName: first.isNotEmpty
+            ? first[0].toUpperCase() + first.substring(1)
+            : mock.role,
+        lastName: last.isNotEmpty
+            ? last[0].toUpperCase() + last.substring(1)
+            : 'User',
         role: mock.role,
         requiresTwoFactor: mock.requiresTwoFactor,
       );

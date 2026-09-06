@@ -1,9 +1,6 @@
 import 'package:flutter/material.dart';
-<<<<<<< HEAD
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-=======
 import 'package:go_router/go_router.dart';
->>>>>>> 3995412de992acdfbb82d49ddddf9c807882fc1b
 import 'package:tms_mobile/core/adaptive/breakpoints.dart';
 import 'package:tms_mobile/core/adaptive/capabilities.dart';
 import 'package:tms_mobile/core/adaptive/widgets/adaptive_layout.dart';
@@ -72,7 +69,10 @@ class _TeacherHomeScreenState extends ConsumerState<TeacherHomeScreen> {
           children: [
             Text(
               'Teacher Portal',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+              style: Theme.of(context)
+                  .textTheme
+                  .titleLarge
+                  ?.copyWith(fontWeight: FontWeight.w700),
             ),
             Text(
               'Welcome, ${user?.name ?? DemoTeacherData.teacherName}',
@@ -133,7 +133,8 @@ class _TeacherHomeScreenState extends ConsumerState<TeacherHomeScreen> {
               onSubmitLog: (id) {
                 setState(() => _submittedLogIds.add(id));
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Update log submitted successfully!')),
+                  const SnackBar(
+                      content: Text('Update log submitted successfully!')),
                 );
               },
             );
@@ -192,28 +193,14 @@ class _TeacherHomeScreenState extends ConsumerState<TeacherHomeScreen> {
           ),
           _SidebarAction(
             icon: Icons.assignment_outlined,
-<<<<<<< HEAD
-            label: 'Pending Logs (${_pendingLogs.length - _submittedLogIds.length})',
+            label:
+                'Pending Logs (${_pendingLogs.length - _submittedLogIds.length})',
             onTap: () => _onDestinationSelected(0),
-=======
-            label: 'Grade Submissions',
-            onTap: () {},
-          ),
-          _SidebarAction(
-            icon: Icons.people_outline,
-            label: 'Manage Students',
-            onTap: () {},
           ),
           _SidebarAction(
             icon: Icons.event_note_outlined,
             label: 'Leave Requests',
             onTap: () => context.push('/teacher/leave'),
-          ),
-          _SidebarAction(
-            icon: Icons.settings_outlined,
-            label: 'Class Settings',
-            onTap: () {},
->>>>>>> 3995412de992acdfbb82d49ddddf9c807882fc1b
           ),
           const SizedBox(height: 24),
           const Divider(),
@@ -401,7 +388,8 @@ class _TodayTab extends StatelessWidget {
                         color: kColorAccent.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Icon(Icons.event_busy_rounded, color: kColorAccent),
+                      child: const Icon(Icons.event_busy_rounded,
+                          color: kColorAccent),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -446,7 +434,8 @@ class _TodayTab extends StatelessWidget {
                         color: kColorPrimary.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Icon(Icons.calendar_month_rounded, color: kColorPrimary),
+                      child: const Icon(Icons.calendar_month_rounded,
+                          color: kColorPrimary),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -483,22 +472,25 @@ class _TodayTab extends StatelessWidget {
                 onTap: () => onClassTap(session),
                 borderRadius: BorderRadius.circular(12),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(
                           color: kColorPrimary.withValues(alpha: 0.08),
                           borderRadius: BorderRadius.circular(999),
                         ),
                         child: Text(
                           formatShortTime(session.scheduledStart),
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: kColorPrimary,
-                                fontWeight: FontWeight.w700,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: kColorPrimary,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -507,9 +499,11 @@ class _TodayTab extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(session.subject,
-                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w700, fontSize: 15)),
                             const SizedBox(height: 4),
-                            Text('${session.room} • ${session.enrolledCount} enrolled',
+                            Text(
+                                '${session.room} • ${session.enrolledCount} enrolled',
                                 style: Theme.of(context).textTheme.bodySmall),
                           ],
                         ),
@@ -546,8 +540,11 @@ class _TodayTab extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(log.className, style: const TextStyle(fontWeight: FontWeight.w600)),
-                          Text('Awaiting lesson topic & attendance sync', style: Theme.of(context).textTheme.bodySmall),
+                          Text(log.className,
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w600)),
+                          Text('Awaiting lesson topic & attendance sync',
+                              style: Theme.of(context).textTheme.bodySmall),
                         ],
                       ),
                     ),
@@ -555,15 +552,20 @@ class _TodayTab extends StatelessWidget {
                       const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.check_circle, color: kColorSuccess, size: 18),
+                          Icon(Icons.check_circle,
+                              color: kColorSuccess, size: 18),
                           SizedBox(width: 6),
-                          Text('Submitted', style: TextStyle(color: kColorSuccess, fontWeight: FontWeight.w600)),
+                          Text('Submitted',
+                              style: TextStyle(
+                                  color: kColorSuccess,
+                                  fontWeight: FontWeight.w600)),
                         ],
                       )
                     else
                       FilledButton.tonal(
                         onPressed: () => onSubmitLog(log.id),
-                        style: FilledButton.styleFrom(minimumSize: const Size(80, 36)),
+                        style: FilledButton.styleFrom(
+                            minimumSize: const Size(80, 36)),
                         child: const Text('Submit'),
                       ),
                   ],
@@ -598,7 +600,8 @@ class _TimetableTab extends StatelessWidget {
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Text('Weekly Timetable', style: Theme.of(context).textTheme.headlineSmall),
+            Text('Weekly Timetable',
+                style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 16),
             ...sessions.map(
               (session) => Padding(
@@ -607,7 +610,8 @@ class _TimetableTab extends StatelessWidget {
                   child: ListTile(
                     contentPadding: const EdgeInsets.all(16),
                     onTap: () => onSessionTap(session),
-                    title: Text(session.subject, style: const TextStyle(fontWeight: FontWeight.w700)),
+                    title: Text(session.subject,
+                        style: const TextStyle(fontWeight: FontWeight.w700)),
                     subtitle: Text(
                       '${formatTimestamp(session.scheduledStart)} • ${session.room}',
                     ),
@@ -643,7 +647,8 @@ class _TimetableTab extends StatelessWidget {
         rows: sessions.map((session) {
           return DataRow(
             cells: [
-              DataCell(Text(session.subject, style: const TextStyle(fontWeight: FontWeight.w700))),
+              DataCell(Text(session.subject,
+                  style: const TextStyle(fontWeight: FontWeight.w700))),
               DataCell(Text(formatTimestamp(session.scheduledStart))),
               DataCell(Text(session.room)),
               DataCell(Text('${session.enrolledCount}')),
@@ -678,7 +683,8 @@ class _AttendanceTab extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text('Geo-Attendance', style: Theme.of(context).textTheme.headlineSmall),
+            Text('Geo-Attendance',
+                style: Theme.of(context).textTheme.headlineSmall),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
@@ -689,7 +695,11 @@ class _AttendanceTab extends StatelessWidget {
                 children: [
                   Icon(Icons.location_on, size: 16, color: kColorSuccess),
                   SizedBox(width: 4),
-                  Text('GPS Verified', style: TextStyle(color: kColorSuccess, fontWeight: FontWeight.w600, fontSize: 12)),
+                  Text('GPS Verified',
+                      style: TextStyle(
+                          color: kColorSuccess,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12)),
                 ],
               ),
             ),
@@ -700,7 +710,8 @@ class _AttendanceTab extends StatelessWidget {
           (session) => Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: Card(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
@@ -709,14 +720,18 @@ class _AttendanceTab extends StatelessWidget {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(session.subject, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
+                        Text(session.subject,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w700, fontSize: 17)),
                         _StatusBadge(status: session.status),
                       ],
                     ),
                     const SizedBox(height: 6),
-                    Text('${formatShortTime(session.scheduledStart)} – ${formatShortTime(session.scheduledEnd)} • ${session.room}'),
+                    Text(
+                        '${formatShortTime(session.scheduledStart)} – ${formatShortTime(session.scheduledEnd)} • ${session.room}'),
                     const SizedBox(height: 4),
-                    Text('${session.enrolledCount} Students Enrolled', style: Theme.of(context).textTheme.bodySmall),
+                    Text('${session.enrolledCount} Students Enrolled',
+                        style: Theme.of(context).textTheme.bodySmall),
                     const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,
@@ -798,9 +813,9 @@ class _ProfileTab extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(DemoTeacherData.teacherName,
-                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 20)),
+                style:
+                    const TextStyle(fontWeight: FontWeight.w700, fontSize: 20)),
             const SizedBox(height: 6),
-<<<<<<< HEAD
             Text('${DemoTeacherData.branchName} • Senior Faculty',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: kColorText.withValues(alpha: 0.7),
@@ -811,19 +826,22 @@ class _ProfileTab extends StatelessWidget {
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.badge_outlined, color: kColorPrimary),
               title: const Text('Employee ID'),
-              trailing: const Text('TCH-2026-042', style: TextStyle(fontWeight: FontWeight.w600)),
+              trailing: const Text('TCH-2026-042',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
             ),
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.email_outlined, color: kColorPrimary),
               title: const Text('Email'),
-              trailing: const Text('teacher@tms.edu.np', style: TextStyle(fontWeight: FontWeight.w600)),
+              trailing: const Text('teacher@tms.edu.np',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
             ),
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.phone_outlined, color: kColorPrimary),
               title: const Text('Phone'),
-              trailing: const Text('+977 9801234567', style: TextStyle(fontWeight: FontWeight.w600)),
+              trailing: const Text('+977 9801234567',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
             ),
             const SizedBox(height: 16),
             SizedBox(
@@ -833,14 +851,12 @@ class _ProfileTab extends StatelessWidget {
                 icon: const Icon(Icons.logout_rounded),
                 label: const Text('Log Out of Account'),
               ),
-=======
-            Text('${DemoTeacherData.branchName} • Senior Teacher'),
+            ),
             const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: () => context.push('/teacher/change-password'),
               icon: const Icon(Icons.key_rounded),
               label: const Text('Change password'),
->>>>>>> 3995412de992acdfbb82d49ddddf9c807882fc1b
             ),
           ],
         ),
@@ -858,7 +874,9 @@ class _ProfileTab extends StatelessWidget {
             leading: Icon(Icons.event_note, color: kColorWarning),
             title: Text('Personal Leave — 12 Jul'),
             subtitle: Text('Awaiting Branch Admin approval'),
-            trailing: Text('Pending', style: TextStyle(color: kColorWarning, fontWeight: FontWeight.w600)),
+            trailing: Text('Pending',
+                style: TextStyle(
+                    color: kColorWarning, fontWeight: FontWeight.w600)),
           ),
           const Divider(),
           const ListTile(
@@ -866,7 +884,9 @@ class _ProfileTab extends StatelessWidget {
             leading: Icon(Icons.check_circle, color: kColorSuccess),
             title: Text('Medical Leave — 24 Jun'),
             subtitle: Text('Approved by Branch Admin'),
-            trailing: Text('Approved', style: TextStyle(color: kColorSuccess, fontWeight: FontWeight.w600)),
+            trailing: Text('Approved',
+                style: TextStyle(
+                    color: kColorSuccess, fontWeight: FontWeight.w600)),
           ),
           const SizedBox(height: 16),
           SizedBox(
@@ -908,11 +928,13 @@ class _HomeworkPreviewCard extends StatelessWidget {
                         color: const Color(0xFFE8EDF4),
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: const Icon(Icons.menu_book_outlined, size: 20, color: kColorPrimary),
+                      child: const Icon(Icons.menu_book_outlined,
+                          size: 20, color: kColorPrimary),
                     ),
                     const SizedBox(width: 12),
                     Expanded(child: Text('Class ${index + 1} Submissions')),
-                    Text('${18 + index * 4} turned in', style: const TextStyle(fontWeight: FontWeight.w600)),
+                    Text('${18 + index * 4} turned in',
+                        style: const TextStyle(fontWeight: FontWeight.w600)),
                   ],
                 ),
               ),
@@ -943,7 +965,11 @@ class _SectionCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+            Text(title,
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w700)),
             const SizedBox(height: 16),
             child,
           ],
@@ -975,7 +1001,8 @@ class _StatusBadge extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700),
+        style:
+            TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700),
       ),
     );
   }
