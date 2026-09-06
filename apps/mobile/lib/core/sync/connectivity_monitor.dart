@@ -33,7 +33,9 @@ class ConnectivityMonitor extends StateNotifier<ConnectivityState> {
         defaultValue: 'http://10.0.2.2:3001');
     final uri = Uri.tryParse(host);
     final target = (uri != null && uri.hasAuthority) ? uri.host : host;
-    final port = (uri != null && uri.hasPort) ? uri.port : 3001;
+    final port = (uri != null && uri.hasAuthority)
+        ? (uri.hasPort ? uri.port : (uri.scheme == 'https' ? 443 : 80))
+        : 3001;
     try {
       final socket =
           await Socket.connect(target, port, timeout: const Duration(seconds: 3));

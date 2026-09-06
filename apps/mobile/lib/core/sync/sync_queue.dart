@@ -165,6 +165,7 @@ class SyncQueueService {
         case ReplayOutcome.applied:
           await _store.remove(op.idempotencyKey);
           replayed++;
+          break;
         case ReplayOutcome.conflict:
           await _store.remove(op.idempotencyKey);
           final conflict = SyncConflict(
@@ -178,6 +179,7 @@ class SyncQueueService {
           _conflictsController.add(conflict);
           onConflict?.call(conflict);
           replayed++;
+          break;
         case ReplayOutcome.retryable:
           await _store.bumpAttempts(op.idempotencyKey, op.attempts + 1);
           failed++;
