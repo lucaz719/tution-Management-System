@@ -1,21 +1,48 @@
+/// API-backed student academics screen (MOB-102).
+///
+/// Segments: Results, Syllabus, Homework, Analytics. Data comes from
+/// `GET /api/users/me/student-portal` through
+/// [StudentAcademicsViewModel]; detail insights can be refreshed from
+/// `GET /api/performance/student/:studentId`. Screens handle loading,
+/// empty, error, denied (403), offline, and session-expired (401) states.
+/// Route guard (`/student/*` requires the student role) plus
+/// server-resolved identity keeps records restricted to the signed-in
+/// student.
+library;
+
 import 'package:flutter/material.dart';
-import '../data/student_demo_data.dart';
-import '../models/student_portal_models.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../models/student_academics_api.dart';
 import '../student_design.dart';
+import '../viewmodels/student_academics_viewmodel.dart';
+import '../widgets/student_record_states.dart';
 import '../widgets/student_scaffold.dart';
 
-class StudentAcademicsScreen extends StatefulWidget {
+class StudentAcademicsScreen extends ConsumerStatefulWidget {
   const StudentAcademicsScreen({super.key});
 
   @override
-  State<StudentAcademicsScreen> createState() => _StudentAcademicsScreenState();
+  ConsumerState<StudentAcademicsScreen> createState() =>
+      _StudentAcademicsScreenState();
 }
 
-class _StudentAcademicsScreenState extends State<StudentAcademicsScreen> {
+class _StudentAcademicsScreenState
+    extends ConsumerState<StudentAcademicsScreen> {
   int _segment = 0;
 
   @override
+  void initState() {
+    super.initState();
+    Future.microtask(() =>
+        ref.read(studentAcademicsViewModelProvider.notifier).load());
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final state = ref.watch(studentAcademicsViewModelProvider);
+    final viewModel = ref.read(studentAcademicsViewModelProvider.notifier);
+
     return StudentScaffold(
       title: 'My academics',
       selectedIndex: 1,
@@ -39,33 +66,87 @@ class _StudentAcademicsScreenState extends State<StudentAcademicsScreen> {
               ),
             ),
           ),
-          Expanded(
-            child: IndexedStack(
-              index: _segment,
-              children: const [
-                _ResultsView(),
-                _SyllabusView(),
-                _HomeworkView(),
-                _InsightsView(),
-              ],
-            ),
-          ),
+          Expanded(child: _buildBody(state, viewModel)),
         ],
       ),
+    );
+  }
+
+  Widget _buildBody(
+    StudentAcademicsState state,
+    StudentAcademicsViewModel viewModel,
+  ) {
+    if (state.isLoading && !state.hasData) {
+      return const StudentLoadingView(message: 'Loading your academics…');
+    }
+    if (state.sessionExpired) {
+      return StudentErrorView(
+        icon: Icons.lock_outline_rounded,
+        title: 'Session expired',
+        message: 'Please sign in again to view your academics.',
+        retryLabel: 'Reload',
+        onRetry: viewModel.refresh,
+      );
+    }
+    if (state.accessDenied) {
+      return StudentErrorView(
+        icon: Icons.block_rounded,
+        title: 'Not available',
+        message: state.error ??
+            'Your account cannot view these academic records.',
+        retryLabel: 'Try again',
+        onRetry: viewModel.refresh,
+      );
+    }
+    if (state.offline && !state.hasData) {
+      return StudentErrorView(
+        icon: Icons.wifi_off_rounded,
+        title: 'You are offline',
+        message: 'Check your connection and try again.',
+        retryLabel: 'Retry',
+        onRetry: viewModel.refresh,
+      );
+    }
+    if (state.error != null && !state.hasData) {
+      return StudentErrorView(
+        icon: Icons.error_outline_rounded,
+        title: 'Could not load academics',
+        message: state.error!,
+        retryLabel: 'Retry',
+        onRetry: viewModel.refresh,
+      );
+    }
+    return IndexedStack(
+      index: _segment,
+      children: [
+        _ResultsView(state: state, viewModel: viewModel),
+        _SyllabusView(state: state, viewModel: viewModel),
+        _HomeworkView(state: state, viewModel: viewModel),
+        _InsightsView(state: state, viewModel: viewModel),
+      ],
     );
   }
 }
 
 class _ResultsView extends StatelessWidget {
-  const _ResultsView();
+  const _ResultsView({required this.state, required this.viewModel});
+
+  final StudentAcademicsState state;
+  final StudentAcademicsViewModel viewModel;
 
   @override
   Widget build(BuildContext context) {
-    final results = StudentDemoData.results;
+    final results = state.pagedResults;
+    if (state.results.isEmpty) {
+      return const StudentEmptyView(
+        icon: Icons.grade_outlined,
+        title: 'No results yet',
+        message:
+            'Scores appear here as soon as your teacher publishes them.',
+      );
+    }
     return RefreshIndicator(
-      onRefresh: () async => Future<void>.delayed(
-        const Duration(milliseconds: 350),
-      ),
+      onRefresh: viewModel.refresh,
       child: ListView(
         padding: const EdgeInsets.all(StudentSpace.md),
         children: [
@@ -88,12 +169,18 @@ class _ResultsView extends StatelessWidget {
             ),
           ),
           const SizedBox(height: StudentSpace.lg),
-          Text('Latest results', style: Theme.of(context).textTheme.titleLarge),
+          Text('Latest results',
+              style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: StudentSpace.sm),
           for (final result in results) ...[
             _ResultCard(result: result),
             const SizedBox(height: StudentSpace.sm),
           ],
+          StudentLoadMoreFooter(
+            hasMore: state.hasMoreResults,
+            remaining: state.results.length - results.length,
+            onLoadMore: viewModel.loadMoreResults,
+          ),
         ],
       ),
     );
@@ -102,12 +189,13 @@ class _ResultsView extends StatelessWidget {
 
 class _ResultCard extends StatelessWidget {
   const _ResultCard({required this.result});
-  final TestResult result;
+  final AcademicResult result;
 
   @override
   Widget build(BuildContext context) {
+    final classAverage = result.classAverage;
     final aboveAverage =
-        result.percentage >= result.classAverage / result.maximum * 100;
+        classAverage == null || result.score >= classAverage;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(StudentSpace.md),
@@ -124,7 +212,7 @@ class _ResultCard extends StatelessWidget {
                       Text(result.subject,
                           style: Theme.of(context).textTheme.titleMedium),
                       const SizedBox(height: StudentSpace.xxs),
-                      Text(result.testName,
+                      Text(result.assessment,
                           style: Theme.of(context).textTheme.bodySmall),
                     ],
                   ),
@@ -142,7 +230,8 @@ class _ResultCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(StudentRadius.pill),
               child: LinearProgressIndicator(
                 minHeight: 8,
-                value: result.percentage / 100,
+                value:
+                    (result.percentage / 100).clamp(0.0, 1.0).toDouble(),
                 backgroundColor: StudentColors.border,
               ),
             ),
@@ -161,10 +250,11 @@ class _ResultCard extends StatelessWidget {
                       : StudentColors.warning,
                 ),
                 const Spacer(),
-                Text(
-                  'Class avg. ${result.classAverage.toStringAsFixed(0)}/${result.maximum.toStringAsFixed(0)}',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
+                if (result.publishedLabel != null)
+                  Text(
+                    result.publishedLabel!,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
               ],
             ),
           ],
@@ -175,24 +265,27 @@ class _ResultCard extends StatelessWidget {
 }
 
 class _SyllabusView extends StatelessWidget {
-  const _SyllabusView();
+  const _SyllabusView({required this.state, required this.viewModel});
+
+  final StudentAcademicsState state;
+  final StudentAcademicsViewModel viewModel;
 
   @override
   Widget build(BuildContext context) {
-    const subjects = [
-      ('Mathematics', 'Linear equations and geometry', 0.68),
-      ('Science', 'Force, motion, and chemical reactions', 0.61),
-      ('English', 'Literature analysis and creative writing', 0.74),
-      ('Social Studies', 'Civics and geography', 0.52),
-    ];
-
+    if (state.syllabi.isEmpty) {
+      return const StudentEmptyView(
+        icon: Icons.menu_book_outlined,
+        title: 'No syllabus shared yet',
+        message:
+            'Your teachers share the term syllabus here once it is ready.',
+      );
+    }
     return RefreshIndicator(
-      onRefresh: () async =>
-          Future<void>.delayed(const Duration(milliseconds: 350)),
+      onRefresh: viewModel.refresh,
       child: ListView(
         padding: const EdgeInsets.all(StudentSpace.md),
         children: [
-          Text('Term 2 syllabus',
+          Text('Term syllabus',
               style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: StudentSpace.xs),
           Text(
@@ -202,7 +295,7 @@ class _SyllabusView extends StatelessWidget {
                 ),
           ),
           const SizedBox(height: StudentSpace.lg),
-          for (final subject in subjects) ...[
+          for (final syllabus in state.syllabi) ...[
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(StudentSpace.md),
@@ -215,21 +308,29 @@ class _SyllabusView extends StatelessWidget {
                             color: StudentColors.primary),
                         const SizedBox(width: StudentSpace.sm),
                         Expanded(
-                          child: Text(subject.$1,
-                              style: Theme.of(context).textTheme.titleMedium),
+                          child: Text(syllabus.subject,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium),
                         ),
-                        Text('${(subject.$3 * 100).round()}%'),
+                        Text('${syllabus.topicCount} topics'),
                       ],
                     ),
-                    const SizedBox(height: StudentSpace.sm),
-                    Text(subject.$2),
-                    const SizedBox(height: StudentSpace.sm),
-                    LinearProgressIndicator(
-                      value: subject.$3,
-                      minHeight: 8,
-                      borderRadius: BorderRadius.circular(StudentRadius.pill),
-                      backgroundColor: StudentColors.border,
+                    const SizedBox(height: StudentSpace.xs),
+                    Text(
+                      syllabus.className,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: StudentColors.mutedText,
+                          ),
                     ),
+                    const SizedBox(height: StudentSpace.sm),
+                    for (final chapter in syllabus.chapters)
+                      Padding(
+                        padding: const EdgeInsets.only(top: StudentSpace.xs),
+                        child: Text(
+                          '• ${chapter.title} (${chapter.topics.length})',
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -243,150 +344,225 @@ class _SyllabusView extends StatelessWidget {
 }
 
 class _HomeworkView extends StatelessWidget {
-  const _HomeworkView();
+  const _HomeworkView({required this.state, required this.viewModel});
+
+  final StudentAcademicsState state;
+  final StudentAcademicsViewModel viewModel;
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(StudentSpace.md),
-      children: [
-        Text('Pending homework', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: StudentSpace.sm),
-        for (final item in StudentDemoData.homework) ...[
-          Card(
-            child: ListTile(
-              minTileHeight: 84,
-              leading: Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: (item.dueAt.isBefore(DateTime.now())
-                          ? StudentColors.error
-                          : StudentColors.primary)
-                      .withValues(alpha: .10),
-                  borderRadius: BorderRadius.circular(StudentRadius.control),
-                ),
-                child: Icon(
-                  item.dueAt.isBefore(DateTime.now())
-                      ? Icons.priority_high_rounded
-                      : Icons.assignment_outlined,
-                  color: item.dueAt.isBefore(DateTime.now())
-                      ? StudentColors.error
-                      : StudentColors.primary,
-                ),
-              ),
-              title: Text(item.title),
-              subtitle: Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  '${item.subject} · ${_date(item.dueAt)}',
-                  style: TextStyle(
-                    color: item.dueAt.isBefore(DateTime.now())
+    if (state.homework.isEmpty) {
+      return const StudentEmptyView(
+        icon: Icons.assignment_outlined,
+        title: 'No homework assigned',
+        message: 'New homework from your teachers will show up here.',
+      );
+    }
+    return RefreshIndicator(
+      onRefresh: viewModel.refresh,
+      child: ListView(
+        padding: const EdgeInsets.all(StudentSpace.md),
+        children: [
+          Text('Pending homework',
+              style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: StudentSpace.sm),
+          for (final item in state.pagedHomework) ...[
+            Card(
+              child: ListTile(
+                minTileHeight: 84,
+                leading: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: (item.isOverdue
+                            ? StudentColors.error
+                            : StudentColors.primary)
+                        .withValues(alpha: .10),
+                    borderRadius:
+                        BorderRadius.circular(StudentRadius.control),
+                  ),
+                  child: Icon(
+                    item.isOverdue
+                        ? Icons.priority_high_rounded
+                        : Icons.assignment_outlined,
+                    color: item.isOverdue
                         ? StudentColors.error
-                        : StudentColors.mutedText,
-                    fontWeight: FontWeight.w600,
+                        : StudentColors.primary,
                   ),
                 ),
+                title: Text(item.title),
+                subtitle: Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    '${item.subject} · ${item.dueLabel}',
+                    style: TextStyle(
+                      color: item.isOverdue
+                          ? StudentColors.error
+                          : StudentColors.mutedText,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                trailing: item.completed
+                    ? const Icon(Icons.check_circle_rounded,
+                        color: StudentColors.success)
+                    : null,
               ),
             ),
+            const SizedBox(height: StudentSpace.sm),
+          ],
+          StudentLoadMoreFooter(
+            hasMore: state.hasMoreHomework,
+            remaining:
+                state.homework.length - state.pagedHomework.length,
+            onLoadMore: viewModel.loadMoreHomework,
           ),
-          const SizedBox(height: StudentSpace.sm),
         ],
-      ],
+      ),
     );
   }
 }
 
 class _InsightsView extends StatelessWidget {
-  const _InsightsView();
+  const _InsightsView({required this.state, required this.viewModel});
+
+  final StudentAcademicsState state;
+  final StudentAcademicsViewModel viewModel;
 
   @override
   Widget build(BuildContext context) {
-    const insights = StudentDemoData.insights;
+    final insights = state.detail?.insights.isNotEmpty == true
+        ? state.detail!.insights
+        : state.insights;
+    if (insights.isEmpty) {
+      return const StudentEmptyView(
+        icon: Icons.insights_outlined,
+        title: 'No insights yet',
+        message:
+            'Insights are calculated from your published scores.',
+      );
+    }
     final strongest = [...insights]
       ..sort((a, b) => b.average.compareTo(a.average));
     final weakest = [...insights]
       ..sort((a, b) => a.average.compareTo(b.average));
-    return ListView(
-      padding: const EdgeInsets.all(StudentSpace.md),
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: _InsightSummary(
-                label: 'Strongest',
-                subject: strongest.first.subject,
-                value: strongest.first.average,
-                color: StudentColors.success,
-                icon: Icons.workspace_premium_outlined,
+    return RefreshIndicator(
+      onRefresh: viewModel.refresh,
+      child: ListView(
+        padding: const EdgeInsets.all(StudentSpace.md),
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: _InsightSummary(
+                  label: 'Strongest',
+                  subject: strongest.first.subject,
+                  value: strongest.first.average,
+                  color: StudentColors.success,
+                  icon: Icons.workspace_premium_outlined,
+                ),
               ),
-            ),
-            const SizedBox(width: StudentSpace.sm),
-            Expanded(
-              child: _InsightSummary(
-                label: 'Needs focus',
-                subject: weakest.first.subject,
-                value: weakest.first.average,
-                color: StudentColors.warning,
-                icon: Icons.track_changes_rounded,
+              const SizedBox(width: StudentSpace.sm),
+              Expanded(
+                child: _InsightSummary(
+                  label: 'Needs focus',
+                  subject: weakest.first.subject,
+                  value: weakest.first.average,
+                  color: StudentColors.warning,
+                  icon: Icons.track_changes_rounded,
+                ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: StudentSpace.lg),
-        Text('Subject trends', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: StudentSpace.sm),
-        for (final insight in insights) ...[
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(StudentSpace.md),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+            ],
+          ),
+          const SizedBox(height: StudentSpace.lg),
+          Text('Subject trends',
+              style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: StudentSpace.sm),
+          for (final insight in insights) ...[
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(StudentSpace.md),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(insight.subject,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium),
+                          const SizedBox(height: StudentSpace.xs),
+                          LinearProgressIndicator(
+                            minHeight: 7,
+                            value: (insight.average / 100)
+                                .clamp(0.0, 1.0)
+                                .toDouble(),
+                            borderRadius: BorderRadius.circular(
+                                StudentRadius.pill),
+                            backgroundColor: StudentColors.border,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: StudentSpace.md),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text(insight.subject,
-                            style: Theme.of(context).textTheme.titleMedium),
-                        const SizedBox(height: StudentSpace.xs),
-                        LinearProgressIndicator(
-                          minHeight: 7,
-                          value: insight.average / 100,
-                          borderRadius:
-                              BorderRadius.circular(StudentRadius.pill),
-                          backgroundColor: StudentColors.border,
+                        Text('${insight.average.toStringAsFixed(0)}%',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium),
+                        Text(
+                          '${insight.trend} ${insight.change >= 0 ? '+' : ''}${insight.change.toStringAsFixed(0)}%',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                                color: insight.change >= 0
+                                    ? StudentColors.success
+                                    : StudentColors.error,
+                              ),
                         ),
                       ],
                     ),
-                  ),
-                  const SizedBox(width: StudentSpace.md),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text('${insight.average.toStringAsFixed(0)}%',
-                          style: Theme.of(context).textTheme.titleMedium),
-                      Text(
-                        '${insight.trend} ${insight.change >= 0 ? '+' : ''}${insight.change.toStringAsFixed(0)}%',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: insight.change >= 0
-                                  ? StudentColors.success
-                                  : StudentColors.error,
-                            ),
-                      ),
-                    ],
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
+            const SizedBox(height: StudentSpace.sm),
+          ],
+          const SizedBox(height: StudentSpace.xs),
+          if (state.detailLoading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: StudentSpace.sm),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (state.detail == null && state.snapshot != null)
+            Center(
+              child: TextButton.icon(
+                onPressed: viewModel.loadDetail,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Refresh detailed insights'),
+              ),
+            ),
+          for (final remark in state.detail?.remarks ?? const []) ...[
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.comment_outlined,
+                    color: StudentColors.primary),
+                title: Text(remark.subject),
+                subtitle: Text(remark.message),
+              ),
+            ),
+            const SizedBox(height: StudentSpace.sm),
+          ],
+          Text(
+            'Insights use averages across published tests and are read-only.',
+            style: Theme.of(context).textTheme.bodySmall,
           ),
-          const SizedBox(height: StudentSpace.sm),
         ],
-        const SizedBox(height: StudentSpace.xs),
-        Text(
-          'Insights use averages across published tests and are read-only.',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-      ],
+      ),
     );
   }
 }
@@ -430,6 +606,3 @@ class _InsightSummary extends StatelessWidget {
     );
   }
 }
-
-String _date(DateTime value) =>
-    '${value.day.toString().padLeft(2, '0')}/${value.month.toString().padLeft(2, '0')}/${value.year}';
