@@ -2,9 +2,9 @@ name: TMS CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, staging, mobile-app]
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, staging, mobile-app]
 
 jobs:
   validate:
@@ -55,6 +55,31 @@ jobs:
             -e 'TMSWelcome[0-9]' -e 'PinnacleAdmin' -e 'BaneshworAdmin' \
             -e 'b-baneshwor-01' -e 'janitor-staff-user-300' \
             apps services packages
+
+  mobile:
+    name: Flutter analyze and test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze (errors only fail)
+        run: flutter analyze --no-fatal-warnings
+
+      - name: Run tests
+        run: flutter test
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
