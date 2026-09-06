@@ -1,3 +1,4 @@
+import { AcademicCalendarView } from '../components/calendar/AcademicCalendarView';
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { PageShell } from '../components/patterns/PageShell';
@@ -10,7 +11,7 @@ import { useAuth } from '../context/AuthContext';
 import { api, type AccountantWorkspace } from '../services/api';
 import './staffFinance.css';
 
-type Tab = 'overview' | 'petty-cash' | 'billing' | 'payroll' | 'payments' | 'reports' | 'security';
+type Tab = 'calendar' | 'overview' | 'petty-cash' | 'billing' | 'payroll' | 'payments' | 'reports' | 'security';
 type PettyCash = AccountantWorkspace['pettyCash'][number];
 type Invoice = AccountantWorkspace['invoices'][number];
 type CashDialog = 'new' | PettyCash | null;
@@ -25,6 +26,7 @@ const createCashLine = (item?: PettyCash['items'][number]): CashLine => ({
 });
 
 const accountantNavItems = [
+  { section: 'FINANCE' as const, label: 'Academic calendar', icon: 'calendar_month', path: '/staff/finance#calendar' },
   { section: 'FINANCE' as const, label: 'Overview', icon: 'space_dashboard', path: '/staff/finance#overview' },
   { section: 'FINANCE' as const, label: 'Petty cash', icon: 'account_balance_wallet', path: '/staff/finance#petty-cash' },
   { section: 'FINANCE' as const, label: 'Fee & billing', icon: 'payments', path: '/staff/finance#billing' },
@@ -143,7 +145,7 @@ export function StaffFinancePage() {
   }, [loadWorkspace]);
   useEffect(() => {
     const section = location.hash.slice(1);
-    if (['overview', 'petty-cash', 'billing', 'payroll', 'payments', 'reports', 'security'].includes(section)) setTab(section as Tab);
+    if (['overview', 'petty-cash', 'billing', 'payroll', 'payments', 'reports', 'security', 'calendar'].includes(section)) setTab(section as Tab);
   }, [location.hash]);
 
   const cap = workspace?.pettyCashCap ?? 0;
@@ -230,12 +232,12 @@ export function StaffFinancePage() {
       </td></tr>)}
     </tbody></table></div>;
 
-  const body = loading ? <section className="accountant-panel"><EmptyState title="Loading finance workspace" description="Fetching current branch records and permissions." /></section>
+  const body = tab === 'calendar' ? <section aria-label="Academic calendar"><h1>Academic calendar</h1><p>Institution and assigned-branch events shared with everyone or staff.</p><AcademicCalendarView viewerRole="Accountant" /></section> : loading ? <section className="accountant-panel"><EmptyState title="Loading finance workspace" description="Fetching current branch records and permissions." /></section>
     : loadError ? <section className="accountant-panel"><div className="accountant-empty"><Icon name="error" /><strong>Finance workspace unavailable</strong><p>{loadError}</p><button type="button" className="accountant-secondary-button" onClick={() => void loadWorkspace()}>Try again</button></div></section>
     : !workspace ? null : <>
       {tab === 'overview' && <section className="accountant-hero"><div><span className="accountant-eyebrow"><Icon name="account_balance_wallet" />{branchLabel}</span><h1>Finance control centre</h1><p>Reconcile branch collections and move petty cash through the recorded approval workflow.</p></div><button type="button" className="accountant-primary-button" disabled={!workspace.branches.length} onClick={() => openCashDialog('new')}><Icon name="add" />New petty cash request</button></section>}
 
-      {tab === 'overview' && <><section className="accountant-kpis" aria-label="Finance summary">
+      {tab === 'overview' && <><AcademicCalendarView viewerRole="Accountant" upcoming calendarPath="/staff/finance#calendar" /><section className="accountant-kpis" aria-label="Finance summary">
         <article><span className="is-success"><Icon name="payments" /></span><div><p>Collected</p><strong>{money(workspace.summary.collected)}</strong><small>Across permitted invoices</small></div></article>
         <article><span className="is-warning"><Icon name="pending_actions" /></span><div><p>Outstanding</p><strong>{money(workspace.summary.outstanding)}</strong><small>{money(workspace.summary.overdueAmount)} overdue</small></div></article>
         <article><span className="is-info"><Icon name="account_balance_wallet" /></span><div><p>Petty cash available</p><strong>{money(remaining)}</strong><small>{money(cap)} per branch this month</small></div></article>

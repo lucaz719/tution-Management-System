@@ -15,7 +15,7 @@ export const academicEventsApi = {
     if (viewerRole) query.set('viewerRole', viewerRole);
     return request<{ events: AcademicEvent[] }>(`/academic-events${query.size ? `?${query}` : ''}`);
   },
-  options: () => request<{ classes: Array<{ id: string; name: string; branchId: string; branch: { name: string } }> }>('/academic-events/options'),
-  updateAudience: (id: string, audience: EventAudience) => request(`/academic-events/${encodeURIComponent(id)}/audience`, { method: 'PATCH', body: JSON.stringify({ audience }) }),
+  options: (branchId?: string) => request<{ classes: Array<{ id: string; name: string; branchId: string; branch: { name: string } }> }>(`/academic-events/options${branchId ? `?branchId=${encodeURIComponent(branchId)}` : ''}`),
+  updateAudience: (id: string, audience: EventAudience, branchId?: string) => request(`/academic-events/${encodeURIComponent(id)}/audience`, { method: 'PATCH', body: JSON.stringify({ audience, branchId }) }),
   createTenantWide: (payload: Omit<AcademicEvent, 'id' | 'branchId'>) => request<{ event: AcademicEvent }>('/academic-events', { method: 'POST', body: JSON.stringify(payload) }),
 };

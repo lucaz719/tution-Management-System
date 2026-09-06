@@ -7,7 +7,7 @@ import { NepalCalendar } from './NepalCalendar';
 import './academicCalendarView.css';
 
 /** Read-only view: server resolves the actor's branch, class, audience and child access. */
-export function AcademicCalendarView({ studentId, upcoming = false, calendarPath = 'calendar', viewerRole }: { studentId?: string; upcoming?: boolean; calendarPath?: string; viewerRole?: 'Teacher' | 'Student' | 'Parent' }) {
+export function AcademicCalendarView({ studentId, upcoming = false, calendarPath = 'calendar', viewerRole }: { studentId?: string; upcoming?: boolean; calendarPath?: string; viewerRole?: 'Teacher' | 'Student' | 'Parent' | 'Accountant' }) {
   const [state, setState] = useState<{ key?: string; events: AcademicEvent[]; loading: boolean; error?: string }>({ events: [], loading: true });
   const [revision, setRevision] = useState(0);
   const today = useNepalToday();

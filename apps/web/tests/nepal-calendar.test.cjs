@@ -68,3 +68,14 @@ test('events use inclusive Nepal dates, including midnight and date-only holiday
   assert.equal(calendar.eventOccursOn({ startDate: '2026-09-05', endDate: '2026-09-05' }, '2026-09-05'), true);
   assert.equal(calendar.eventOccursOn({ startDate: 'invalid', endDate: 'invalid' }, '2026-09-05'), false);
 });
+
+test('appointment Nepal wall time round-trips independently of browser timezone', () => {
+  const original = process.env.TZ;
+  try {
+    for (const zone of ['UTC', 'Asia/Kathmandu', 'America/Los_Angeles']) {
+      process.env.TZ = zone;
+      assert.equal(calendar.nepalDateTimeInput('2026-09-06T18:30:00Z'), '2026-09-07T00:15');
+      assert.equal(calendar.nepalDateTimeInputToIso('2026-09-07T00:15'), '2026-09-06T18:30:00.000Z');
+    }
+  } finally { if (original === undefined) delete process.env.TZ; else process.env.TZ = original; }
+});
