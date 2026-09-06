@@ -1,34 +1,62 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:tms_mobile/core/adaptive/capabilities.dart';
 import 'package:tms_mobile/core/adaptive/widgets/adaptive_layout.dart';
-import '../data/student_demo_data.dart';
-import '../models/student_portal_models.dart';
+import 'package:tms_mobile/core/sync/sync.dart';
+import '../models/student_portal_dto.dart';
 import '../student_design.dart';
+import '../viewmodels/student_home_viewmodel.dart';
 import '../widgets/student_scaffold.dart';
 
-class StudentHomeScreen extends StatelessWidget {
+/// Student home screen backed by the authenticated student portal.
+///
+/// Data comes from [studentHomeViewModelProvider] (one
+/// `GET /api/users/me/student-portal` per load/refresh). Every state is
+/// covered: loading, loaded, empty sections, error with retry, access-denied
+/// (403) and offline (no connection).
+class StudentHomeScreen extends ConsumerWidget {
   const StudentHomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final nextEvent = StudentDemoData.events.first;
-    final overdue = StudentDemoData.invoices
-        .where((invoice) => invoice.state == FeeDeadlineState.overdue)
-        .fold<double>(0, (sum, invoice) => sum + invoice.netPayable);
-    final unread =
-        StudentDemoData.notices.where((notice) => !notice.isRead).length;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(studentHomeViewModelProvider);
+    final viewModel = ref.read(studentHomeViewModelProvider.notifier);
+    final connectivity = ref.watch(connectivityMonitorProvider);
+    final portal = state.portal;
+
+    if (state.isLoading && portal == null) {
+      return const StudentScaffold(
+        title: 'Student dashboard',
+        selectedIndex: 0,
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (portal == null) {
+      return StudentScaffold(
+        title: 'Student dashboard',
+        selectedIndex: 0,
+        body: _HomeStateMessage(
+          state: state,
+          isOffline: state.isOffline || connectivity == ConnectivityState.offline,
+          onRetry: viewModel.load,
+        ),
+      );
+    }
+
+    final showOfflineBar = connectivity == ConnectivityState.offline;
 
     return StudentScaffold(
       title: 'Student dashboard',
       selectedIndex: 0,
       actions: [
         Semantics(
-          label: '$unread unread notifications',
+          label: '${portal.unreadCount} unread notifications',
           button: true,
           child: Badge(
-            isLabelVisible: unread > 0,
-            label: Text('$unread'),
+            isLabelVisible: portal.unreadCount > 0,
+            label: Text('${portal.unreadCount}'),
             child: IconButton(
               tooltip: 'Notifications',
               onPressed: () => context.push('/student/notifications'),
@@ -39,75 +67,75 @@ class StudentHomeScreen extends StatelessWidget {
         const SizedBox(width: StudentSpace.xs),
       ],
       body: RefreshIndicator(
-        onRefresh: () async =>
-            Future<void>.delayed(const Duration(milliseconds: 350)),
-        child: ResponsiveBuilder(
-          builder: (context, sizeClass) {
-            final useTwoColumns =
-                const UseTwoColumns().isAvailableAt(sizeClass);
-            final useThreeColumns =
-                const UseThreeColumns().isAvailableAt(sizeClass);
+        onRefresh: viewModel.refresh,
+        child: Column(
+          children: [
+            if (showOfflineBar)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                color: StudentColors.warning.withValues(alpha: 0.12),
+                child: const Row(
+                  children: [
+                    Icon(Icons.wifi_off_rounded, size: 18),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'You are offline. Showing the last loaded dashboard.',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            Expanded(
+              child: ResponsiveBuilder(
+                builder: (context, sizeClass) {
+                  final useTwoColumns =
+                      const UseTwoColumns().isAvailableAt(sizeClass);
+                  final useThreeColumns =
+                      const UseThreeColumns().isAvailableAt(sizeClass);
 
-            if (useThreeColumns) {
-              return _buildThreeColumnLayout(
-                context,
-                nextEvent,
-                overdue,
-                unread,
-              );
-            }
+                  if (useThreeColumns) {
+                    return _buildThreeColumnLayout(context, portal);
+                  }
 
-            if (useTwoColumns) {
-              return _buildTwoColumnLayout(
-                context,
-                nextEvent,
-                overdue,
-                unread,
-              );
-            }
+                  if (useTwoColumns) {
+                    return _buildTwoColumnLayout(context, portal);
+                  }
 
-            return _buildCompactLayout(
-              context,
-              nextEvent,
-              overdue,
-              unread,
-            );
-          },
+                  return _buildCompactLayout(context, portal);
+                },
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildCompactLayout(
-    BuildContext context,
-    StudentAcademicEvent nextEvent,
-    double overdue,
-    int unread,
-  ) {
+  Widget _buildCompactLayout(BuildContext context, StudentPortal portal) {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       children: [
-        _buildWelcomeCard(context, nextEvent),
-        if (overdue > 0) ...[
+        _buildWelcomeCard(context, portal),
+        if (portal.overdueAmount > 0) ...[
           const SizedBox(height: StudentSpace.md),
-          _buildOverdueCard(context, overdue),
+          _buildOverdueCard(context, portal.overdueAmount),
         ],
         const SizedBox(height: StudentSpace.lg),
-        _buildTimetableSection(context),
+        _buildTimetableSection(context, portal),
         const SizedBox(height: StudentSpace.sm),
-        _buildHomeworkSection(context),
+        _buildHomeworkSection(context, portal),
         const SizedBox(height: StudentSpace.sm),
-        _buildQuickActions(context),
+        _buildQuickActions(context, portal),
       ],
     );
   }
 
-  Widget _buildTwoColumnLayout(
-    BuildContext context,
-    StudentAcademicEvent nextEvent,
-    double overdue,
-    int unread,
-  ) {
+  Widget _buildTwoColumnLayout(BuildContext context, StudentPortal portal) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -116,15 +144,15 @@ class StudentHomeScreen extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(24, 8, 12, 24),
             children: [
-              _buildWelcomeCard(context, nextEvent),
-              if (overdue > 0) ...[
+              _buildWelcomeCard(context, portal),
+              if (portal.overdueAmount > 0) ...[
                 const SizedBox(height: StudentSpace.md),
-                _buildOverdueCard(context, overdue),
+                _buildOverdueCard(context, portal.overdueAmount),
               ],
               const SizedBox(height: StudentSpace.lg),
-              _buildTimetableSection(context),
+              _buildTimetableSection(context, portal),
               const SizedBox(height: StudentSpace.sm),
-              _buildHomeworkSection(context),
+              _buildHomeworkSection(context, portal),
             ],
           ),
         ),
@@ -134,11 +162,11 @@ class StudentHomeScreen extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(12, 8, 24, 24),
             children: [
-              _buildQuickActions(context, isSidebar: true),
+              _buildQuickActions(context, portal, isSidebar: true),
               const SizedBox(height: StudentSpace.lg),
-              _buildNextEventCard(context, nextEvent),
+              _buildNextEventCard(context, portal),
               const SizedBox(height: StudentSpace.lg),
-              _buildCertificatesCard(context),
+              _buildCertificatesCard(context, portal),
             ],
           ),
         ),
@@ -146,12 +174,7 @@ class StudentHomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildThreeColumnLayout(
-    BuildContext context,
-    StudentAcademicEvent nextEvent,
-    double overdue,
-    int unread,
-  ) {
+  Widget _buildThreeColumnLayout(BuildContext context, StudentPortal portal) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -161,9 +184,9 @@ class StudentHomeScreen extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              _buildProfileSidebar(context),
+              _buildProfileSidebar(context, portal),
               const SizedBox(height: StudentSpace.lg),
-              _buildQuickActions(context, isSidebar: true),
+              _buildQuickActions(context, portal, isSidebar: true),
             ],
           ),
         ),
@@ -174,15 +197,15 @@ class StudentHomeScreen extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(24, 8, 12, 24),
             children: [
-              _buildWelcomeCard(context, nextEvent),
-              if (overdue > 0) ...[
+              _buildWelcomeCard(context, portal),
+              if (portal.overdueAmount > 0) ...[
                 const SizedBox(height: StudentSpace.md),
-                _buildOverdueCard(context, overdue),
+                _buildOverdueCard(context, portal.overdueAmount),
               ],
               const SizedBox(height: StudentSpace.lg),
-              _buildTimetableSection(context),
+              _buildTimetableSection(context, portal),
               const SizedBox(height: StudentSpace.sm),
-              _buildHomeworkSection(context),
+              _buildHomeworkSection(context, portal),
             ],
           ),
         ),
@@ -193,11 +216,9 @@ class StudentHomeScreen extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              _buildNextEventCard(context, nextEvent),
+              _buildNextEventCard(context, portal),
               const SizedBox(height: StudentSpace.lg),
-              _buildCertificatesCard(context),
-              const SizedBox(height: StudentSpace.lg),
-              _buildStatsSidebar(context),
+              _buildCertificatesCard(context, portal),
             ],
           ),
         ),
@@ -205,8 +226,8 @@ class StudentHomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildWelcomeCard(
-      BuildContext context, StudentAcademicEvent nextEvent) {
+  Widget _buildWelcomeCard(BuildContext context, StudentPortal portal) {
+    final profile = portal.profile;
     return Container(
       padding: const EdgeInsets.all(StudentSpace.lg),
       decoration: BoxDecoration(
@@ -221,7 +242,7 @@ class StudentHomeScreen extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Namaste, Aarav',
+            'Namaste, ${profile.name.split(' ').first}',
             style: Theme.of(context)
                 .textTheme
                 .displaySmall
@@ -229,7 +250,7 @@ class StudentHomeScreen extends StatelessWidget {
           ),
           const SizedBox(height: StudentSpace.xs),
           Text(
-            'Grade 8 · Baneshwor Branch',
+            '${profile.grade} · ${profile.branch}',
             style: Theme.of(context)
                 .textTheme
                 .bodyMedium
@@ -241,7 +262,7 @@ class StudentHomeScreen extends StatelessWidget {
               const Icon(Icons.schedule_rounded, color: StudentColors.accent),
               const SizedBox(width: StudentSpace.xs),
               Text(
-                '${StudentDemoData.sessions.length} sessions today',
+                '${portal.todaySessions.length} sessions today',
                 style: Theme.of(context)
                     .textTheme
                     .titleMedium
@@ -292,7 +313,7 @@ class StudentHomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildTimetableSection(BuildContext context) {
+  Widget _buildTimetableSection(BuildContext context, StudentPortal portal) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -302,15 +323,33 @@ class StudentHomeScreen extends StatelessWidget {
           onTap: () => context.push('/student/timetable'),
         ),
         const SizedBox(height: StudentSpace.sm),
-        for (final session in StudentDemoData.sessions) ...[
-          _SessionTile(session: session),
-          const SizedBox(height: StudentSpace.sm),
-        ],
+        if (portal.todaySessions.isEmpty)
+          const Card(
+            child: Padding(
+              padding: EdgeInsets.all(StudentSpace.md),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.event_busy_outlined,
+                    color: StudentColors.mutedText,
+                  ),
+                  SizedBox(width: StudentSpace.sm),
+                  Expanded(child: Text('No sessions scheduled for today.')),
+                ],
+              ),
+            ),
+          )
+        else
+          for (final session in portal.todaySessions) ...[
+            _SessionTile(session: session),
+            const SizedBox(height: StudentSpace.sm),
+          ],
       ],
     );
   }
 
-  Widget _buildHomeworkSection(BuildContext context) {
+  Widget _buildHomeworkSection(BuildContext context, StudentPortal portal) {
+    final pending = portal.pendingHomework;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -320,49 +359,81 @@ class StudentHomeScreen extends StatelessWidget {
           onTap: () => context.go('/student/academics'),
         ),
         const SizedBox(height: StudentSpace.sm),
-        for (final item in StudentDemoData.homework.take(2)) ...[
-          Card(
-            child: ListTile(
-              minTileHeight: 72,
-              leading: const Icon(Icons.assignment_outlined,
-                  color: StudentColors.primary),
-              title: Text(item.title),
-              subtitle: Text('${item.subject} · Due ${_shortDate(item.dueAt)}'),
-              trailing: const Icon(Icons.chevron_right_rounded),
-              onTap: () => context.go('/student/academics'),
+        if (pending.isEmpty)
+          const Card(
+            child: Padding(
+              padding: EdgeInsets.all(StudentSpace.md),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.check_circle_outline_rounded,
+                    color: StudentColors.success,
+                  ),
+                  SizedBox(width: StudentSpace.sm),
+                  Expanded(child: Text('All caught up. No pending homework.')),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: StudentSpace.sm),
-        ],
+          )
+        else
+          for (final item in pending.take(2)) ...[
+            Card(
+              child: ListTile(
+                minTileHeight: 72,
+                leading: const Icon(
+                  Icons.assignment_outlined,
+                  color: StudentColors.primary,
+                ),
+                title: Text(item.title),
+                subtitle: Text('${item.subject} · Due ${item.dueLabel}'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => context.go('/student/academics'),
+              ),
+            ),
+            const SizedBox(height: StudentSpace.sm),
+          ],
       ],
     );
   }
 
-  Widget _buildQuickActions(BuildContext context, {bool isSidebar = false}) {
+  Widget _buildQuickActions(
+    BuildContext context,
+    StudentPortal portal, {
+    bool isSidebar = false,
+  }) {
+    final profile = portal.profile;
+    final latestScore = portal.results.isEmpty
+        ? '—'
+        : '${portal.results.first.percentage.toStringAsFixed(0)}%';
+    final nextEvent = portal.events.isEmpty
+        ? '—'
+        : '${portal.events.first.day} ${portal.events.first.month}';
+    final attendance = profile.attendanceRate == null
+        ? '—'
+        : '${profile.attendanceRate!.toStringAsFixed(0)}%';
     final actions = [
       _QuickActionData(
         icon: Icons.fact_check_outlined,
         label: 'Attendance',
-        value: '75%',
+        value: attendance,
         onTap: () => context.push('/student/attendance'),
       ),
       _QuickActionData(
         icon: Icons.show_chart_rounded,
         label: 'Latest score',
-        value: '88%',
+        value: latestScore,
         onTap: () => context.go('/student/academics'),
       ),
       _QuickActionData(
         icon: Icons.workspace_premium_outlined,
         label: 'Certificates',
-        value: '${StudentDemoData.certificates.length}',
+        value: '${portal.certificates.length}',
         onTap: () => context.push('/student/certificates'),
       ),
       _QuickActionData(
         icon: Icons.event_outlined,
         label: 'Next event',
-        value:
-            '${StudentDemoData.events.first.date.day}/${StudentDemoData.events.first.date.month}',
+        value: nextEvent,
         onTap: () => context.push('/student/calendar'),
       ),
     ];
@@ -435,7 +506,7 @@ class StudentHomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildNextEventCard(BuildContext context, StudentAcademicEvent event) {
+  Widget _buildNextEventCard(BuildContext context, StudentPortal portal) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(StudentSpace.md),
@@ -446,72 +517,83 @@ class StudentHomeScreen extends StatelessWidget {
               children: [
                 const Icon(Icons.event_outlined, color: StudentColors.primary),
                 const SizedBox(width: StudentSpace.sm),
-                Text('Upcoming Events',
-                    style: Theme.of(context).textTheme.titleMedium),
+                Expanded(
+                  child: Text('Upcoming Events',
+                      style: Theme.of(context).textTheme.titleMedium),
+                ),
               ],
             ),
             const SizedBox(height: StudentSpace.md),
-            ...StudentDemoData.events.take(3).map((e) => Padding(
-                  padding: const EdgeInsets.only(bottom: StudentSpace.sm),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: StudentColors.primary.withValues(alpha: 0.1),
-                          borderRadius:
-                              BorderRadius.circular(StudentRadius.card),
+            if (portal.events.isEmpty)
+              Text(
+                'No upcoming events.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              )
+            else
+              ...portal.events.take(3).map((e) => Padding(
+                    padding: const EdgeInsets.only(bottom: StudentSpace.sm),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: StudentColors.primary.withValues(alpha: 0.1),
+                            borderRadius:
+                                BorderRadius.circular(StudentRadius.card),
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                e.day,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleLarge
+                                    ?.copyWith(
+                                      color: StudentColors.primary,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                              ),
+                              Text(
+                                e.month,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                      color: StudentColors.primary,
+                                    ),
+                              ),
+                            ],
+                          ),
                         ),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              '${e.date.day}',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleLarge
-                                  ?.copyWith(
-                                    color: StudentColors.primary,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                            ),
-                            Text(
-                              _monthShort(e.date.month),
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(
-                                    color: StudentColors.primary,
-                                  ),
-                            ),
-                          ],
+                        const SizedBox(width: StudentSpace.md),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(e.title,
+                                  style:
+                                      Theme.of(context).textTheme.titleSmall),
+                              Text(
+                                e.details.isEmpty
+                                    ? '${e.kind} · ${e.dateLabel}'
+                                    : '${e.details} · ${e.dateLabel}',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: StudentSpace.md),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(e.title,
-                                style: Theme.of(context).textTheme.titleSmall),
-                            Text(
-                              '${e.details} · ${_formatTime(e.date)}',
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                )),
+                      ],
+                    ),
+                  )),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildCertificatesCard(BuildContext context) {
+  Widget _buildCertificatesCard(BuildContext context, StudentPortal portal) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(StudentSpace.md),
@@ -523,9 +605,10 @@ class StudentHomeScreen extends StatelessWidget {
                 const Icon(Icons.workspace_premium_outlined,
                     color: StudentColors.primary),
                 const SizedBox(width: StudentSpace.sm),
-                Text('Certificates',
-                    style: Theme.of(context).textTheme.titleMedium),
-                const Spacer(),
+                Expanded(
+                  child: Text('Certificates',
+                      style: Theme.of(context).textTheme.titleMedium),
+                ),
                 TextButton(
                   onPressed: () => context.go('/student/certificates'),
                   child: const Text('View All'),
@@ -533,45 +616,60 @@ class StudentHomeScreen extends StatelessWidget {
               ],
             ),
             const SizedBox(height: StudentSpace.md),
-            ...StudentDemoData.certificates.take(2).map((cert) => Padding(
-                  padding: const EdgeInsets.only(bottom: StudentSpace.sm),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: StudentColors.accent.withValues(alpha: 0.1),
-                          borderRadius:
-                              BorderRadius.circular(StudentRadius.card),
+            if (portal.certificates.isEmpty)
+              Text(
+                'No certificates yet.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              )
+            else
+              ...portal.certificates.take(2).map((cert) => Padding(
+                    padding: const EdgeInsets.only(bottom: StudentSpace.sm),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color:
+                                StudentColors.accent.withValues(alpha: 0.1),
+                            borderRadius:
+                                BorderRadius.circular(StudentRadius.card),
+                          ),
+                          child: const Icon(Icons.star_rounded,
+                              color: StudentColors.accent),
                         ),
-                        child: const Icon(Icons.star_rounded,
-                            color: StudentColors.accent),
-                      ),
-                      const SizedBox(width: StudentSpace.md),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(cert.title,
-                                style: Theme.of(context).textTheme.titleSmall),
-                            Text(
-                              'Issued ${_shortDate(cert.issuedAt)}',
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ],
+                        const SizedBox(width: StudentSpace.md),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(cert.title,
+                                  style:
+                                      Theme.of(context).textTheme.titleSmall),
+                              Text(
+                                'Issued ${cert.issuedDateLabel}',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                )),
+                      ],
+                    ),
+                  )),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildProfileSidebar(BuildContext context) {
+  Widget _buildProfileSidebar(BuildContext context, StudentPortal portal) {
+    final profile = portal.profile;
+    final attendance = profile.attendanceRate == null
+        ? '—'
+        : '${profile.attendanceRate!.toStringAsFixed(0)}%';
+    final latestScore = portal.results.isEmpty
+        ? '—'
+        : '${portal.results.first.percentage.toStringAsFixed(0)}%';
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(StudentSpace.md),
@@ -580,28 +678,43 @@ class StudentHomeScreen extends StatelessWidget {
             CircleAvatar(
               radius: 32,
               backgroundColor: StudentColors.primary.withValues(alpha: 0.1),
-              child: const Icon(Icons.person,
-                  size: 32, color: StudentColors.primary),
+              child: Text(
+                profile.initials,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: StudentColors.primary,
+                    ),
+              ),
             ),
             const SizedBox(height: StudentSpace.md),
             Text(
-              'Aarav Sharma',
+              profile.name,
               style: Theme.of(context).textTheme.titleLarge,
+              textAlign: TextAlign.center,
             ),
             const SizedBox(height: StudentSpace.xxs),
             Text(
-              'Grade 8 · Baneshwor Branch',
+              '${profile.grade} · ${profile.branch}',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: StudentColors.mutedText,
                   ),
+              textAlign: TextAlign.center,
             ),
             const SizedBox(height: StudentSpace.md),
-            const Row(
+            Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _ProfileStat(label: 'Attendance', value: '75%'),
-                _ProfileStat(label: 'Score', value: '88%'),
-                _ProfileStat(label: 'Rank', value: '12/45'),
+                Expanded(
+                  child: _ProfileStat(label: 'Attendance', value: attendance),
+                ),
+                Expanded(
+                  child: _ProfileStat(label: 'Score', value: latestScore),
+                ),
+                Expanded(
+                  child: _ProfileStat(
+                    label: 'Certificates',
+                    value: '${portal.certificates.length}',
+                  ),
+                ),
               ],
             ),
           ],
@@ -609,23 +722,91 @@ class StudentHomeScreen extends StatelessWidget {
       ),
     );
   }
+}
 
-  Widget _buildStatsSidebar(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(StudentSpace.md),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('This Month', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: StudentSpace.md),
-            const _StatRow(label: 'Sessions', value: '42'),
-            const _StatRow(label: 'Hours', value: '84h'),
-            const _StatRow(label: 'Assignments', value: '18'),
-            const _StatRow(label: 'Avg Score', value: '87%'),
-          ],
+/// Full-screen loading/error/denied/offline message for the home screen.
+class _HomeStateMessage extends StatelessWidget {
+  const _HomeStateMessage({
+    required this.state,
+    required this.isOffline,
+    required this.onRetry,
+  });
+
+  final StudentHomeState state;
+  final bool isOffline;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    if (state.isDenied) {
+      return _StateBody(
+        icon: Icons.block_rounded,
+        title: 'Access denied',
+        message: state.error ??
+            'Your account is not allowed to view the student dashboard.',
+        actionLabel: 'Try again',
+        onAction: onRetry,
+      );
+    }
+    if (isOffline) {
+      return _StateBody(
+        icon: Icons.wifi_off_rounded,
+        title: 'You are offline',
+        message:
+            'Check your connection and try again. The dashboard needs the network to load.',
+        actionLabel: 'Retry',
+        onAction: onRetry,
+      );
+    }
+    return _StateBody(
+      icon: Icons.error_outline_rounded,
+      title: 'Could not load the dashboard',
+      message: state.error ?? 'Something went wrong. Please try again.',
+      actionLabel: 'Retry',
+      onAction: onRetry,
+    );
+  }
+}
+
+class _StateBody extends StatelessWidget {
+  const _StateBody({
+    required this.icon,
+    required this.title,
+    required this.message,
+    required this.actionLabel,
+    required this.onAction,
+  });
+
+  final IconData icon;
+  final String title;
+  final String message;
+  final String actionLabel;
+  final VoidCallback onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        const SizedBox(height: 64),
+        Icon(icon, size: 56, color: StudentColors.mutedText),
+        const SizedBox(height: 16),
+        Text(
+          title,
+          style: Theme.of(context).textTheme.titleLarge,
+          textAlign: TextAlign.center,
         ),
-      ),
+        const SizedBox(height: 8),
+        Text(
+          message,
+          style: Theme.of(context).textTheme.bodyMedium,
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 20),
+        Center(
+          child: FilledButton(onPressed: onAction, child: Text(actionLabel)),
+        ),
+      ],
     );
   }
 }
@@ -650,33 +831,6 @@ class _ProfileStat extends StatelessWidget {
                   color: StudentColors.mutedText,
                 )),
       ],
-    );
-  }
-}
-
-class _StatRow extends StatelessWidget {
-  const _StatRow({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: Theme.of(context).textTheme.bodyMedium),
-          Text(
-            value,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: StudentColors.primary,
-                ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -722,7 +876,7 @@ class _SectionHeader extends StatelessWidget {
 class _SessionTile extends StatelessWidget {
   const _SessionTile({required this.session});
 
-  final StudentSession session;
+  final PortalSession session;
 
   @override
   Widget build(BuildContext context) {
@@ -732,18 +886,22 @@ class _SessionTile extends StatelessWidget {
         child: Row(
           children: [
             SizedBox(
-              width: 54,
+              width: 64,
               child: Column(
                 children: [
                   Text(
-                    _time(session.startsAt),
+                    session.time,
                     style: Theme.of(context)
                         .textTheme
                         .titleMedium
                         ?.copyWith(color: StudentColors.primaryDark),
+                    textAlign: TextAlign.center,
                   ),
-                  Text(_meridiem(session.startsAt),
-                      style: Theme.of(context).textTheme.bodySmall),
+                  Text(
+                    session.endTime,
+                    style: Theme.of(context).textTheme.bodySmall,
+                    textAlign: TextAlign.center,
+                  ),
                 ],
               ),
             ),
@@ -771,7 +929,7 @@ class _SessionTile extends StatelessWidget {
               ),
             ),
             StudentStatusPill(
-              label: session.type.label,
+              label: session.typeLabel,
               icon: Icons.school_outlined,
               color: StudentColors.info,
             ),
@@ -817,31 +975,4 @@ class _QuickAction extends StatelessWidget {
       ),
     );
   }
-}
-
-String _shortDate(DateTime value) => '${value.day}/${value.month}';
-String _monthShort(int month) => const [
-      '',
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec'
-    ][month];
-String _time(DateTime value) {
-  final hour = value.hour % 12 == 0 ? 12 : value.hour % 12;
-  return '$hour:${value.minute.toString().padLeft(2, '0')}';
-}
-
-String _meridiem(DateTime value) => value.hour < 12 ? 'AM' : 'PM';
-String _formatTime(DateTime value) {
-  final hour = value.hour % 12 == 0 ? 12 : value.hour % 12;
-  return '$hour:${value.minute.toString().padLeft(2, '0')} ${value.hour < 12 ? 'AM' : 'PM'}';
 }
