@@ -5,10 +5,23 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
 
+import 'api_exception.dart';
+import 'correlation_id.dart';
+import 'retry_policy.dart';
+
 /// Central API client for the TMS mobile app.
 ///
 /// Uses Dio with a Better Auth session cookie jar. All backend calls should go
 /// through [ApiClient.dio] so the httpOnly session cookie is sent automatically.
+///
+/// Interceptor chain (in order):
+/// 1. CookieManager — attaches/persists the Better Auth session cookie.
+/// 2. [CorrelationIdInterceptor] — stamps `x-request-id` per request.
+/// 3. [RetryInterceptor] — safe retry: idempotent GETs only, max 2 retries
+///    with exponential backoff; never auto-retries POST/PUT/PATCH/DELETE.
+/// 4. [_AuthInterceptor] — clears local session on 401 and maps every
+///    failure to a typed [ApiException] (kept on `DioException.error`) while
+///    preserving the human-readable `DioException.message` contract.
 class ApiClient {
   ApiClient._();
 
@@ -30,7 +43,7 @@ class ApiClient {
   static const String userKey = 'tms_auth_user';
   static const String tenantKey = 'tms_tenant_id';
 
-  late final Dio dio;
+  late Dio dio;
   bool _initialized = false;
   static PersistCookieJar? _cookieJar;
 
@@ -52,13 +65,7 @@ class ApiClient {
       throw StateError('Release builds require an HTTPS API_BASE_URL.');
     }
 
-    dio = Dio(BaseOptions(
-      baseUrl: _configuredBaseUrl,
-      connectTimeout: const Duration(seconds: 15),
-      receiveTimeout: const Duration(seconds: 15),
-      contentType: 'application/json',
-      responseType: ResponseType.json,
-    ));
+    dio = buildDio(baseUrl: _configuredBaseUrl);
 
     if (!kIsWeb) {
       // MOB-004: persist session cookies across restarts so the Better Auth
@@ -67,11 +74,68 @@ class ApiClient {
       _cookieJar = PersistCookieJar(
         storage: FileStorage('${supportDir.path}/cookies'),
       );
-      dio.interceptors.add(CookieManager(_cookieJar!));
+      // CookieManager must run first so the session cookie is attached
+      // before any other interceptor sees the request.
+      dio.interceptors.insert(0, CookieManager(_cookieJar!));
     }
-    dio.interceptors.add(_AuthInterceptor());
     _initialized = true;
   }
+
+  /// Builds a fully-wired Dio for [baseUrl] WITHOUT touching platform
+  /// plugins (no path_provider / shared_preferences).
+  ///
+  /// Used by [init] and by unit tests. Pass [adapter] to stub the transport
+  /// (e.g. a mock [HttpClientAdapter]) and [extraInterceptors] to observe or
+  /// stub requests in tests.
+  static Dio buildDio({
+    required String baseUrl,
+    HttpClientAdapter? adapter,
+    List<Interceptor>? extraInterceptors,
+    SafeRetryPolicy? retryPolicy,
+  }) {
+    final client = Dio(BaseOptions(
+      baseUrl: baseUrl,
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 15),
+      contentType: 'application/json',
+      responseType: ResponseType.json,
+    ));
+    if (adapter != null) client.httpClientAdapter = adapter;
+    client.interceptors.add(CorrelationIdInterceptor());
+    client.interceptors.add(RetryInterceptor(client, retryPolicy));
+    if (extraInterceptors != null) {
+      client.interceptors.addAll(extraInterceptors);
+    }
+    client.interceptors.add(_AuthInterceptor());
+    return client;
+  }
+
+  /// Injects a mock/stub [Dio] for unit tests.
+  ///
+  /// Prefer building the double with [buildDio] so the real interceptor
+  /// chain (correlation-id, retry, error mapping) stays under test:
+  ///
+  /// ```dart
+  /// ApiClient.instance.setDioForTesting(ApiClient.buildDio(
+  ///   baseUrl: 'https://test.invalid',
+  ///   adapter: myMockAdapter,
+  /// ));
+  /// addTearDown(ApiClient.instance.resetForTesting);
+  /// ```
+  @visibleForTesting
+  void setDioForTesting(Dio testDio) {
+    dio = testDio;
+    _initialized = true;
+  }
+
+  /// Clears state injected via [setDioForTesting].
+  @visibleForTesting
+  void resetForTesting() {
+    _initialized = false;
+  }
+
+  /// Whether the client is ready to serve requests.
+  bool get isInitialized => _initialized;
 
   /// Save the authenticated user as JSON string.
   static Future<void> saveUser(String userJson) async {
@@ -94,7 +158,8 @@ class ApiClient {
   }
 }
 
-/// Clears local user state when the server rejects the session.
+/// Clears local user state when the server rejects the session, then maps
+/// every failure to a typed [ApiException].
 class _AuthInterceptor extends Interceptor {
   @override
   Future<void> onError(
@@ -106,21 +171,16 @@ class _AuthInterceptor extends Interceptor {
       ApiClient.onSessionInvalidated?.call();
     }
 
-    // Surface a human-readable message from the API response body.
-    if (err.response?.data is Map) {
-      final body = err.response!.data as Map<String, dynamic>;
-      final message = body['error'] as String? ?? body['message'] as String?;
-      if (message != null) {
-        handler.next(DioException(
-          requestOptions: err.requestOptions,
-          response: err.response,
-          type: err.type,
-          error: message,
-          message: message,
-        ));
-        return;
-      }
-    }
-    handler.next(err);
+    // Map to the typed exception. The human-readable message stays on
+    // `message` (existing callers read that); the typed value rides on
+    // `error` for callers that want to branch on kind/status.
+    final apiError = ApiException.fromDioException(err);
+    handler.next(DioException(
+      requestOptions: err.requestOptions,
+      response: err.response,
+      type: err.type,
+      error: apiError,
+      message: apiError.message,
+    ));
   }
 }
