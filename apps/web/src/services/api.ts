@@ -31,7 +31,7 @@ export interface BillingLedger {
 export interface AccountantWorkspace {
   branches: Array<{ id: string; name: string }>;
   pettyCashCap: number;
-  pettyCashUsage: Array<{ branchId: string; committed: number }>;
+  pettyCashUsage: Array<{ branchId: string; committed: number; limit: number; available: number }>;
   summary: {
     collected: number;
     outstanding: number;

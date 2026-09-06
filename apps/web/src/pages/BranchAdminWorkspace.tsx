@@ -1,3 +1,5 @@
+import { PettyCashFunding } from '../components/patterns/PettyCashFunding';
+import { financeApi, type BranchAllowance } from '../services/api/finance';
 import { NepaliDateTimeField } from '../components/calendar/NepaliDateTimeField';
 import { nepalDateTimeInput, nepaliDateHeading, NEPAL_TIME_ZONE } from '../utils/nepalCalendar';
 import { EventTargetFields } from '../components/calendar/EventTargetFields';
@@ -219,15 +221,15 @@ function PettyCashView() {
   const [reason, setReason] = useState(''); 
   const [decision, setDecision] = useState<'APPROVE' | 'REJECT'>('APPROVE');
   const [pettyCash, setPettyCash] = useState<any[]>([]);
-  const [monthlyLimit, setMonthlyLimit] = useState(0);
+  const [allowances, setAllowances] = useState<BranchAllowance[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const loadPettyCash = useCallback(async () => { setLoading(true); setLoadError(''); try { const [records, config] = await Promise.all([api.finances.getPettyCash(), api.finances.getConfig()]); setPettyCash(records); setMonthlyLimit(config.pettyCashCap); } catch (cause) { setLoadError(cause instanceof Error ? cause.message : 'Petty-cash requests could not be loaded.'); } finally { setLoading(false); } }, []);
+  const loadPettyCash = useCallback(async () => { setLoading(true); setLoadError(''); try { const [records, config] = await Promise.all([api.finances.getPettyCash(), financeApi.funding()]); setPettyCash(records); setAllowances(config.allowances); } catch (cause) { setLoadError(cause instanceof Error ? cause.message : 'Petty-cash requests could not be loaded.'); } finally { setLoading(false); } }, []);
   useEffect(() => { void loadPettyCash(); }, [loadPettyCash]);
   const pendingPettyCash = pettyCash.filter((item) => item.status === 'PENDING').map((item) => ({ ...item, requester: item.requesterName || 'Branch accountant', date: new Date(item.createdAt).toLocaleDateString('en-NP') }));
-  const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
-  const currentUsage = pettyCash.filter((item) => new Date(item.createdAt) >= monthStart && !['REJECTED', 'PENDING'].includes(item.status)).reduce((sum, item) => sum + Number(item.amount), 0);
-  const availableLimit = monthlyLimit - currentUsage;
+  const allowance = allowances.find(item => item.branchId === selectedRequest?.branchId);
+  const currentUsage = allowance?.used ?? 0;
+  const availableLimit = allowance?.available ?? 0;
   const requestAmount = selectedRequest?.amount || 0;
   const isOutOfLimit = requestAmount > availableLimit;
 
@@ -235,34 +237,19 @@ function PettyCashView() {
     event.preventDefault(); 
     if (decision === 'REJECT' && !reason.trim()) return; 
     
-    let successMessage = '';
-    let apiCall: Promise<unknown>;
-    
-    if (decision === 'APPROVE') {
-      if (isOutOfLimit) {
-        apiCall = api.finances.approvePettyCash(selectedRequest.id, 'APPROVE_L1', reason);
-        successMessage = 'Out of limit: Request forwarded to Tenant Admin for approval.';
-      } else {
-        apiCall = api.finances.approvePettyCash(selectedRequest.id, 'APPROVE_L2', reason);
-        successMessage = 'Petty cash approved and granted (within monthly limit).';
-      }
-    } else {
-      apiCall = api.finances.decidePettyCash(selectedRequest.id, 'REJECT', reason);
-      successMessage = 'Petty cash request rejected.';
-    }
-    
     void action.run(async () => {
-      await apiCall;
-      setSelectedRequest(null);
-      setReason('');
-      await loadPettyCash();
-    }, successMessage); 
+      if (decision === 'APPROVE') await api.finances.approvePettyCash(selectedRequest.id, 'APPROVE_L1', reason);
+      else await api.finances.decidePettyCash(selectedRequest.id, 'REJECT', reason);
+      setSelectedRequest(null); setReason(''); await loadPettyCash();
+    }, decision === 'REJECT' ? 'Petty cash request rejected.' : 'Decision saved. Requests within the allowance are released; excess requests go to the Tenant Admin.');
   };
-  
+
   const reasonMissing = decision === 'REJECT' && !reason.trim();
   
   return <Page title="Petty Cash Approvals" description="Manage petty cash requests. If within limit, grant directly. If out of limit, forward to Tenant Admin.">
-    <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: '20px' }}>
+    <PettyCashFunding key={JSON.stringify(allowances)} onUpdated={() => void loadPettyCash()} />
+    <Feedback message={action.message} error={action.error} />
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
       {/* List of requests */}
       <Card hoverable={false} style={{ padding: '16px' }}>
         <h3 style={{ fontSize: '16px', marginBottom: '12px' }}>Pending Requests</h3>
@@ -338,6 +325,13 @@ function PettyCashView() {
         )}
       </div>
     </div>
+    <Card hoverable={false}><h3>Request history and receipts</h3>
+      {pettyCash.filter(item => item.status !== 'PENDING').map(item => <div key={item.id} style={{ borderTop: '1px solid var(--border)', padding: '12px 0' }}>
+        <strong>{item.purpose} - NPR {Number(item.amount).toLocaleString()}</strong><p>{item.status === 'APPROVED_LEVEL1' ? 'Awaiting Tenant Admin decision' : item.status}</p>
+        {item.receiptProofUrl && /^https?:\/\//i.test(item.receiptProofUrl) && <a href={item.receiptProofUrl} target="_blank" rel="noreferrer">View receipt</a>}
+        {item.status === 'RECEIPT_SUBMITTED' && <Button disabled={action.busy} onClick={() => void action.run(async () => { await financeApi.closePettyCash(item.id); await loadPettyCash(); }, 'Receipt verified and request closed.')}>Verify & close</Button>}
+      </div>)}
+    </Card>
   </Page>;
 }
 

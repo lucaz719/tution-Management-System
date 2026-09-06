@@ -50,12 +50,12 @@ assert.equal(
 assert.equal(
   canReleasePettyCash(branchAdmin, { tenantId: 'tenant-a', branchId: 'branch-a', status: 'APPROVED_LEVEL1' }),
   false,
-  'Branch Admin may never release petty-cash funds',
+  'Branch Admin cannot use the tenant release endpoint',
 );
 assert.equal(
   canReleasePettyCash(tenantAdmin, { tenantId: 'tenant-a', branchId: 'branch-a', status: 'APPROVED_LEVEL1' }),
   true,
-  'Tenant Admin releases only L1-approved petty cash',
+  'Tenant Admin can release escalated petty cash',
 );
 assert.equal(
   (ROLE_PERMISSIONS['Branch Admin'] as readonly string[]).includes('view_reports'),
@@ -64,3 +64,7 @@ assert.equal(
 );
 
 console.log('access-control tests passed');
+
+assert.equal(canReleasePettyCash(tenantAdmin, { tenantId: 'tenant-a', branchId: 'branch-a', status: 'PENDING' }), true);
+assert.equal(canReleasePettyCash(tenantAdmin, { tenantId: 'tenant-b', branchId: 'branch-a', status: 'PENDING' }), false);
+assert.equal(canReleasePettyCash(tenantAdmin, { tenantId: 'tenant-a', branchId: 'branch-a', status: 'RELEASED' }), false);

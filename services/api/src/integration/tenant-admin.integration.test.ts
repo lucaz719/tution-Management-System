@@ -667,7 +667,7 @@ async function main(): Promise<void> {
       amount: 30000,
       purpose: 'Request above the remaining monthly cap',
     });
-    assert.equal(response.status, 422, 'petty-cash requests must enforce the branch monthly cap');
+    assert.equal(response.status, 201, 'excess requests must be allowed for escalation');
     response = await request('POST', '/api/finances/petty-cash/request', accountantCookie, {
       branchId: branchA.id,
       amount: 1500,
@@ -704,7 +704,7 @@ async function main(): Promise<void> {
     response = await request('POST', `/api/finances/petty-cash/approve-l2/${pettyCashId}`, adminACookie, {
       remarks: 'Released manually',
     });
-    assert.equal(response.status, 200);
+    assert.equal(response.status, 403, 'within-allowance branch release must not be released twice');
     response = await request('POST', `/api/finances/petty-cash/upload-receipt/${pettyCashId}`, adminACookie, {
       receiptProofUrl: 'https://example.invalid/admin-cannot-upload.jpg',
     });
@@ -725,8 +725,6 @@ async function main(): Promise<void> {
     });
     assert.equal(response.status, 201);
     const revisionPettyCashId = response.body.pettyCash.id;
-    response = await request('POST', `/api/finances/petty-cash/approve-l1/${revisionPettyCashId}`, branchAdminCookie, {});
-    assert.equal(response.status, 200);
     response = await request('POST', `/api/finances/petty-cash/decide/${revisionPettyCashId}`, adminACookie, {
       action: 'REVISION',
       remarks: 'Clarify the required supplies.',

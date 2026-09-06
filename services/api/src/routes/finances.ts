@@ -1,3 +1,4 @@
+import { branchAllowance, pettyCashPeriod } from '../services/petty-cash';
 import { Router, Response } from 'express';
 import { LateFeeMode, Prisma, RefundPolicy } from '@prisma/client';
 import prisma from '../utils/db';
@@ -5,7 +6,7 @@ import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { MockSmsSender } from '../utils/notifications';
 import { getAdmissionTenure, getBillingPeriod } from '../utils/nepali';
-import { canApprovePettyCashL1, canReleasePettyCash, hasBranchPermission, isTenantAdmin } from '../utils/access-control';
+import { managedBranchIds, canApprovePettyCashL1, canReleasePettyCash, hasBranchPermission, isTenantAdmin } from '../utils/access-control';
 import crypto from 'node:crypto';
 import { isInvoiceOverdue, recurringInvoiceType } from '../utils/billing-rules';
 import { createConnectIpsForm, validateAndConfirmConnectIps } from '../utils/connectips';
@@ -640,10 +641,7 @@ router.get('/accountant-workspace', authMiddleware, async (req: TenantRequest, r
   };
 
   try {
-    const monthStart = new Date();
-    monthStart.setDate(1);
-    monthStart.setHours(0, 0, 0, 0);
-    const [branches, invoices, requests, monthlyRequests, expenses, payrolls, tenant, pendingPaymentReviews] = await Promise.all([
+    const [branches, invoices, requests, expenses, payrolls, tenant, pendingPaymentReviews] = await Promise.all([
       prisma.branch.findMany({
         where: { tenantId: req.tenantId!, ...(tenantWide ? {} : { id: { in: branchIds } }) },
         select: { id: true, name: true },
@@ -664,21 +662,13 @@ router.get('/accountant-workspace', authMiddleware, async (req: TenantRequest, r
         orderBy: { createdAt: 'desc' },
         take: 200,
       }),
-      prisma.pettyCash.findMany({
-        where: {
-          tenantId: req.tenantId!,
-          branchId: tenantWide ? undefined : { in: pettyCash.scopes },
-          createdAt: { gte: monthStart },
-          status: { not: 'REJECTED' },
-        },
-        select: { branchId: true, amount: true },
-      }),
       prisma.expense.findMany({ where: expenseWhere, orderBy: { date: 'desc' }, take: 500 }),
       prisma.payroll.findMany({ where: payrollWhere, take: 500 }),
       prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { pettyCashCapNpr: true } }),
       prisma.paymentAttempt.count({ where: { tenantId: req.tenantId!, provider: 'BANK', status: 'PENDING', ...(tenantWide ? {} : { branchId: { in: billing.scopes } }) } }),
     ]);
 
+    const allowances = await Promise.all(branches.map(branch => branchAllowance(prisma, req.tenantId!, branch.id)));
     const invoiceSummary = summarizeInvoices(invoices);
     const releasedPettyCash = requests
       .filter((item) => ['RELEASED', 'RECEIPT_SUBMITTED', 'CLOSED'].includes(item.status))
@@ -691,9 +681,11 @@ router.get('/accountant-workspace', authMiddleware, async (req: TenantRequest, r
     return res.json({
       branches,
       pettyCashCap: num(tenant?.pettyCashCapNpr),
-      pettyCashUsage: branches.map((branch) => ({
+      pettyCashUsage: branches.map((branch, index) => ({
         branchId: branch.id,
-        committed: monthlyRequests.filter((item) => item.branchId === branch.id).reduce((sum, item) => sum + num(item.amount), 0),
+        committed: allowances[index].used,
+        limit: allowances[index].limit,
+        available: allowances[index].available,
       })),
       summary: {
         collected: invoiceSummary.totalPaid,
@@ -1459,6 +1451,55 @@ router.get(
   }
 );
 
+// Branch funding is an allowance, never an expense or a cash release.
+router.get('/petty-cash/funding', authMiddleware, async (req: TenantRequest, res: Response) => {
+  try {
+    const tenantWide = isTenantAdmin(req.user!);
+    const branches = await prisma.branch.findMany({ where: { tenantId: req.tenantId!, ...(tenantWide ? {} : { id: { in: managedBranchIds(req.user!) } }) }, select: { id: true, name: true } });
+    if (!tenantWide && !branches.length) return res.status(403).json({ error: 'Branch administration access required.' });
+    const allowances = await Promise.all(branches.map(async branch => ({ branchId: branch.id, branchName: branch.name, ...await branchAllowance(prisma, req.tenantId!, branch.id) })));
+    const requests = await prisma.pettyCashFunding.findMany({ where: { tenantId: req.tenantId!, branchId: { in: branches.map(b => b.id) } }, orderBy: { createdAt: 'desc' } });
+    return res.json({ allowances, requests });
+  } catch { return res.status(500).json({ error: 'Could not load branch funding.' }); }
+});
+
+router.post('/petty-cash/funding', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const shape = parseStrictKeys(req.body, ['branchId', 'amount', 'purpose']);
+  if (!shape.success) return res.status(400).json({ error: shape.error });
+  const branchId = readTrimmedString(shape.data, 'branchId', { required: true, maxLength: 128, message: 'Branch is required.' });
+  const amount = readFiniteNumber(shape.data, 'amount', { min: 0.01, max: 10_000_000, message: 'A positive amount is required.' });
+  const purpose = readTrimmedString(shape.data, 'purpose', { required: true, maxLength: 1000, message: 'Reason is required.' });
+  if (!branchId.success || !amount.success || !purpose.success) return res.status(400).json({ error: 'Branch, positive amount and reason are required.' });
+  if (!managedBranchIds(req.user!).includes(branchId.data)) return res.status(403).json({ error: 'Only the assigned Branch Admin may request additional funds.' });
+  try {
+    const branch = await prisma.branch.findFirst({ where: { id: branchId.data, tenantId: req.tenantId! } });
+    if (!branch) return res.status(404).json({ error: 'Branch not found.' });
+    const funding = await prisma.pettyCashFunding.create({ data: { tenantId: req.tenantId!, branchId: branch.id, amount: amount.data, purpose: purpose.data, period: pettyCashPeriod().period, requestedBy: req.user!.id } });
+    return res.status(201).json(funding);
+  } catch { return res.status(500).json({ error: 'Could not request additional funds.' }); }
+});
+
+router.post('/petty-cash/funding/:id/decide', authMiddleware, async (req: TenantRequest, res: Response) => {
+  if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may approve additional branch funds.' });
+  const input = parseStrictObject(req.body, { fields: {
+    action: { required: true, pattern: /^(APPROVE|REJECT)$/, maxLength: 20, message: 'Choose APPROVE or REJECT.' },
+    remarks: { required: false, maxLength: 2000, normalize: value => value.trim(), message: 'Remarks must be text up to 2000 characters.' },
+  } });
+  if (!input.success) return res.status(400).json({ error: input.error });
+  if (input.data.action === 'REJECT' && !input.data.remarks) return res.status(400).json({ error: 'A rejection reason is required.' });
+  try {
+    const funding = await prisma.pettyCashFunding.findFirst({ where: { id: req.params.id, tenantId: req.tenantId! } });
+    if (!funding) return res.status(404).json({ error: 'Funding request not found.' });
+    if (funding.period !== pettyCashPeriod().period && input.data.action === 'APPROVE') return res.status(409).json({ error: 'This request is for a previous month. Ask the branch to submit a current request.' });
+    const result = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT "id" FROM "Branch" WHERE "id" = ${funding.branchId} AND "tenantId" = ${req.tenantId!} FOR UPDATE`;
+      return tx.pettyCashFunding.updateMany({ where: { id: funding.id, tenantId: req.tenantId!, status: 'PENDING' }, data: { status: input.data.action === 'APPROVE' ? 'APPROVED' : 'REJECTED', decidedBy: req.user!.id, remarks: input.data.remarks || '' } });
+    });
+    if (result.count !== 1) return res.status(409).json({ error: 'Funding request already decided.' });
+    return res.json({ message: 'Branch funding updated.' });
+  } catch { return res.status(500).json({ error: 'Could not decide branch funding.' }); }
+});
+
 // 6. Petty Cash Approval Flow
 // L1 Request
 router.post(
@@ -1486,16 +1527,6 @@ router.post(
       const branch = await prisma.branch.findFirst({ where: { id: branchId.data, tenantId: req.tenantId! } });
       if (!branch) return res.status(404).json({ error: 'Branch not found.' });
       const tenantPolicy = await prisma.tenant.findUniqueOrThrow({ where: { id: req.tenantId! } });
-      const monthStart = new Date();
-      monthStart.setDate(1);
-      monthStart.setHours(0, 0, 0, 0);
-      const monthlyUsage = await prisma.pettyCash.aggregate({
-        where: { tenantId: req.tenantId!, branchId: branchId.data, createdAt: { gte: monthStart }, status: { not: 'REJECTED' } },
-        _sum: { amount: true },
-      });
-      if (num(monthlyUsage._sum.amount) + requestedAmount > tenantPolicy.pettyCashCapNpr) {
-        return res.status(422).json({ error: 'This request would exceed the branch monthly petty-cash cap.' });
-      }
       const pc = await prisma.pettyCash.create({
           data: {
             tenantId: req.tenantId!,
@@ -1583,17 +1614,6 @@ router.put('/petty-cash/:id', authMiddleware, async (req: TenantRequest, res: Re
     if (!hasBranchPermission(req.user!, 'manage_petty_cash', request.branchId)) {
       return res.status(403).json({ error: 'You no longer have petty-cash access for this branch.' });
     }
-    const tenantPolicy = await prisma.tenant.findUniqueOrThrow({ where: { id: req.tenantId! }, select: { pettyCashCapNpr: true } });
-    const monthStart = new Date(request.createdAt);
-    monthStart.setDate(1);
-    monthStart.setHours(0, 0, 0, 0);
-    const monthlyUsage = await prisma.pettyCash.aggregate({
-      where: { tenantId: req.tenantId!, branchId: request.branchId, id: { not: request.id }, createdAt: { gte: monthStart }, status: { not: 'REJECTED' } },
-      _sum: { amount: true },
-    });
-    if (num(monthlyUsage._sum.amount) + requestItems.total > tenantPolicy.pettyCashCapNpr) {
-      return res.status(422).json({ error: 'This revision would exceed the branch monthly petty-cash cap.' });
-    }
     const nextChain = [...approvalChain, {
       role: 'Accountant', action: 'RESUBMITTED', timestamp: new Date().toISOString(), comment: 'Request revised and resubmitted.',
     }];
@@ -1626,28 +1646,24 @@ router.post(
         return res.status(403).json({ error: 'Only the assigned Branch Admin can approve a pending petty-cash request at Level 1.' });
       }
 
-      const updatedChain = [...(pc.approvalChain as any[] || []), {
-        role: 'Branch Admin',
-        action: 'APPROVED_L1',
-        timestamp: new Date().toISOString(),
-        comment: remarks || '',
-      }];
-
-      const transition = await prisma.pettyCash.updateMany({
-        where: { id, tenantId: req.tenantId!, status: 'PENDING' },
-        data: {
-          status: 'APPROVED_LEVEL1',
-          approvalChain: updatedChain,
-        },
+      const result = await prisma.$transaction(async (tx) => {
+        // Serialize spending and allowance decisions for this branch.
+        await tx.$queryRaw`SELECT "id" FROM "Branch" WHERE "id" = ${pc.branchId} AND "tenantId" = ${req.tenantId!} FOR UPDATE`;
+        const allowance = await branchAllowance(tx, req.tenantId!, pc.branchId);
+        const status = Number(pc.amount) <= allowance.available ? 'RELEASED' : 'APPROVED_LEVEL1';
+        const approvalChain = [...(pc.approvalChain as any[] || []), {
+          role: 'Branch Admin', actorId: req.user!.id,
+          action: status === 'RELEASED' ? 'RELEASED_WITHIN_ALLOWANCE' : 'APPROVED_L1',
+          timestamp: new Date().toISOString(), comment: remarks,
+        }];
+        const transition = await tx.pettyCash.updateMany({
+          where: { id, tenantId: req.tenantId!, status: 'PENDING' },
+          data: { status, approvalChain, releasedAt: status === 'RELEASED' ? new Date() : null },
+        });
+        return { count: transition.count, status, approvalChain };
       });
-      if (transition.count !== 1) {
-        return res.status(409).json({ error: 'Petty-cash request was already processed.' });
-      }
-
-      return res.status(200).json({
-        message: 'L1 approval completed.',
-        pettyCash: { ...pc, status: 'APPROVED_LEVEL1', approvalChain: updatedChain },
-      });
+      if (result.count !== 1) return res.status(409).json({ error: 'Petty-cash request was already processed.' });
+      return res.json({ message: result.status === 'RELEASED' ? 'Approved within branch allowance. Cash release recorded.' : 'Request forwarded to Tenant Admin because the branch allowance is insufficient.', pettyCash: { ...pc, status: result.status, approvalChain: result.approvalChain } });
     } catch (error: any) {
       return res.status(500).json({ error: 'L1 approval failed.', details: error.message });
     }
@@ -1668,7 +1684,7 @@ router.post(
 
       if (!pc) return res.status(404).json({ error: 'Petty cash request not found.' });
       if (!canReleasePettyCash(req.user!, pc)) {
-        return res.status(403).json({ error: 'Only the Tenant Admin can release a Level-1-approved petty-cash request.' });
+        return res.status(403).json({ error: 'Only the Tenant Admin can release a pending or escalated petty-cash request.' });
       }
 
       const updatedChain = [...(pc.approvalChain as any[] || []), {
@@ -1678,12 +1694,16 @@ router.post(
         comment: remarks || '',
       }];
 
-      const transition = await prisma.pettyCash.updateMany({
-        where: { id, tenantId: req.tenantId!, status: 'APPROVED_LEVEL1' },
+      const transition = await prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT "id" FROM "Branch" WHERE "id" = ${pc.branchId} AND "tenantId" = ${req.tenantId!} FOR UPDATE`;
+      return tx.pettyCash.updateMany({
+        where: { id, tenantId: req.tenantId!, status: pc.status },
         data: {
           status: 'RELEASED',
+          releasedAt: new Date(),
           approvalChain: updatedChain,
         },
+      });
       });
       if (transition.count !== 1) {
         return res.status(409).json({ error: 'Petty-cash request was already released.' });
@@ -1699,7 +1719,7 @@ router.post(
   }
 );
 
-// Tenant Admin rejects a Level-1 request or returns it to the Accountant for revision.
+// Branch Admin handles pending requests; Tenant Admin can also decide escalations.
 router.post(
   '/petty-cash/decide/:id',
   authMiddleware,
@@ -1710,15 +1730,15 @@ router.post(
     } });
     if (!input.success) return res.status(400).json({ error: input.error });
     const { action, remarks } = input.data;
-    if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may make the final decision.' });
     const pc = await prisma.pettyCash.findFirst({ where: { id: req.params.id, tenantId: req.tenantId! } });
     if (!pc) return res.status(404).json({ error: 'Petty cash request not found.' });
-    if (pc.status !== 'APPROVED_LEVEL1') return res.status(409).json({ error: 'Only Level-1-approved requests can receive a final decision.' });
+    if (!isTenantAdmin(req.user!) && !canApprovePettyCashL1(req.user!, pc)) return res.status(403).json({ error: 'Only the assigned Branch Admin or Tenant Admin may decide this request.' });
+    if (!['PENDING', 'APPROVED_LEVEL1'].includes(pc.status)) return res.status(409).json({ error: 'Only requests awaiting approval can receive a decision.' });
     const approvalChain = [...((pc.approvalChain as any[]) || []), {
-      role: 'Tenant Admin', action, timestamp: new Date().toISOString(), comment: remarks,
+      role: isTenantAdmin(req.user!) ? 'Tenant Admin' : 'Branch Admin', actorId: req.user!.id, action, timestamp: new Date().toISOString(), comment: remarks,
     }];
     const transition = await prisma.pettyCash.updateMany({
-      where: { id: pc.id, tenantId: req.tenantId!, status: 'APPROVED_LEVEL1' },
+      where: { id: pc.id, tenantId: req.tenantId!, status: pc.status },
       data: { status: action === 'REJECT' ? 'REJECTED' : 'PENDING', approvalChain },
     });
     if (transition.count !== 1) return res.status(409).json({ error: 'The request was already processed.' });
@@ -1779,14 +1799,12 @@ router.post(
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
     const { id } = req.params;
-    if (!isTenantAdmin(req.user!)) {
-      return res.status(403).json({ error: 'Only the Tenant Admin can close petty cash after receipt verification.' });
-    }
 
     try {
       const pc = await prisma.pettyCash.findFirst({ where: { id, tenantId: req.tenantId! } });
 
       if (!pc) return res.status(404).json({ error: 'Petty cash record not found.' });
+      if (!isTenantAdmin(req.user!) && !managedBranchIds(req.user!).includes(pc.branchId)) return res.status(403).json({ error: 'Only the assigned Branch Admin or Tenant Admin may verify receipts.' });
       if (pc.status !== 'RECEIPT_SUBMITTED') {
         return res.status(409).json({ error: 'A submitted receipt is required before closing petty cash.' });
       }

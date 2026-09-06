@@ -1,3 +1,4 @@
+import { PettyCashFunding } from '../components/patterns/PettyCashFunding';
 import { EventTargetFields } from '../components/calendar/EventTargetFields';
 import type { EventAudience } from '../services/api/academicEvents';
 import { NepaliDateTimeField } from '../components/calendar/NepaliDateTimeField';
@@ -63,14 +64,16 @@ export function TenantPettyCashPage() {
     } catch (next) { showToast(errorMessage(next), 'error'); if (next instanceof ApiError && next.isConflict) await reload(); }
     finally { setBusy(''); }
   };
-  return <div style={{ display: 'grid', gap: 18 }}><Header title="Petty Cash" description="Review branch requests and record manual release or closure." />
-    <Card hoverable={false}><label>Filter status <select style={{ ...input, width: 220, marginLeft: 10 }} value={status} onChange={(e) => setStatus(e.target.value)}><option>ALL</option><option>APPROVED_LEVEL1</option><option>RELEASED</option><option>RECEIPT_SUBMITTED</option><option>CLOSED</option><option>REJECTED</option></select></label></Card>
+  return <div style={{ display: 'grid', gap: 18 }}><Header title="Petty Cash" description="Approve additional branch funds, review escalated spending, and verify receipts." />
+    <PettyCashFunding tenant key={busy} />
+    <Card hoverable={false}><label>Filter status <select style={{ ...input, width: 220, marginLeft: 10 }} value={status} onChange={(e) => setStatus(e.target.value)}><option>ALL</option><option>PENDING</option><option>APPROVED_LEVEL1</option><option>RELEASED</option><option>RECEIPT_SUBMITTED</option><option>CLOSED</option><option>REJECTED</option></select></label></Card>
     {loading ? <RemoteState kind="loading" /> : error ? <RemoteState kind={error instanceof ApiError && error.isAccessDenied ? 'denied' : 'error'} message={errorMessage(error)} onRetry={() => void reload()} /> :
       !filtered.length ? <RemoteState kind="empty" message="No petty-cash records match this filter." /> :
       <Card hoverable={false}>{filtered.map((item) => <div key={item.id} style={row}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><strong>{item.purpose}</strong><p style={{ fontSize: 12, color: 'var(--text-muted)' }}>{new Date(item.createdAt).toLocaleDateString()}</p></div><div style={{ textAlign: 'right' }}><strong>NPR {Number(item.amount).toLocaleString()}</strong><br/><StatusBadge variant="info">{item.status}</StatusBadge></div></div>
         {item.approvalChain?.length ? <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>{item.approvalChain.map((step) => `${step.role}: ${step.action}`).join(' → ')}</p> : null}
-        {item.status === 'APPROVED_LEVEL1' ? <><textarea style={input} aria-label="Decision remarks" placeholder="Decision remarks" value={remarks[item.id] ?? ''} onChange={(e) => setRemarks((old) => ({ ...old, [item.id]: e.target.value }))}/><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><Button disabled={busy === item.id} onClick={() => void mutate(item, 'APPROVE')}>Record release</Button><Button variant="outline" disabled={busy === item.id} onClick={() => void mutate(item, 'REVISION')}>Send back</Button><Button variant="danger" disabled={busy === item.id} onClick={() => void mutate(item, 'REJECT')}>Reject</Button></div></> : null}
+        {['PENDING', 'APPROVED_LEVEL1'].includes(item.status) ? <><textarea style={input} aria-label="Decision remarks" placeholder="Decision remarks" value={remarks[item.id] ?? ''} onChange={(e) => setRemarks((old) => ({ ...old, [item.id]: e.target.value }))}/><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><Button disabled={busy === item.id} onClick={() => void mutate(item, 'APPROVE')}>Approve & record release</Button><Button variant="outline" disabled={busy === item.id} onClick={() => void mutate(item, 'REVISION')}>Send back</Button><Button variant="danger" disabled={busy === item.id} onClick={() => void mutate(item, 'REJECT')}>Reject</Button></div></> : null}
+        {item.receiptProofUrl && /^https?:\/\//i.test(item.receiptProofUrl) ? <a href={item.receiptProofUrl} target="_blank" rel="noreferrer">View receipt</a> : null}
         {item.status === 'RECEIPT_SUBMITTED' ? <Button disabled={busy === item.id} onClick={() => void mutate(item, 'CLOSE')}>Verify & close</Button> : null}
       </div>)}</Card>}
   </div>;

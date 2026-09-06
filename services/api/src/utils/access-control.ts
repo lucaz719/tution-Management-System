@@ -62,6 +62,6 @@ export function canApprovePettyCashL1(actor: Actor & Pick<UserPayload, 'tenantId
 
 export function canReleasePettyCash(actor: Actor & Pick<UserPayload, 'tenantId'>, request: PettyCashRequest): boolean {
   return actor.tenantId === request.tenantId
-    && request.status === 'APPROVED_LEVEL1'
+    && ['PENDING', 'APPROVED_LEVEL1'].includes(request.status)
     && isTenantAdmin(actor);
 }
