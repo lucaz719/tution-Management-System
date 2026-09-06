@@ -1,15 +1,122 @@
 import { Router, Response } from 'express';
-import { CourseType, Prisma } from '@prisma/client';
+import { CourseType, GradeBillingMode, Prisma } from '@prisma/client';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { canAccessBranch, hasBranchPermission, isTenantAdmin } from '../utils/access-control';
 import { parsePlainRecord, parseStrictKeys, readFiniteNumber, readTrimmedString, type ValidationResult } from '../utils/request-validation';
+import { recurringInvoiceType } from '../utils/billing-rules';
+import { normalizeSchedule, parseSchedule, SCHEDULE_DAYS, slotsOverlap, type ScheduleSlot } from '../utils/schedule';
 
 const router = Router();
 const COURSE_TYPES = new Set<string>(['REGULAR', 'MUSIC', 'SHORT_TERM', 'LONG_TERM', 'PERSONALIZED']);
-const SCHEDULE_DAYS = new Set(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
-const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+const ACTIVE_ENROLLMENT_STATUSES = ['ACTIVE', 'BLOCKED'];
+
+async function eligibleTeacher(tenantId: string, branchId: string, teacherId: string) {
+  const teacher = await prisma.user.findFirst({
+    where: { id: teacherId, tenantId },
+    include: { userRoles: { include: { role: { select: { name: true } } } } },
+  });
+  if (!teacher) return null;
+  return teacher.userRoles.some((assignment) => assignment.role.name === 'Teacher' && (!assignment.branchId || assignment.branchId === branchId)) ? teacher : null;
+}
+
+async function classConflict(params: {
+  tenantId: string;
+  branchId: string;
+  teacherId: string | null;
+  schedule: ScheduleSlot[];
+  excludeClassId?: string;
+  studentIds?: string[];
+}): Promise<string[]> {
+  const studentIds = params.studentIds ?? [];
+  const conflicts = new Set<string>();
+  const otherClasses = await prisma.class.findMany({
+    where: {
+      archivedAt: null,
+      ...(params.excludeClassId ? { id: { not: params.excludeClassId } } : {}),
+      course: { tenantId: params.tenantId },
+      OR: [
+        { branchId: params.branchId },
+        ...(params.teacherId ? [{ teacherId: params.teacherId }] : []),
+        ...(studentIds.length ? [{ enrollments: { some: { studentId: { in: studentIds }, status: { in: ACTIVE_ENROLLMENT_STATUSES } } } }] : []),
+      ],
+    },
+    select: {
+      id: true,
+      name: true,
+      branchId: true,
+      teacherId: true,
+      schedule: true,
+      enrollments: { where: { studentId: { in: studentIds }, status: { in: ACTIVE_ENROLLMENT_STATUSES } }, select: { studentId: true } },
+    },
+  });
+  for (const other of otherClasses) {
+    const otherSchedule = normalizeSchedule(other.schedule);
+    for (const slot of params.schedule) {
+      for (const candidate of otherSchedule) {
+        if (!slotsOverlap(slot, candidate)) continue;
+        const time = `${slot.day} ${slot.startTime}–${slot.endTime}`;
+        if (params.teacherId && other.teacherId === params.teacherId) conflicts.add(`Teacher conflict: already assigned during ${time}.`);
+        if (other.branchId === params.branchId && slot.room && candidate.room && slot.room.localeCompare(candidate.room, undefined, { sensitivity: 'accent' }) === 0) {
+          conflicts.add(`Room conflict: ${slot.room} is already used by ${other.name} during ${time}.`);
+        }
+        if (other.enrollments.length) conflicts.add(`Student conflict: ${other.enrollments.length} enrolled student${other.enrollments.length === 1 ? '' : 's'} also attend ${other.name} during ${time}.`);
+      }
+    }
+  }
+  return Array.from(conflicts);
+}
+
+async function inheritedGradeStudentIds(tenantId: string, branchId: string, gradeId: string | null): Promise<string[]> {
+  if (!gradeId) return [];
+  const students = await prisma.student.findMany({
+    where: {
+      gradeId,
+      admissionStatus: 'ACTIVE',
+      user: { tenantId, status: 'ACTIVE', userRoles: { some: { branchId } } },
+    },
+    select: { id: true },
+  });
+  return students.map((student) => student.id);
+}
+
+async function studentEnrollmentConflicts(params: {
+  tenantId: string;
+  studentId: string;
+  targetClassId: string;
+  targetSchedule: ScheduleSlot[];
+  targetBranchId: string;
+  studentGradeId: string | null;
+  excludeClassIds?: string[];
+}): Promise<string[]> {
+  if (!params.targetSchedule.length) return [];
+  const existing = await prisma.class.findMany({
+    where: {
+      archivedAt: null,
+      id: { notIn: [params.targetClassId, ...(params.excludeClassIds ?? [])] },
+      course: { tenantId: params.tenantId },
+      OR: [
+        { enrollments: { some: { studentId: params.studentId, status: { in: ACTIVE_ENROLLMENT_STATUSES } } } },
+        ...(params.studentGradeId ? [{ branchId: params.targetBranchId, course: { tenantId: params.tenantId, gradeId: params.studentGradeId } }] : []),
+      ],
+    },
+    select: {
+      name: true, schedule: true, course: { select: { name: true } },
+    },
+  });
+  const conflicts = new Set<string>();
+  for (const klass of existing) {
+    const otherSchedule = normalizeSchedule(klass.schedule);
+    for (const target of params.targetSchedule) {
+      for (const occupied of otherSchedule) {
+        if (!slotsOverlap(target, occupied)) continue;
+        conflicts.add(`Student conflict: ${klass.course.name} (${klass.name}) already runs on ${target.day} ${occupied.startTime}–${occupied.endTime}.`);
+      }
+    }
+  }
+  return Array.from(conflicts);
+}
 
 interface BulkCourseInput {
   name: string;
@@ -45,29 +152,6 @@ function parseFeeStructure(value: unknown): ValidationResult<{ monthlyBase: numb
   return monthlyBase.success ? { success: true, data: { monthlyBase: monthlyBase.data } } : monthlyBase;
 }
 
-function parseSchedule(value: unknown): ValidationResult<Array<Record<string, string>>> {
-  if (!Array.isArray(value) || value.length > 14) return { success: false, error: 'schedule must be an array of at most 14 timetable slots.' };
-  const slots: Array<Record<string, string>> = [];
-  for (const [index, slot] of value.entries()) {
-    const shape = parseStrictKeys(slot, ['day', 'start', 'end', 'startTime', 'endTime', 'room']);
-    if (!shape.success) return { success: false, error: `Schedule slot ${index + 1}: ${shape.error}` };
-    const day = shape.data.day;
-    const hasLegacyTimes = shape.data.start !== undefined || shape.data.end !== undefined;
-    const hasModernTimes = shape.data.startTime !== undefined || shape.data.endTime !== undefined;
-    if (hasLegacyTimes === hasModernTimes) {
-      return { success: false, error: `Schedule slot ${index + 1} must use either start/end or startTime/endTime.` };
-    }
-    const start = hasModernTimes ? shape.data.startTime : shape.data.start;
-    const end = hasModernTimes ? shape.data.endTime : shape.data.end;
-    if (typeof day !== 'string' || !SCHEDULE_DAYS.has(day) || typeof start !== 'string' || !TIME_PATTERN.test(start) || typeof end !== 'string' || !TIME_PATTERN.test(end) || start >= end) {
-      return { success: false, error: `Schedule slot ${index + 1} must have a valid weekday and an increasing HH:mm time range.` };
-    }
-    const room = typeof shape.data.room === 'string' ? shape.data.room.trim() : '';
-    if (room.length > 120) return { success: false, error: `Schedule slot ${index + 1} room must be 120 characters or fewer.` };
-    slots.push(hasModernTimes ? { day, startTime: start, endTime: end, ...(room ? { room } : {}) } : { day, start, end, ...(room ? { room } : {}) });
-  }
-  return { success: true, data: slots };
-}
 
 function parseBulkCourses(body: unknown): ValidationResult<{ branchId: string; items: BulkCourseInput[] }> {
   const request = parseStrictKeys(body, ['branchId', 'items']);
@@ -149,23 +233,26 @@ router.post(
       }
 
       // Optional grade must belong to the tenant.
-      let resolvedGradeId: string | null = null;
+      let resolvedGrade: { id: string; billingMode: GradeBillingMode } | null = null;
       if (gradeId) {
-        const grade = await prisma.grade.findFirst({ where: { id: gradeId, tenantId: req.tenantId! } });
+        const grade = await prisma.grade.findFirst({ where: { id: gradeId, tenantId: req.tenantId! }, select: { id: true, billingMode: true } });
         if (!grade) {
           return res.status(404).json({ error: 'Grade not found in your institution.' });
         }
-        resolvedGradeId = grade.id;
+        resolvedGrade = grade;
       }
+
+      const resolvedIsExtraActivity = type.data !== CourseType.REGULAR || isExtraActivity.data;
+      const includedInGradePackage = type.data === CourseType.REGULAR && !resolvedIsExtraActivity && resolvedGrade?.billingMode === GradeBillingMode.GRADE;
 
       const course = await prisma.course.create({
         data: {
           tenantId: req.tenantId!, branchId: branchId.data,
-          gradeId: resolvedGradeId,
+          gradeId: resolvedGrade?.id ?? null,
           name: name.data,
           description,
-          type: type.data!, feeStructure: feeStructure.data,
-          isExtraActivity: isExtraActivity.data, isTaxExempt: isTaxExempt.data,
+          type: type.data!, feeStructure: includedInGradePackage ? { monthlyBase: 0 } : feeStructure.data,
+          isExtraActivity: resolvedIsExtraActivity, isTaxExempt: isTaxExempt.data,
           taxPercentage: typeof taxPercentage === 'number' ? taxPercentage : taxPercentage.data,
         },
       });
@@ -195,8 +282,8 @@ router.post(
         return res.status(404).json({ error: 'Branch not found in your institution.' });
       }
 
-      const grades = await prisma.grade.findMany({ where: { tenantId: req.tenantId! }, select: { id: true } });
-      const gradeIds = new Set(grades.map((g) => g.id));
+      const grades = await prisma.grade.findMany({ where: { tenantId: req.tenantId! }, select: { id: true, billingMode: true } });
+      const gradeModes = new Map(grades.map((g) => [g.id, g.billingMode]));
 
       const existing = await prisma.course.findMany({
         where: { tenantId: req.tenantId!, branchId },
@@ -212,7 +299,7 @@ router.post(
           results.push({ index, name, status: 'error', error: 'Course name is required.' });
           continue;
         }
-        if (gradeId && !gradeIds.has(gradeId)) {
+        if (gradeId && !gradeModes.has(gradeId)) {
           results.push({ index, name, status: 'error', error: 'Grade not found in your institution.' });
           continue;
         }
@@ -234,7 +321,7 @@ router.post(
             name,
             description: item.description,
             type: item.type,
-            feeStructure: { monthlyBase: fee },
+            feeStructure: { monthlyBase: gradeId && gradeModes.get(gradeId) === 'GRADE' && item.type === 'REGULAR' ? 0 : fee },
             isTaxExempt: item.isTaxExempt,
           },
         });
@@ -262,11 +349,11 @@ router.get(
   async (req: TenantRequest, res: Response) => {
     try {
       const courses = await prisma.course.findMany({
-        where: { tenantId: req.tenantId! },
+        where: { tenantId: req.tenantId!, ...(isTenantAdmin(req.user!) ? {} : { branchId: { in: req.user!.roles.filter((role: { roleName: string; branchId: string | null }) => role.roleName === 'Branch Admin' && role.branchId).map((role: { roleName: string; branchId: string | null }) => role.branchId as string) } }) },
         orderBy: { createdAt: 'desc' },
         include: {
           branch: { select: { name: true } },
-          grade: { select: { id: true, name: true } },
+          grade: { select: { id: true, name: true, billingMode: true } },
           _count: { select: { classes: true, enrollments: true } },
         },
       });
@@ -280,8 +367,10 @@ router.get(
           branchName: c.branch.name,
           gradeId: c.gradeId,
           gradeName: c.grade?.name ?? null,
+          gradeBillingMode: c.grade?.billingMode ?? null,
           feeStructure: c.feeStructure,
           isTaxExempt: c.isTaxExempt,
+          isExtraActivity: c.isExtraActivity,
           taxPercentage: Number(c.taxPercentage),
           classCount: c._count.classes,
           enrollmentCount: c._count.enrollments,
@@ -300,11 +389,12 @@ router.get(
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
     try {
+      const includeArchived = req.query.includeArchived === 'true';
       const classes = await prisma.class.findMany({
-        where: { course: { tenantId: req.tenantId! }, ...(isTenantAdmin(req.user!) ? {} : { branchId: { in: req.user!.roles.filter((role: { roleName: string; branchId: string | null }) => role.roleName === 'Branch Admin' && role.branchId).map((role: { roleName: string; branchId: string | null }) => role.branchId as string) } }) },
+        where: { course: { tenantId: req.tenantId! }, ...(includeArchived ? {} : { archivedAt: null }), ...(isTenantAdmin(req.user!) ? {} : { branchId: { in: req.user!.roles.filter((role: { roleName: string; branchId: string | null }) => role.roleName === 'Branch Admin' && role.branchId).map((role: { roleName: string; branchId: string | null }) => role.branchId as string) } }) },
         orderBy: { createdAt: 'desc' },
         include: {
-          course: { select: { name: true, type: true, grade: { select: { id: true, name: true } } } },
+          course: { select: { name: true, type: true, feeStructure: true, isTaxExempt: true, taxPercentage: true, grade: { select: { id: true, name: true, billingMode: true } } } },
           branch: { select: { name: true } },
           assignedTeacher: { select: { id: true, firstName: true, lastName: true } },
           enrollments: { where: { status: { in: ['ACTIVE', 'BLOCKED'] } }, include: { student: { include: { user: { select: { firstName: true, lastName: true, email: true } } } } }, orderBy: { student: { user: { firstName: 'asc' } } } },
@@ -315,18 +405,28 @@ router.get(
         classes: classes.map((c) => ({
           id: c.id,
           name: c.name,
-          schedule: c.schedule,
+          schedule: normalizeSchedule(c.schedule),
           courseId: c.courseId,
           courseName: c.course.name,
           courseType: c.course.type,
+          feeStructure: c.course.feeStructure,
+          isTaxExempt: c.course.isTaxExempt,
+          taxPercentage: Number(c.course.taxPercentage),
           // Grade is derived from the course — the class inherits it automatically.
           gradeId: c.course.grade?.id ?? null,
           gradeName: c.course.grade?.name ?? null,
+          gradeBillingMode: c.course.grade?.billingMode ?? null,
           branchId: c.branchId,
           branchName: c.branch.name,
           teacherId: c.teacherId,
           teacherName: c.assignedTeacher ? `${c.assignedTeacher.firstName} ${c.assignedTeacher.lastName}` : null,
-          enrollmentCount: c._count.enrollments,
+          academicYear: c.academicYear,
+          effectiveFrom: c.effectiveFrom,
+          effectiveUntil: c.effectiveUntil,
+          archivedAt: c.archivedAt,
+          archivedBy: c.archivedBy,
+          enrollmentCount: c.enrollments.length,
+          hasEnrollmentHistory: c._count.enrollments > 0,
           enrollments: c.enrollments.map((enrollment) => ({ id: enrollment.id, studentId: enrollment.studentId, status: enrollment.status, studentName: `${enrollment.student.user.firstName} ${enrollment.student.user.lastName}`.trim(), studentEmail: enrollment.student.user.email })),
           sessionCount: c._count.sessions,
           createdAt: c.createdAt,
@@ -337,6 +437,191 @@ router.get(
     }
   }
 );
+
+router.get('/classes/:classId/versions', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const klass = await prisma.class.findFirst({ where: { id: req.params.classId, course: { tenantId: req.tenantId! } } });
+  if (!klass) return res.status(404).json({ error: 'Class not found in your institution.' });
+  if (!canAccessBranch(req.user!, klass.branchId)) return res.status(403).json({ error: 'You cannot view timetable history for this branch.' });
+  const versions = await prisma.timetableVersion.findMany({ where: { classId: klass.id }, orderBy: { version: 'desc' } });
+  return res.json({ versions: versions.map((version) => ({ ...version, schedule: normalizeSchedule(version.schedule) })) });
+});
+
+router.get('/classes/:id/dependencies', authMiddleware, async (req: TenantRequest, res: Response) => {
+  try {
+    const klass = await prisma.class.findFirst({
+      where: { id: req.params.id, course: { tenantId: req.tenantId! } },
+      select: {
+        id: true, branchId: true, archivedAt: true,
+        _count: { select: { enrollments: true, sessions: true, studentAttendance: true, homework: true, syllabi: true, resultDefinitions: true } },
+        enrollments: { where: { status: { in: ACTIVE_ENROLLMENT_STATUSES } }, select: { id: true } },
+      },
+    });
+    if (!klass) return res.status(404).json({ error: 'Class not found in your institution.' });
+    if (!hasBranchPermission(req.user!, 'manage_courses', klass.branchId)) return res.status(403).json({ error: 'You cannot manage classes for this branch.' });
+    const dependencies = {
+      activeEnrollments: klass.enrollments.length,
+      enrollmentHistory: klass._count.enrollments,
+      sessions: klass._count.sessions,
+      attendanceRecords: klass._count.studentAttendance,
+      homework: klass._count.homework,
+      syllabi: klass._count.syllabi,
+      resultDefinitions: klass._count.resultDefinitions,
+    };
+    return res.json({ archived: Boolean(klass.archivedAt), canArchive: klass.enrollments.length === 0, canDelete: Boolean(klass.archivedAt) && Object.values(dependencies).every((count) => count === 0), dependencies });
+  } catch {
+    return res.status(500).json({ error: 'Failed to inspect class dependencies.' });
+  }
+});
+
+router.patch('/classes/:id/archive', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const shape = parseStrictKeys(req.body, ['archived']);
+  if (!shape.success || typeof shape.data.archived !== 'boolean') return res.status(400).json({ error: 'archived must be a boolean.' });
+  try {
+    const klass = await prisma.class.findFirst({ where: { id: req.params.id, course: { tenantId: req.tenantId! } }, include: { enrollments: { where: { status: { in: ACTIVE_ENROLLMENT_STATUSES } }, select: { id: true } } } });
+    if (!klass) return res.status(404).json({ error: 'Class not found in your institution.' });
+    if (!hasBranchPermission(req.user!, 'manage_courses', klass.branchId)) return res.status(403).json({ error: 'You cannot manage classes for this branch.' });
+    if (shape.data.archived && klass.enrollments.length) return res.status(409).json({ error: 'Move or remove active students before archiving this class.' });
+    const updated = await prisma.class.update({ where: { id: klass.id }, data: shape.data.archived ? { archivedAt: new Date(), archivedBy: req.user!.id } : { archivedAt: null, archivedBy: null } });
+    return res.json({ message: shape.data.archived ? 'Class archived.' : 'Class restored.', class: updated });
+  } catch {
+    return res.status(500).json({ error: 'Failed to update class archive status.' });
+  }
+});
+
+router.post('/classes/:id/move-students', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const shape = parseStrictKeys(req.body, ['targetClassId', 'studentIds']);
+  if (!shape.success) return res.status(400).json({ error: shape.error });
+  const targetClassId = readTrimmedString(shape.data, 'targetClassId', { required: true, maxLength: 128, message: 'A valid targetClassId is required.' });
+  if (!targetClassId.success) return res.status(400).json({ error: targetClassId.error });
+  if (!Array.isArray(shape.data.studentIds) || shape.data.studentIds.length === 0 || shape.data.studentIds.length > 500 || shape.data.studentIds.some((id) => typeof id !== 'string' || !id.trim() || id.length > 128)) return res.status(400).json({ error: 'studentIds must contain between 1 and 500 valid IDs.' });
+  const studentIds = [...new Set((shape.data.studentIds as string[]).map((id) => id.trim()))];
+  if (req.params.id === targetClassId.data) return res.status(400).json({ error: 'Choose a different target class.' });
+  try {
+    const [source, target] = await Promise.all([
+      prisma.class.findFirst({ where: { id: req.params.id, course: { tenantId: req.tenantId! } }, include: { course: { select: { gradeId: true } }, enrollments: { where: { studentId: { in: studentIds }, status: { in: ACTIVE_ENROLLMENT_STATUSES } }, select: { studentId: true } } } }),
+      prisma.class.findFirst({ where: { id: targetClassId.data, course: { tenantId: req.tenantId! } }, include: { course: { select: { gradeId: true } }, enrollments: { where: { studentId: { in: studentIds }, status: { in: ACTIVE_ENROLLMENT_STATUSES } }, select: { studentId: true } } } }),
+    ]);
+    if (!source || !target) return res.status(404).json({ error: 'Source or target class was not found.' });
+    if (!hasBranchPermission(req.user!, 'manage_courses', source.branchId) || !hasBranchPermission(req.user!, 'manage_courses', target.branchId)) return res.status(403).json({ error: 'You cannot move students between these classes.' });
+    if (target.archivedAt) return res.status(409).json({ error: 'Restore the target class before moving students into it.' });
+    if (source.branchId !== target.branchId || source.course.gradeId !== target.course.gradeId) return res.status(400).json({ error: 'Students can only move between classes in the same branch and grade.' });
+    if (source.enrollments.length !== studentIds.length) return res.status(409).json({ error: 'One or more students are no longer active in the source class.' });
+    if (target.enrollments.length) return res.status(409).json({ error: 'One or more students are already active in the target class.' });
+    for (const studentId of studentIds) {
+      const conflicts = await studentEnrollmentConflicts({ tenantId: req.tenantId!, studentId, targetClassId: target.id, targetSchedule: normalizeSchedule(target.schedule), targetBranchId: target.branchId, studentGradeId: target.course.gradeId, excludeClassIds: [source.id] });
+      if (conflicts.length) return res.status(409).json({ error: conflicts[0], conflicts });
+    }
+    const movedAt = new Date();
+    await prisma.$transaction(async (tx) => {
+      await tx.enrollment.updateMany({ where: { classId: source.id, studentId: { in: studentIds }, status: { in: ACTIVE_ENROLLMENT_STATUSES } }, data: { status: 'DROPPED', validUntil: movedAt } });
+      await tx.enrollment.createMany({ data: studentIds.map((studentId) => ({ studentId, courseId: target.courseId, classId: target.id, status: 'ACTIVE', admissionDate: movedAt, validFrom: movedAt })) });
+    });
+    return res.json({ message: `${studentIds.length} student${studentIds.length === 1 ? '' : 's'} moved.`, moved: studentIds.length });
+  } catch {
+    return res.status(500).json({ error: 'Failed to move students.' });
+  }
+});
+
+// Students who can be assigned to a class, restricted to its tenant, branch,
+// and configured grade. Grade-based admissions do not create class enrolments
+// until an admin assigns the student to a concrete section.
+router.get('/classes/:id/eligible-students', authMiddleware, async (req: TenantRequest, res: Response) => {
+  try {
+    const klass = await prisma.class.findFirst({
+      where: { id: req.params.id, course: { tenantId: req.tenantId! } },
+      include: { course: { select: { gradeId: true } }, enrollments: { where: { status: { in: ACTIVE_ENROLLMENT_STATUSES } }, select: { studentId: true } } },
+    });
+    if (!klass) return res.status(404).json({ error: 'Class not found in your institution.' });
+    if (!canAccessBranch(req.user!, klass.branchId)) return res.status(403).json({ error: 'You cannot manage students for this branch.' });
+    if (!klass.course.gradeId) return res.json({ students: [] });
+    const enrolledIds = klass.enrollments.map((item) => item.studentId);
+    const students = await prisma.student.findMany({
+      where: {
+        gradeId: klass.course.gradeId,
+        admissionStatus: 'ACTIVE',
+        id: enrolledIds.length ? { notIn: enrolledIds } : undefined,
+        user: { tenantId: req.tenantId!, status: 'ACTIVE', userRoles: { some: { branchId: klass.branchId } } },
+      },
+      include: { user: { select: { firstName: true, lastName: true, email: true } } },
+      orderBy: { user: { firstName: 'asc' } },
+    });
+    return res.json({ students: students.map((student) => ({ studentId: student.id, studentName: `${student.user.firstName} ${student.user.lastName}`.trim(), studentEmail: student.user.email })) });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Failed to load eligible students.', details: error.message });
+  }
+});
+
+// Atomically create the course, class, timetable baseline, and optional roster.
+// This is the Branch Admin setup flow; keeping it server-side prevents orphaned
+// courses and partially-created extra-class rosters when a later write fails.
+router.post('/classes/setup', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const shape = parseStrictKeys(req.body, ['branchId', 'gradeId', 'courseName', 'courseType', 'className', 'monthlyBase', 'teacherId', 'studentIds']);
+  if (!shape.success) return res.status(400).json({ error: shape.error });
+  const branchId = readTrimmedString(shape.data, 'branchId', { required: true, maxLength: 128, message: 'A valid branchId is required.' });
+  const gradeId = readTrimmedString(shape.data, 'gradeId', { required: true, maxLength: 128, message: 'A valid gradeId is required.' });
+  const courseName = readTrimmedString(shape.data, 'courseName', { required: true, maxLength: 160, message: 'A course name is required and must be 160 characters or fewer.' });
+  const courseType = parseCourseType(shape.data, 'courseType', true);
+  const className = readTrimmedString(shape.data, 'className', { required: true, maxLength: 160, message: 'A class name is required and must be 160 characters or fewer.' });
+  const monthlyBase = readFiniteNumber(shape.data, 'monthlyBase', { min: 0, max: 100_000_000, message: 'monthlyBase must be a non-negative finite number.' });
+  if (!branchId.success) return res.status(400).json({ error: branchId.error });
+  if (!gradeId.success) return res.status(400).json({ error: gradeId.error });
+  if (!courseName.success) return res.status(400).json({ error: courseName.error });
+  if (!courseType.success) return res.status(400).json({ error: courseType.error });
+  if (!className.success) return res.status(400).json({ error: className.error });
+  if (!monthlyBase.success) return res.status(400).json({ error: monthlyBase.error });
+  const teacherIdValue = shape.data.teacherId;
+  if (teacherIdValue !== undefined && teacherIdValue !== null && (typeof teacherIdValue !== 'string' || !teacherIdValue.trim() || teacherIdValue.length > 128)) {
+    return res.status(400).json({ error: 'teacherId must be a valid ID or null.' });
+  }
+  const teacherId = typeof teacherIdValue === 'string' ? teacherIdValue.trim() : null;
+  if (!Array.isArray(shape.data.studentIds) || shape.data.studentIds.length > 500 || shape.data.studentIds.some((id) => typeof id !== 'string' || !id.trim() || id.length > 128)) {
+    return res.status(400).json({ error: 'studentIds must be an array of at most 500 valid IDs.' });
+  }
+  const studentIds = [...new Set((shape.data.studentIds as string[]).map((id) => id.trim()))];
+
+  try {
+    const [branch, grade] = await Promise.all([
+      prisma.branch.findFirst({ where: { id: branchId.data, tenantId: req.tenantId! } }),
+      prisma.grade.findFirst({ where: { id: gradeId.data, tenantId: req.tenantId! }, select: { id: true, billingMode: true } }),
+    ]);
+    if (!branch) return res.status(404).json({ error: 'Branch not found in your institution.' });
+    if (!hasBranchPermission(req.user!, 'manage_courses', branch.id)) return res.status(403).json({ error: 'You cannot create classes for this branch.' });
+    if (!grade) return res.status(404).json({ error: 'Grade not found in your institution.' });
+    if (teacherId && !await eligibleTeacher(req.tenantId!, branch.id, teacherId)) return res.status(400).json({ error: 'Selected teacher is not assigned to this branch.' });
+    if (courseType.data === CourseType.REGULAR && studentIds.length) return res.status(400).json({ error: 'Regular-class students must be assigned after admission.' });
+
+    if (studentIds.length) {
+      const eligibleStudents = await prisma.student.findMany({
+        where: {
+          id: { in: studentIds }, gradeId: grade.id, admissionStatus: 'ACTIVE',
+          user: { tenantId: req.tenantId!, status: 'ACTIVE', userRoles: { some: { branchId: branch.id } } },
+        },
+        select: { id: true },
+      });
+      if (eligibleStudents.length !== studentIds.length) {
+        return res.status(400).json({ error: 'Every selected student must be active and admitted to this branch and grade.' });
+      }
+    }
+
+    const isExtraActivity = courseType.data !== CourseType.REGULAR;
+    const includedInGradePackage = !isExtraActivity && grade.billingMode === GradeBillingMode.GRADE;
+    const created = await prisma.$transaction(async (tx) => {
+      const course = await tx.course.create({ data: {
+        tenantId: req.tenantId!, branchId: branch.id, gradeId: grade.id,
+        name: courseName.data, type: courseType.data!,
+        feeStructure: { monthlyBase: includedInGradePackage ? 0 : monthlyBase.data },
+        isExtraActivity, isTaxExempt: false, taxPercentage: 13,
+      } });
+      const klass = await tx.class.create({ data: { courseId: course.id, branchId: branch.id, name: className.data, schedule: [], teacherId } });
+      await tx.timetableVersion.create({ data: { classId: klass.id, version: 1, academicYear: klass.academicYear, teacherId, name: klass.name, schedule: [] as unknown as Prisma.InputJsonValue, changedBy: req.user!.id } });
+      if (studentIds.length) await tx.enrollment.createMany({ data: studentIds.map((studentId) => ({ studentId, courseId: course.id, classId: klass.id, status: 'ACTIVE', admissionDate: new Date() })) });
+      return { course, class: klass };
+    });
+    return res.status(201).json({ message: 'Class setup completed.', ...created });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Failed to create class setup.' });
+  }
+});
 
 // 3. Enroll a Student and Auto-Generate Initial Invoice (Accounting/Admin)
 router.post(
@@ -353,11 +638,11 @@ router.post(
 
     try {
       // 1. Fetch course and verify it belongs to the caller's tenant.
-      const course = await prisma.course.findUnique({ where: { id: courseId } });
+      const course = await prisma.course.findUnique({ where: { id: courseId }, include: { grade: { select: { billingMode: true } } } });
       if (!course || course.tenantId !== req.tenantId) {
         return res.status(404).json({ error: 'Course not found in your institution.' });
       }
-      if (!canAccessBranch(req.user!, course.branchId)) {
+      if (!hasBranchPermission(req.user!, 'manage_courses', course.branchId)) {
         return res.status(403).json({ error: 'Only the Tenant Admin or assigned Branch Admin may enroll this student.' });
       }
 
@@ -365,7 +650,7 @@ router.post(
       const [student, klass] = await Promise.all([
         prisma.student.findFirst({
           where: { id: studentId, user: { tenantId: req.tenantId! } },
-          include: { grade: { select: { name: true } }, user: { select: { status: true } } },
+          include: { grade: { select: { name: true } }, user: { select: { status: true, userRoles: { select: { branchId: true } } } } },
         }),
         prisma.class.findFirst({ where: { id: classId.data, course: { tenantId: req.tenantId! } } }),
       ]);
@@ -378,13 +663,20 @@ router.post(
       if (!klass) {
         return res.status(404).json({ error: 'Class not found in your institution.' });
       }
+      if (klass.archivedAt) {
+        return res.status(409).json({ error: 'Restore this class before enrolling students.' });
+      }
       // The class must belong to the course being enrolled in.
       if (klass.courseId !== courseId) {
         return res.status(400).json({ error: 'The selected class does not belong to this course.' });
       }
 
+      if (klass.branchId !== course.branchId || !student.user.userRoles.some((role) => role.branchId === course.branchId)) {
+        return res.status(400).json({ error: 'The student must be assigned to the same branch as the class.' });
+      }
+
       // Grade guard: a graded course can only enrol students of that grade.
-      if (course.gradeId && student.gradeId && course.gradeId !== student.gradeId) {
+      if (course.gradeId && course.gradeId !== student.gradeId) {
         const courseGrade = await prisma.grade.findUnique({ where: { id: course.gradeId }, select: { name: true } });
         return res.status(400).json({
           error: `This course is for ${courseGrade?.name ?? 'another grade'}, but ${student.gradeId ? `the student is in ${student.grade?.name ?? 'a different grade'}` : 'the student has no grade set'}. Assign a matching grade first.`,
@@ -392,9 +684,21 @@ router.post(
       }
 
       // Prevent duplicate active enrolment in the same class.
-      const dup = await prisma.enrollment.findFirst({ where: { studentId, classId: classId.data, status: 'ACTIVE' } });
+      const dup = await prisma.enrollment.findFirst({ where: { studentId, classId: classId.data, status: { in: ACTIVE_ENROLLMENT_STATUSES } } });
       if (dup) {
         return res.status(409).json({ error: 'Student is already enrolled in this class.' });
+      }
+
+      const timetableConflicts = await studentEnrollmentConflicts({
+        tenantId: req.tenantId!,
+        studentId,
+        targetClassId: klass.id,
+        targetSchedule: normalizeSchedule(klass.schedule),
+        targetBranchId: klass.branchId,
+        studentGradeId: student.gradeId,
+      });
+      if (timetableConflicts.length) {
+        return res.status(409).json({ error: timetableConflicts[0], conflicts: timetableConflicts });
       }
 
       // Create the enrolment only. Billing is the monthly run (grade tuition +
@@ -411,7 +715,8 @@ router.post(
 
       const feeStructure = (course.feeStructure ?? {}) as { monthlyBase?: number };
       const base = Number(feeStructure.monthlyBase || 0);
-      const monthlyDelta = course.isTaxExempt ? base : base * (1 + Number(course.taxPercentage || 13) / 100);
+      const isRecurringCharge = recurringInvoiceType(course.grade?.billingMode ?? 'GRADE', course.isExtraActivity);
+      const monthlyDelta = isRecurringCharge ? (course.isTaxExempt ? base : base * (1 + Number(course.taxPercentage || 13) / 100)) : 0;
 
       return res.status(201).json({
         message: 'Student enrolled.',
@@ -424,13 +729,53 @@ router.post(
   }
 );
 
+// Live conflict check used by the shared Tenant/Branch Admin timetable editor.
+router.post(
+  '/classes/conflicts',
+  authMiddleware,
+  async (req: TenantRequest, res: Response) => {
+    const shape = parseStrictKeys(req.body, ['courseId', 'classId', 'teacherId', 'schedule']);
+    if (!shape.success) return res.status(400).json({ error: shape.error });
+    const courseId = readTrimmedString(shape.data, 'courseId', { required: true, maxLength: 128, message: 'A valid courseId is required.' });
+    const classId = readTrimmedString(shape.data, 'classId', { required: false, maxLength: 128, message: 'classId must be valid.' });
+    const schedule = parseSchedule(shape.data.schedule);
+    if (!courseId.success) return res.status(400).json({ error: courseId.error });
+    if (!classId.success) return res.status(400).json({ error: classId.error });
+    if (!schedule.success) return res.status(400).json({ error: schedule.error });
+    const teacherIdValue = shape.data.teacherId;
+    if (teacherIdValue !== undefined && teacherIdValue !== null && (typeof teacherIdValue !== 'string' || !teacherIdValue.trim() || teacherIdValue.length > 128)) {
+      return res.status(400).json({ error: 'teacherId must be a valid ID or null.' });
+    }
+    const teacherId = typeof teacherIdValue === 'string' ? teacherIdValue.trim() : null;
+    try {
+      const course = await prisma.course.findFirst({ where: { id: courseId.data, tenantId: req.tenantId! } });
+      if (!course) return res.status(404).json({ error: 'Course not found in your institution.' });
+      if (!hasBranchPermission(req.user!, 'manage_courses', course.branchId)) return res.status(403).json({ error: 'You cannot schedule classes for this branch.' });
+      if (teacherId && !await eligibleTeacher(req.tenantId!, course.branchId, teacherId)) return res.status(400).json({ error: 'Selected teacher is not assigned to this branch.' });
+      let studentIds: string[] = [];
+      if (classId.data) {
+        const klass = await prisma.class.findFirst({
+          where: { id: classId.data, courseId: course.id, branchId: course.branchId },
+          select: { course: { select: { gradeId: true } }, enrollments: { where: { status: { in: ACTIVE_ENROLLMENT_STATUSES } }, select: { studentId: true } } },
+        });
+        if (!klass) return res.status(404).json({ error: 'Class not found for the selected course.' });
+        studentIds = [...new Set([...klass.enrollments.map((enrollment) => enrollment.studentId), ...await inheritedGradeStudentIds(req.tenantId!, course.branchId, klass.course.gradeId)])];
+      }
+      else studentIds = await inheritedGradeStudentIds(req.tenantId!, course.branchId, course.gradeId);
+      const conflicts = await classConflict({ tenantId: req.tenantId!, branchId: course.branchId, teacherId, schedule: schedule.data, excludeClassId: classId.data || undefined, studentIds });
+      return res.json({ conflicts });
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Failed to check timetable conflicts.', details: error.message });
+    }
+  },
+);
+
 // 4. Create a Class (Timetable Instance)
 router.post(
   '/classes',
   authMiddleware,
-  hasPermission('manage_courses'),
   async (req: TenantRequest, res: Response) => {
-    const shape = parseStrictKeys(req.body, ['courseId', 'name', 'schedule']);
+    const shape = parseStrictKeys(req.body, ['courseId', 'name', 'schedule', 'teacherId', 'academicYear', 'effectiveFrom', 'effectiveUntil']);
     if (!shape.success) return res.status(400).json({ error: shape.error });
     const courseId = readTrimmedString(shape.data, 'courseId', { required: true, maxLength: 128, message: 'A valid courseId is required.' });
     const name = readTrimmedString(shape.data, 'name', { required: true, maxLength: 160, message: 'A class name is required and must be 160 characters or fewer.' });
@@ -438,6 +783,18 @@ router.post(
     if (!courseId.success) return res.status(400).json({ error: courseId.error });
     if (!name.success) return res.status(400).json({ error: name.error });
     if (!schedule.success) return res.status(400).json({ error: schedule.error });
+    const teacherIdValue = shape.data.teacherId;
+    if (teacherIdValue !== undefined && teacherIdValue !== null && (typeof teacherIdValue !== 'string' || !teacherIdValue.trim() || teacherIdValue.length > 128)) {
+      return res.status(400).json({ error: 'teacherId must be a valid ID or null.' });
+    }
+    const teacherId = typeof teacherIdValue === 'string' ? teacherIdValue.trim() : null;
+    const academicYear = readTrimmedString(shape.data, 'academicYear', { required: false, maxLength: 40, message: 'academicYear must be 40 characters or fewer.' });
+    if (!academicYear.success) return res.status(400).json({ error: academicYear.error });
+    const effectiveFrom = shape.data.effectiveFrom ? new Date(String(shape.data.effectiveFrom)) : null;
+    const effectiveUntil = shape.data.effectiveUntil ? new Date(String(shape.data.effectiveUntil)) : null;
+    if ((effectiveFrom && Number.isNaN(effectiveFrom.getTime())) || (effectiveUntil && Number.isNaN(effectiveUntil.getTime())) || (effectiveFrom && effectiveUntil && effectiveFrom > effectiveUntil)) {
+      return res.status(400).json({ error: 'Effective dates must be valid and effectiveUntil cannot precede effectiveFrom.' });
+    }
 
     try {
       // The class inherits the course's branch; verify both belong to the tenant.
@@ -445,15 +802,35 @@ router.post(
       if (!course || course.tenantId !== req.tenantId) {
         return res.status(404).json({ error: 'Course not found in your institution.' });
       }
+      if (!hasBranchPermission(req.user!, 'manage_courses', course.branchId)) {
+        return res.status(403).json({ error: 'You cannot create classes for this branch.' });
+      }
+      if (teacherId && !await eligibleTeacher(req.tenantId!, course.branchId, teacherId)) {
+        return res.status(400).json({ error: 'Selected teacher is not assigned to this branch.' });
+      }
+      const inheritedStudentIds = await inheritedGradeStudentIds(req.tenantId!, course.branchId, course.gradeId);
+      const conflicts = await classConflict({ tenantId: req.tenantId!, branchId: course.branchId, teacherId, schedule: schedule.data, studentIds: inheritedStudentIds });
+      if (conflicts.length) return res.status(409).json({ error: conflicts[0], conflicts });
 
       const cls = await prisma.class.create({
         data: {
           courseId: courseId.data,
           branchId: course.branchId,
           name: name.data,
-          schedule: schedule.data as Prisma.InputJsonValue,
+          schedule: schedule.data as unknown as Prisma.InputJsonValue,
+          teacherId,
+          academicYear: academicYear.data,
+          effectiveFrom,
+          effectiveUntil,
         },
       });
+      await prisma.timetableVersion.create({ data: {
+        classId: cls.id, version: 1, academicYear: cls.academicYear,
+        effectiveFrom: cls.effectiveFrom, effectiveUntil: cls.effectiveUntil,
+        teacherId: cls.teacherId, name: cls.name, schedule: cls.schedule as Prisma.InputJsonValue,
+        changedBy: req.user!.id,
+      } });
+      if (teacherId) await ensureTodaySession(teacherId, cls.id, cls.schedule);
       return res.status(201).json({ message: 'Class timetable created successfully.', class: cls });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to create class.', details: error.message });
@@ -462,7 +839,7 @@ router.post(
 );
 
 // 4b. Weekday abbreviations used in class schedules.
-const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const DAY_ABBR = SCHEDULE_DAYS;
 
 // Ensure a TeacherSession exists for the assigned teacher on today's date when
 // the class is scheduled today. This is the per-day session generation that a
@@ -472,7 +849,7 @@ async function ensureTodaySession(teacherId: string, classId: string, schedule: 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const todayAbbr = DAY_ABBR[today.getDay()];
-  const scheduledToday = Array.isArray(schedule) && schedule.some((slot: any) => slot?.day === todayAbbr);
+  const scheduledToday = normalizeSchedule(schedule).some((slot) => slot.day === todayAbbr);
   if (!scheduledToday) {
     return;
   }
@@ -490,7 +867,7 @@ router.put(
   authMiddleware,
   async (req: TenantRequest, res: Response) => {
     const { id } = req.params;
-    const shape = parseStrictKeys(req.body, ['name', 'schedule', 'teacherId']);
+    const shape = parseStrictKeys(req.body, ['name', 'schedule', 'teacherId', 'academicYear', 'effectiveFrom', 'effectiveUntil']);
     if (!shape.success) return res.status(400).json({ error: shape.error });
 
     const data: Prisma.ClassUncheckedUpdateInput = {};
@@ -502,7 +879,7 @@ router.put(
     if (shape.data.schedule !== undefined) {
       const schedule = parseSchedule(shape.data.schedule);
       if (!schedule.success) return res.status(400).json({ error: schedule.error });
-      data.schedule = schedule.data as Prisma.InputJsonValue;
+      data.schedule = schedule.data as unknown as Prisma.InputJsonValue;
     }
     const teacherIdValue = shape.data.teacherId;
     if (teacherIdValue !== undefined) {
@@ -511,44 +888,71 @@ router.put(
       }
       data.teacherId = typeof teacherIdValue === 'string' ? teacherIdValue.trim() : null;
     }
+    if (shape.data.academicYear !== undefined) {
+      const academicYear = readTrimmedString(shape.data, 'academicYear', { required: false, maxLength: 40, message: 'academicYear must be 40 characters or fewer.' });
+      if (!academicYear.success) return res.status(400).json({ error: academicYear.error });
+      data.academicYear = academicYear.data;
+    }
+    for (const field of ['effectiveFrom', 'effectiveUntil'] as const) {
+      if (shape.data[field] === undefined) continue;
+      if (shape.data[field] === null || shape.data[field] === '') data[field] = null;
+      else {
+        const parsed = new Date(String(shape.data[field]));
+        if (Number.isNaN(parsed.getTime())) return res.status(400).json({ error: `${field} must be a valid date or null.` });
+        data[field] = parsed;
+      }
+    }
     if (Object.keys(data).length === 0) {
       return res.status(400).json({ error: 'At least one class field must be provided.' });
     }
 
     try {
-      const cls = await prisma.class.findUnique({ where: { id }, include: { course: true } });
+      const cls = await prisma.class.findUnique({
+        where: { id },
+        include: { course: true, enrollments: { where: { status: { in: ACTIVE_ENROLLMENT_STATUSES } }, select: { studentId: true } } },
+      });
       if (!cls || cls.course.tenantId !== req.tenantId) {
         return res.status(404).json({ error: 'Class not found in your institution.' });
       }
       if (!hasBranchPermission(req.user!, 'manage_courses', cls.branchId)) {
         return res.status(403).json({ error: 'You cannot update classes for this branch.' });
       }
+      if (cls.archivedAt) return res.status(409).json({ error: 'Restore this class before updating it.' });
 
-      // teacherId: string assigns, null unassigns.
-      if (typeof data.teacherId === 'string') {
-        const teacher = await prisma.user.findFirst({
-          where: {
-            id: data.teacherId,
-            tenantId: req.tenantId!,
-            userRoles: { some: { role: { name: 'Teacher' } } },
-          },
+      const nextTeacherId = data.teacherId === undefined ? cls.teacherId : typeof data.teacherId === 'string' ? data.teacherId : null;
+      const nextSchedule = normalizeSchedule(data.schedule ?? cls.schedule);
+      if (nextTeacherId && !await eligibleTeacher(req.tenantId!, cls.branchId, nextTeacherId)) {
+        return res.status(400).json({ error: 'Selected teacher is not assigned to this branch.' });
+      }
+      if (shape.data.schedule !== undefined || teacherIdValue !== undefined) {
+        const conflicts = await classConflict({
+          tenantId: req.tenantId!,
+          branchId: cls.branchId,
+          teacherId: nextTeacherId,
+          schedule: nextSchedule,
+          excludeClassId: cls.id,
+          studentIds: [...new Set([
+            ...cls.enrollments.map((enrollment) => enrollment.studentId),
+            ...await inheritedGradeStudentIds(req.tenantId!, cls.branchId, cls.course.gradeId),
+          ])],
         });
-        if (!teacher) {
-          return res.status(400).json({ error: 'Selected teacher is not a teacher in your institution.' });
-        }
-        const nextSchedule = (data.schedule ?? cls.schedule) as Array<Record<string, string>>;
-        const otherClasses = await prisma.class.findMany({ where: { id: { not: id }, teacherId: data.teacherId, branchId: cls.branchId }, select: { name: true, schedule: true } });
-        for (const other of otherClasses) {
-          const otherSlots = Array.isArray(other.schedule) ? other.schedule as Array<Record<string, string>> : [];
-          for (const slot of nextSchedule) {
-            const start = slot.start ?? slot.startTime; const end = slot.end ?? slot.endTime;
-            const collision = otherSlots.find((candidate) => candidate.day === slot.day && (candidate.start ?? candidate.startTime) < end && (candidate.end ?? candidate.endTime) > start);
-            if (collision) return res.status(409).json({ error: `This teacher is already scheduled for ${other.name} on ${slot.day} during that time.` });
-          }
-        }
+        if (conflicts.length) return res.status(409).json({ error: conflicts[0], conflicts });
       }
 
-      const updated = await prisma.class.update({ where: { id }, data });
+      const nextFrom = data.effectiveFrom === undefined ? cls.effectiveFrom : data.effectiveFrom as Date | null;
+      const nextUntil = data.effectiveUntil === undefined ? cls.effectiveUntil : data.effectiveUntil as Date | null;
+      if (nextFrom && nextUntil && nextFrom > nextUntil) return res.status(400).json({ error: 'effectiveUntil cannot precede effectiveFrom.' });
+      const latestVersion = await prisma.timetableVersion.aggregate({ where: { classId: cls.id }, _max: { version: true } });
+      const updated = await prisma.$transaction(async (tx) => {
+        const saved = await tx.class.update({ where: { id }, data });
+        await tx.timetableVersion.create({ data: {
+          classId: saved.id, version: (latestVersion._max.version ?? 0) + 1,
+          academicYear: saved.academicYear, effectiveFrom: saved.effectiveFrom, effectiveUntil: saved.effectiveUntil,
+          teacherId: saved.teacherId, name: saved.name, schedule: saved.schedule as Prisma.InputJsonValue,
+          changedBy: req.user!.id,
+        } });
+        return saved;
+      });
 
       if (updated.teacherId) {
         await ensureTodaySession(updated.teacherId, updated.id, updated.schedule);
@@ -580,8 +984,9 @@ router.delete(
       if (!hasBranchPermission(req.user!, 'manage_courses', cls.branchId)) {
         return res.status(403).json({ error: 'You cannot delete classes for this branch.' });
       }
+      if (!cls.archivedAt) return res.status(409).json({ error: 'Archive this class before permanently deleting it.' });
       if (cls._count.enrollments > 0) {
-        return res.status(409).json({ error: 'Cannot delete a class with enrolled students. Move or unenrol them first.' });
+        return res.status(409).json({ error: 'Cannot permanently delete a class with enrollment history. Archive support is required to preserve its records.' });
       }
 
       await prisma.$transaction([
@@ -612,7 +1017,7 @@ router.get(
       if (!isTenantAdmin(req.user!) && !hasBranchMembership) {
         return res.status(403).json({ error: 'You cannot view classes for this branch.' });
       }
-      return res.json({ class: cls });
+      return res.json({ class: { ...cls, schedule: normalizeSchedule(cls.schedule) } });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to load class.' });
     }
@@ -650,7 +1055,7 @@ router.get(
         classId: e.classId,
         className: e.class.name,
         courseId: e.courseId,
-        schedule: e.class.schedule,
+        schedule: normalizeSchedule(e.class.schedule),
       }));
       return res.json({ timetable });
     } catch (error: any) {
@@ -678,21 +1083,18 @@ router.get(
         || isTenantAdmin(req.user!)
         || branchIds.some((branchId) => canAccessBranch(req.user!, branchId));
       if (!allowed) return res.status(403).json({ error: 'You cannot view this teacher timetable.' });
-      const sessions = await prisma.teacherSession.findMany({
-        where: { teacherId, class: { course: { tenantId: req.tenantId! } } },
-        include: { class: true },
+      const classes = await prisma.class.findMany({
+        where: { teacherId, archivedAt: null, course: { tenantId: req.tenantId! } },
+        orderBy: { name: 'asc' },
       });
-      
-      const classMap = new Map();
-      sessions.forEach(s => {
-        classMap.set(s.class.id, s.class);
-      });
-      
-      const timetable = Array.from(classMap.values()).map(c => ({
+      const timetable = classes.map(c => ({
         classId: c.id,
         className: c.name,
         courseId: c.courseId,
-        schedule: c.schedule,
+        schedule: normalizeSchedule(c.schedule),
+        academicYear: c.academicYear,
+        effectiveFrom: c.effectiveFrom,
+        effectiveUntil: c.effectiveUntil,
       }));
       return res.json({ timetable });
     } catch (error: any) {
@@ -815,8 +1217,17 @@ router.post(
        if (course.type !== type.data) {
         return res.status(400).json({ error: 'Enrollment type must match the specialized course type.' });
       }
-       const duplicate = await prisma.enrollment.findFirst({ where: { studentId, classId: classId.data, status: 'ACTIVE' } });
+       const duplicate = await prisma.enrollment.findFirst({ where: { studentId, classId: classId.data, status: { in: ACTIVE_ENROLLMENT_STATUSES } } });
       if (duplicate) return res.status(409).json({ error: 'Student is already enrolled in this class.' });
+      const timetableConflicts = await studentEnrollmentConflicts({
+        tenantId: req.tenantId!,
+        studentId,
+        targetClassId: klass.id,
+        targetSchedule: normalizeSchedule(klass.schedule),
+        targetBranchId: klass.branchId,
+        studentGradeId: student.gradeId,
+      });
+      if (timetableConflicts.length) return res.status(409).json({ error: timetableConflicts[0], conflicts: timetableConflicts });
       const enrollment = await prisma.enrollment.create({
           data: {
             studentId,
@@ -1010,11 +1421,15 @@ router.delete(
       if (!enrollment || enrollment.course.tenantId !== req.tenantId) {
         return res.status(404).json({ error: 'Enrolment not found in your institution.' });
       }
-      if (!hasBranchPermission(req.user!, 'manage_billing', enrollment.course.branchId)) {
+      if (!hasBranchPermission(req.user!, 'manage_courses', enrollment.course.branchId)) {
         return res.status(403).json({ error: 'You cannot remove enrollments for this branch.' });
       }
-      await prisma.enrollment.delete({ where: { id } });
-      return res.json({ message: 'Student unenrolled.' });
+      if (!ACTIVE_ENROLLMENT_STATUSES.includes(enrollment.status)) {
+        return res.status(409).json({ error: 'This enrollment is no longer active.' });
+      }
+      const droppedAt = new Date();
+      await prisma.enrollment.update({ where: { id }, data: { status: 'DROPPED', validUntil: droppedAt } });
+      return res.json({ message: 'Student removed from class. Enrollment history was preserved.' });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to unenroll.', details: error.message });
     }
@@ -1095,6 +1510,17 @@ router.put(
         if (!grade) {
           return res.status(404).json({ error: 'Grade not found in your institution.' });
         }
+      }
+
+      // Package-billed academic subjects never carry a second recurring fee.
+      // Normalize on the server so older clients cannot accidentally double-price them.
+      const targetGradeId = data.gradeId === undefined ? course.gradeId : typeof data.gradeId === 'string' ? data.gradeId : null;
+      const targetType = data.type === undefined ? course.type : data.type;
+      const targetIsExtraActivity = targetType !== CourseType.REGULAR || (data.isExtraActivity === undefined ? course.isExtraActivity : Boolean(data.isExtraActivity));
+      data.isExtraActivity = targetIsExtraActivity;
+      if (targetGradeId && targetType === CourseType.REGULAR && !targetIsExtraActivity) {
+        const targetGrade = await prisma.grade.findFirst({ where: { id: targetGradeId, tenantId: req.tenantId! }, select: { billingMode: true } });
+        if (targetGrade?.billingMode === GradeBillingMode.GRADE) data.feeStructure = { monthlyBase: 0 };
       }
 
       const updated = await prisma.course.update({ where: { id }, data });

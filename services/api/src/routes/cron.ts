@@ -5,6 +5,7 @@ import { authMiddleware } from '../middleware/auth';
 import { MockSmsSender, MockPushNotificationService } from '../utils/notifications';
 import { isTenantAdmin } from '../utils/access-control';
 import { reconcilePendingConnectIps } from '../utils/connectips';
+import { generateDailyTeacherSessions } from '../services/timetable-service';
 
 const router = Router();
 
@@ -89,6 +90,9 @@ router.post(
       } else if (taskName === 'connectips-revalidate') {
         const result = await reconcilePendingConnectIps({ tenantId: req.tenantId! });
         logs.push(`Revalidated ${result.checked} pending connectIPS payment(s); confirmed ${result.confirmed}.`);
+      } else if (taskName === 'daily-teacher-sessions') {
+        const result = await generateDailyTeacherSessions({ tenantId: req.tenantId! });
+        logs.push(`Generated ${result.created} teacher session(s) for ${result.day}; ${result.eligible} scheduled class(es) were eligible.`);
       } else {
         return res.status(400).json({ error: `Unknown taskName: ${taskName}.` });
       }

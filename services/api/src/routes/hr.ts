@@ -1,14 +1,34 @@
 import { Router, Response } from 'express';
+import { PayrollStatus, Prisma } from '@prisma/client';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { hasBranchPermission, isTenantAdmin, managedBranchIds } from '../utils/access-control';
 import { parseStrictKeys, readFiniteNumber, readTrimmedString, type ValidationResult } from '../utils/request-validation';
+import {
+  createPayrollRecords,
+  previewPayrollRecords,
+  PayrollConfigurationError,
+  PayrollPeriodConflictError,
+} from '../services/payroll-service';
 
 const router = Router();
 const STAFF_DOCUMENT_TYPES = new Set(['NID', 'CONTRACT', 'ACADEMIC', 'CERTIFICATION']);
 const CONTROL_CHARACTER_PATTERN = /^[^\u0000-\u001F\u007F]+$/;
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})?)?$/;
+
+function parsePayrollPeriod(body: unknown) {
+  const shape = parseStrictKeys(body, ['month', 'year', 'adjustments']);
+  if (!shape.success) return shape;
+  const month = readFiniteNumber(shape.data, 'month', { min: 1, max: 12, message: 'month must be an integer between 1 and 12.' });
+  const year = readFiniteNumber(shape.data, 'year', { min: 2_000, max: 2_100, message: 'year must be an integer between 2000 and 2100.' });
+  if (!month.success || !Number.isInteger(month.data)) return { success: false as const, error: 'month must be an integer between 1 and 12.' };
+  if (!year.success || !Number.isInteger(year.data)) return { success: false as const, error: 'year must be an integer between 2000 and 2100.' };
+  if (shape.data.adjustments !== undefined && !Array.isArray(shape.data.adjustments)) return { success: false as const, error: 'adjustments must be an array.' };
+  const adjustments = (shape.data.adjustments as unknown[] | undefined ?? []).map((value) => value as Record<string, unknown>);
+  if (adjustments.length > 500 || adjustments.some((item) => typeof item.staffRecordId !== 'string' || !Number.isFinite(Number(item.bonuses ?? 0)) || Number(item.bonuses ?? 0) < 0 || !Number.isFinite(Number(item.deductions ?? 0)) || Number(item.deductions ?? 0) < 0 || (item.remarks !== undefined && (typeof item.remarks !== 'string' || item.remarks.length > 500)))) return { success: false as const, error: 'Each adjustment requires a staffRecordId, non-negative bonus and deduction amounts, and optional remarks up to 500 characters.' };
+  return { success: true as const, data: { month: month.data, year: year.data, adjustments: adjustments.map((item) => ({ staffRecordId: String(item.staffRecordId), bonuses: Number(item.bonuses ?? 0), deductions: Number(item.deductions ?? 0), remarks: typeof item.remarks === 'string' ? item.remarks : undefined })) } };
+}
 
 function parseOptionalDate(value: unknown, field: string): ValidationResult<Date | null> {
   if (value === undefined || value === null) return { success: true, data: null };
@@ -159,8 +179,8 @@ router.post(
       if (!canManageStaffAssignments(req, staff.user.userRoles)) {
         return res.status(403).json({ error: 'You cannot initiate exits for staff outside your assigned branches.' });
       }
-      const structure = (staff.salaryStructure ?? {}) as { basicSalary?: number };
-      const salary = Number(structure.basicSalary ?? 0);
+      const structure = (staff.salaryStructure ?? {}) as { baseMonthlySalary?: number };
+      const salary = Number(structure.baseMonthlySalary ?? 0);
       const resignationDay = Number((shape.data.resignationDate as string).slice(8, 10));
       const proRatedSalary = Math.round((salary / 30) * Math.min(resignationDay, 30) * 100) / 100;
 
@@ -275,6 +295,19 @@ router.post(
   }
 );
 
+router.post('/payroll/preview', authMiddleware, hasPermission('manage_staff'), async (req: TenantRequest, res: Response) => {
+  if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may preview payroll.' });
+  const input = parsePayrollPeriod(req.body);
+  if (!input.success) return res.status(400).json({ error: input.error });
+  try {
+    const payrolls = await previewPayrollRecords({ tenantId: req.tenantId!, ...input.data });
+    return res.json({ payrolls, summary: payrolls.reduce((result, item) => ({ gross: result.gross + item.baseSalary + item.bonuses, deductions: result.deductions + item.deductions, netPayable: result.netPayable + item.netPayable }), { gross: 0, deductions: 0, netPayable: 0 }) });
+  } catch (error) {
+    if (error instanceof PayrollConfigurationError) return res.status(422).json({ error: error.message, incompleteStaff: error.staff });
+    return res.status(500).json({ error: 'Payroll preview failed.' });
+  }
+});
+
 // 6. Calculate Payroll
 router.post(
   '/payroll/calculate',
@@ -282,76 +315,23 @@ router.post(
   hasPermission('manage_staff'),
   async (req: TenantRequest, res: Response) => {
     if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may calculate payroll.' });
-    const shape = parseStrictKeys(req.body, ['month', 'year']);
-    if (!shape.success) return res.status(400).json({ error: shape.error });
-    const month = readFiniteNumber(shape.data, 'month', { min: 1, max: 12, message: 'month must be an integer between 1 and 12.' });
-    const year = readFiniteNumber(shape.data, 'year', { min: 2_000, max: 2_100, message: 'year must be an integer between 2000 and 2100.' });
-    if (!month.success || !Number.isInteger(month.data)) return res.status(400).json({ error: 'month must be an integer between 1 and 12.' });
-    if (!year.success || !Number.isInteger(year.data)) return res.status(400).json({ error: 'year must be an integer between 2000 and 2100.' });
+    const input = parsePayrollPeriod(req.body);
+    if (!input.success) return res.status(400).json({ error: input.error });
     const tenantId = req.tenantId!;
 
     try {
-      const staffRecords = await prisma.staffRecord.findMany({
-          where: { user: { tenantId } },
-          include: { user: true },
-        });
-
-      const payrolls = [];
-
-      for (const record of staffRecords) {
-        let baseSalary = 0;
-        let deductions = 0;
-        let bonuses = 0;
-
-        if (record.contractType === 'FIXED') {
-          const struct = record.salaryStructure as any || {};
-          baseSalary = Number(struct.basicSalary) || 30000;
-          deductions = 0;
-          bonuses = 2000;
-        } else if (record.contractType === 'HOUR_RATE') {
-          const struct = record.salaryStructure as any || {};
-          const hourlyRate = Number(struct.hourlyRate) || 400;
-          
-          const sessionsCount = await prisma.teacherSession.count({
-              where: {
-                teacherId: record.userId,
-                status: 'PRESENT_CONFIRMED',
-                date: {
-                  gte: new Date(year.data, month.data - 1, 1),
-                  lt: new Date(year.data, month.data, 1),
-                },
-              },
-            });
-
-          const hoursWorked = sessionsCount * 1.5;
-          baseSalary = hoursWorked * hourlyRate;
-          deductions = 0;
-          bonuses = 0;
-        }
-
-        const netPayable = baseSalary + bonuses - deductions;
-
-        const payRecord = await prisma.payroll.create({
-            data: {
-              tenantId,
-              staffRecordId: record.id,
-              month: month.data,
-              year: year.data,
-              baseSalary,
-              attendanceDeductions: deductions,
-              bonuses,
-              netPayable,
-              status: 'PENDING',
-            },
-          });
-        payrolls.push(payRecord);
-      }
-
+      const payrolls = await createPayrollRecords({ tenantId, ...input.data, calculatedBy: req.user!.id });
       return res.status(201).json({
         message: 'Payroll calculated successfully.',
         payrolls,
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof PayrollConfigurationError) {
+        return res.status(422).json({ error: error.message, incompleteStaff: error.staff });
+      }
+      if (error instanceof PayrollPeriodConflictError) {
+        return res.status(409).json({ error: error.message, existingStaff: error.staff });
+      }
       return res.status(500).json({ error: 'Payroll calculation failed.' });
     }
   }
@@ -365,11 +345,47 @@ router.get(
   async (req: TenantRequest, res: Response) => {
     try {
       if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may view payroll.' });
-      const list = await prisma.payroll.findMany({
-          where: { tenantId: req.tenantId! },
+      const month = typeof req.query.month === 'string' ? Number(req.query.month) : undefined;
+      const year = typeof req.query.year === 'string' ? Number(req.query.year) : undefined;
+      const status = typeof req.query.status === 'string' ? req.query.status.trim() : '';
+      const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+      const allowedStatuses = ['PENDING', 'APPROVED_FOR_MANUAL_PAYMENT', 'MANUALLY_PAID'];
+      if ((month === undefined) !== (year === undefined)) return res.status(400).json({ error: 'month and year must be provided together.' });
+      if (month !== undefined && (!Number.isInteger(month) || month < 1 || month > 12)) return res.status(400).json({ error: 'month must be an integer between 1 and 12.' });
+      if (year !== undefined && (!Number.isInteger(year) || year < 2000 || year > 2100)) return res.status(400).json({ error: 'year must be an integer between 2000 and 2100.' });
+      if (status && !allowedStatuses.includes(status)) return res.status(400).json({ error: 'Invalid payroll status filter.' });
+      if (search.length > 120) return res.status(400).json({ error: 'Payroll search must be 120 characters or fewer.' });
+      const periodWhere: Prisma.PayrollWhereInput = {
+        tenantId: req.tenantId!,
+        ...(month !== undefined && year !== undefined ? { month, year } : {}),
+      };
+      const where: Prisma.PayrollWhereInput = {
+        ...periodWhere,
+        ...(status ? { status: status as PayrollStatus } : {}),
+        ...(search ? { staffRecord: { user: { OR: [
+          { firstName: { contains: search, mode: 'insensitive' } },
+          { lastName: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } },
+        ] } } } : {}),
+      };
+      const [list, periodRecords] = await Promise.all([prisma.payroll.findMany({
+          where,
           include: { staffRecord: { include: { user: true } } },
-        });
-      return res.status(200).json({ payrolls: list });
+          orderBy: [{ year: 'desc' }, { month: 'desc' }, { staffRecord: { user: { firstName: 'asc' } } }],
+          take: 500,
+      }), prisma.payroll.findMany({
+        where: periodWhere,
+        select: { baseSalary: true, bonuses: true, attendanceDeductions: true, netPayable: true, status: true },
+        take: 500,
+      })]);
+      const summary = periodRecords.reduce((result, payroll) => {
+        result.gross += Number(payroll.baseSalary) + Number(payroll.bonuses);
+        result.deductions += Number(payroll.attendanceDeductions);
+        result.netPayable += Number(payroll.netPayable);
+        result.counts[payroll.status] = (result.counts[payroll.status] ?? 0) + 1;
+        return result;
+      }, { gross: 0, deductions: 0, netPayable: 0, counts: {} as Record<string, number> });
+      return res.status(200).json({ payrolls: list, summary: { ...summary, staffCount: periodRecords.length } });
     } catch {
       return res.status(500).json({ error: 'Failed to retrieve payrolls.' });
     }
@@ -413,9 +429,30 @@ router.post(
   }
 );
 
+router.post('/payroll/approve-bulk', authMiddleware, hasPermission('manage_staff'), async (req: TenantRequest, res: Response) => {
+  if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may approve payroll.' });
+  const shape = parseStrictKeys(req.body, ['ids']);
+  if (!shape.success || !Array.isArray(shape.data.ids) || shape.data.ids.length < 1 || shape.data.ids.length > 500 || shape.data.ids.some((id) => typeof id !== 'string')) return res.status(400).json({ error: 'ids must contain between 1 and 500 payroll identifiers.' });
+  const ids = Array.from(new Set(shape.data.ids as string[]));
+  const records = await prisma.payroll.findMany({ where: { id: { in: ids }, tenantId: req.tenantId! }, select: { id: true, status: true } });
+  if (records.length !== ids.length) return res.status(404).json({ error: 'One or more payroll records were not found.' });
+  if (records.some((item) => item.status !== 'PENDING')) return res.status(409).json({ error: 'Every selected payroll must be awaiting approval.' });
+  try {
+    const updated = await prisma.$transaction(async (tx) => {
+      const transition = await tx.payroll.updateMany({ where: { id: { in: ids }, tenantId: req.tenantId!, status: 'PENDING' }, data: { status: 'APPROVED_FOR_MANUAL_PAYMENT', approvedBy: req.user!.id, approvedAt: new Date() } });
+      if (transition.count !== ids.length) throw new Error('PAYROLL_BULK_CONFLICT');
+      return transition.count;
+    });
+    return res.json({ message: `${updated} payroll records approved.`, updated });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'PAYROLL_BULK_CONFLICT') return res.status(409).json({ error: 'Payroll changed while the bulk approval was running.' });
+    return res.status(500).json({ error: 'Bulk payroll approval failed.' });
+  }
+});
+
 router.post('/payroll/reconcile/:id', authMiddleware, async (req: TenantRequest, res: Response) => {
   if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may reconcile payroll.' });
-  const shape = parseStrictKeys(req.body, ['reference']);
+  const shape = parseStrictKeys(req.body, ['reference', 'paymentEvidence', 'settlementDate']);
   if (!shape.success) return res.status(400).json({ error: shape.error });
   const reference = readTrimmedString(shape.data, 'reference', {
     required: true,
@@ -424,6 +461,10 @@ router.post('/payroll/reconcile/:id', authMiddleware, async (req: TenantRequest,
     message: 'External payment reference must be a non-empty string of 160 characters or fewer.',
   });
   if (!reference.success) return res.status(400).json({ error: reference.error });
+  const evidence = readTrimmedString(shape.data, 'paymentEvidence', { required: false, maxLength: 2000, message: 'Payment evidence must be 2000 characters or fewer.' });
+  if (!evidence.success) return res.status(400).json({ error: evidence.error });
+  const settlementDate = shape.data.settlementDate === undefined ? new Date() : new Date(String(shape.data.settlementDate));
+  if (Number.isNaN(settlementDate.getTime())) return res.status(400).json({ error: 'settlementDate must be a valid date.' });
 
   try {
     const payroll = await prisma.payroll.findFirst({ where: { id: req.params.id, tenantId: req.tenantId! } });
@@ -436,8 +477,10 @@ router.post('/payroll/reconcile/:id', authMiddleware, async (req: TenantRequest,
       data: {
         status: 'MANUALLY_PAID',
         settlementReference: reference.data,
+        paymentEvidence: evidence.data,
+        settlementDate,
         reconciledBy: req.user!.id,
-        paymentDate: new Date(),
+        paymentDate: settlementDate,
       },
     });
     if (transition.count !== 1) {
@@ -447,6 +490,32 @@ router.post('/payroll/reconcile/:id', authMiddleware, async (req: TenantRequest,
     return res.json({ message: 'Manual salary payment reconciled. TMS did not transfer funds.', payroll: reconciled });
   } catch {
     return res.status(500).json({ error: 'Payroll reconciliation failed.' });
+  }
+});
+
+router.post('/payroll/reconcile-bulk', authMiddleware, hasPermission('manage_staff'), async (req: TenantRequest, res: Response) => {
+  if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Only the Tenant Admin may reconcile payroll.' });
+  const shape = parseStrictKeys(req.body, ['entries']);
+  if (!shape.success || !Array.isArray(shape.data.entries) || shape.data.entries.length < 1 || shape.data.entries.length > 500) return res.status(400).json({ error: 'entries must contain between 1 and 500 reconciliation records.' });
+  const entries = (shape.data.entries as unknown[]).map((entry) => entry as Record<string, unknown>);
+  if (entries.some((entry) => typeof entry.id !== 'string' || typeof entry.reference !== 'string' || !entry.reference.trim() || entry.reference.length > 160 || (entry.paymentEvidence !== undefined && (typeof entry.paymentEvidence !== 'string' || entry.paymentEvidence.length > 2000)))) return res.status(400).json({ error: 'Each reconciliation requires an id, reference, and optional payment evidence.' });
+  const ids = entries.map((entry) => String(entry.id));
+  if (new Set(ids).size !== ids.length) return res.status(400).json({ error: 'Duplicate payroll identifiers are not allowed.' });
+  const records = await prisma.payroll.findMany({ where: { id: { in: ids }, tenantId: req.tenantId! }, select: { id: true, status: true } });
+  if (records.length !== ids.length) return res.status(404).json({ error: 'One or more payroll records were not found.' });
+  if (records.some((item) => item.status !== 'APPROVED_FOR_MANUAL_PAYMENT')) return res.status(409).json({ error: 'Every selected payroll must be approved before reconciliation.' });
+  const settledAt = new Date();
+  try {
+    await prisma.$transaction(async (tx) => {
+      for (const entry of entries) {
+        const updated = await tx.payroll.updateMany({ where: { id: String(entry.id), tenantId: req.tenantId!, status: 'APPROVED_FOR_MANUAL_PAYMENT' }, data: { status: 'MANUALLY_PAID', settlementReference: String(entry.reference).trim(), paymentEvidence: typeof entry.paymentEvidence === 'string' ? entry.paymentEvidence.trim() : null, settlementDate: settledAt, paymentDate: settledAt, reconciledBy: req.user!.id } });
+        if (updated.count !== 1) throw new Error('PAYROLL_BULK_CONFLICT');
+      }
+    });
+    return res.json({ message: `${entries.length} payroll records reconciled.`, updated: entries.length });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'PAYROLL_BULK_CONFLICT') return res.status(409).json({ error: 'Payroll changed while bulk reconciliation was running.' });
+    return res.status(500).json({ error: 'Bulk payroll reconciliation failed.' });
   }
 });
 

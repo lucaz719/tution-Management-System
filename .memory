@@ -1,10 +1,46 @@
 # TMS Working Memory
 
-Last reconciled: 2026-08-18
+Last reconciled: 2026-08-28
 Repository: `https://github.com/lucazsoft/tution-Management-System/`
-Branch: `feature/global-tms-7roles-implementation`
-Repository baseline: `4783370 teacher portal update` (2026-08-05)
-Worktree at reconciliation: merging
+Branch: `main`
+Repository baseline: `a39b2ff Merge pull request #1 from lucazsoft/staging`
+Worktree at reconciliation: deployment-hardening changes in progress
+
+## Deployment hardening (2026-08-28)
+
+- Production and staging are separate Coolify applications tracking `main` and
+  `staging`, respectively. The required team promotion workflow and GitHub
+  branch-protection settings are documented in
+  `docs/DEPLOYMENT_WORKFLOW.md`.
+- Hosted Compose no longer publishes PostgreSQL, API, or web ports on the VPS.
+  It exposes container-network ports for Coolify routing; local host mappings
+  live in `compose.override.yml`.
+- API and web builds now use Node 22 consistently with CI. The API runtime runs
+  as the unprivileged `node` user.
+- Production SMS is fail-closed: `DISABLED` returns a delivery failure,
+  `AAKASH` requires `AAKASH_SMS_AUTH_TOKEN`, and `MOCK` remains forbidden in
+  production. Compose forwards the Aakash token to the API.
+- CI now has least-privilege permissions, concurrency cancellation, timeouts,
+  all focused API unit/configuration checks, a high-severity production audit,
+  production Compose validation, and API/web Docker image builds.
+- The 2026-08-28 Coolify failure was caused by `NODE_ENV=production` together
+  with `SMS_PROVIDER=MOCK`; database startup and Prisma migration had passed.
+- Production secrets disclosed during setup must be rotated. PostgreSQL
+  rotation must also update the initialized database role (or safely replace
+  the empty new volume), not only the Coolify environment value.
+- The production login connectivity defect was traced to the Better Auth web
+  client reading `VITE_API_ORIGIN` even though the web app uses Webpack. Hosted
+  builds therefore fell back to the visitor's `http://localhost:3001` while
+  ordinary API calls correctly used `TMS_API_BASE_URL`. The auth client now
+  derives its origin from the same injected API URL, CI rejects localhost URLs
+  in the production bundle, and login distinguishes service connectivity
+  failures from invalid credentials without consuming a credential attempt.
+- API CORS already allows the single configured `WEB_ORIGIN` with credentials,
+  Better Auth already uses that origin as `trustedOrigins`, and auth fetches
+  already use `credentials: include`. The API-host-only session cookie is the
+  correct scope: both HTTPS subdomains are same-site, and the web host does not
+  need access to the HTTP-only API cookie. No nginx API proxy or shared parent-
+  domain cookie is required.
 
 ## Reconciliation notes (2026-08-18)
 

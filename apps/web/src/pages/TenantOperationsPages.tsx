@@ -1,3 +1,6 @@
+import { EventTargetFields } from '../components/calendar/EventTargetFields';
+import type { EventAudience } from '../services/api/academicEvents';
+import { NepaliDateTimeField } from '../components/calendar/NepaliDateTimeField';
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { RemoteState } from '../components/patterns/RemoteState';
 import { Button } from '../components/ui/Button';
@@ -11,11 +14,13 @@ import {
 } from '../features/tenant/tenantPortalData';
 import { TenantAcademicCalendar } from '../features/tenant/TenantAcademicCalendar';
 import { academicEventsApi, type AcademicEvent, type EventType } from '../services/api/academicEvents';
-import { ApiError, errorMessage, request } from '../services/api/client';
+import { API_BASE_URL, ApiError, errorMessage, request } from '../services/api/client';
 import { financeApi, type Expense, type PettyCashRecord } from '../services/api/finance';
-import { hrApi, type DocumentAlert, type PayrollRecord } from '../services/api/hr';
+import { hrApi, type DocumentAlert, type PayrollPreviewRecord, type PayrollRecord } from '../services/api/hr';
 import { resourcesApi, type MaintenanceTask } from '../services/api/resources';
 import { api } from '../services/api';
+import { toBsMonthRangeLabel, toDualDateLabel, type CalendarSystem } from '../utils/nepaliDate';
+import { englishDateLabel, nepaliDateHeading, nepalDateKey, nepalDateTimeInputToIso, NEPAL_TIME_ZONE } from '../utils/nepalCalendar';
 import './staffFinance.css';
 
 const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 };
@@ -142,16 +147,16 @@ export function TenantReportsPage() {
       </div>
       <div className="accountant-table-scroll">
         <table className="accountant-table">
-          <thead><tr><th>ID</th><th>Type</th><th>Name</th><th>Branch</th><th>Amount</th><th>Status</th></tr></thead>
+          <thead><tr><th>ID</th><th>Type</th><th>Name</th><th>Branch</th><th>Billing date</th><th>Amount</th><th>Status</th></tr></thead>
           <tbody>
             {data.globalLedger.students.flatMap((student) => student.invoices.map((invoice) => (
               <tr key={invoice.id}>
-                <td><strong>{invoice.id.slice(0, 8)}</strong></td><td>Invoice · {invoice.invoiceType}</td><td>{student.studentName}</td><td>{student.branchName}</td><td className="is-amount">NPR {invoice.netPayable.toLocaleString()}</td><td><StatusBadge variant={invoice.status === 'PAID' ? 'success' : invoice.overdue ? 'error' : 'warning'}>{invoice.overdue && invoice.status !== 'PAID' ? 'OVERDUE' : invoice.status}</StatusBadge></td>
+                <td><strong>{invoice.id.slice(0, 8)}</strong></td><td>Invoice · {invoice.invoiceType}</td><td>{student.studentName}</td><td>{student.branchName}</td><td>{invoice.paymentDate ? `Paid ${toDualDateLabel(invoice.paymentDate)}` : `Due ${toDualDateLabel(invoice.dueDate)}`}</td><td className="is-amount">NPR {invoice.netPayable.toLocaleString()}</td><td><StatusBadge variant={invoice.status === 'PAID' ? 'success' : invoice.overdue ? 'error' : 'warning'}>{invoice.overdue && invoice.status !== 'PAID' ? 'OVERDUE' : invoice.status}</StatusBadge></td>
               </tr>
             )))}
             {data.globalLedger.teachers.flatMap((teacher) => teacher.payrolls.map((payroll) => (
               <tr key={payroll.id}>
-                <td><strong>{payroll.id.slice(0, 8)}</strong></td><td>Payroll</td><td>{teacher.teacherName}</td><td>{teacher.branchName}</td><td className="is-amount">NPR {payroll.netPayable.toLocaleString()}</td><td><StatusBadge variant={payroll.status === 'MANUALLY_PAID' ? 'success' : 'warning'}>{payroll.status.replaceAll('_', ' ')}</StatusBadge></td>
+                <td><strong>{payroll.id.slice(0, 8)}</strong></td><td>Payroll</td><td>{teacher.teacherName}</td><td>{teacher.branchName}</td><td>{payroll.paymentDate ? `Paid ${toDualDateLabel(payroll.paymentDate)}` : `${new Date(payroll.year, payroll.month - 1).toLocaleDateString('en', { month: 'long', year: 'numeric' })} AD · ${toBsMonthRangeLabel(new Date(payroll.year, payroll.month - 1, 1))}`}</td><td className="is-amount">NPR {payroll.netPayable.toLocaleString()}</td><td><StatusBadge variant={payroll.status === 'MANUALLY_PAID' ? 'success' : 'warning'}>{payroll.status.replaceAll('_', ' ')}</StatusBadge></td>
               </tr>
             )))}
           </tbody>
@@ -176,25 +181,48 @@ export function TenantReportsPage() {
 
 export function TenantPayrollPage() {
   const { showToast } = useToast();
-  const loader = useCallback(() => hrApi.payroll(), []);
+  const now = new Date();
+  const [period, setPeriod] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
+  const [status, setStatus] = useState('');
+  const [searchDraft, setSearchDraft] = useState('');
+  const [search, setSearch] = useState('');
+  const [busy, setBusy] = useState('');
+  const [references, setReferences] = useState<Record<string, string>>({});
+  const [preview, setPreview] = useState<PayrollPreviewRecord[] | null>(null);
+  const [year, month] = period.split('-').map(Number);
+  const loader = useCallback(() => hrApi.payroll({ month, year, status, search }), [month, year, status, search]);
   const { data, loading, error, reload } = useRemote(loader);
-  const now = new Date(); const [month, setMonth] = useState(now.getMonth() + 1); const [year, setYear] = useState(now.getFullYear());
-  const [busy, setBusy] = useState(''); const [references, setReferences] = useState<Record<string, string>>({});
   const mutate = async (record: PayrollRecord, action: 'APPROVE' | 'RECONCILE') => {
     if (action === 'RECONCILE' && !references[record.id]?.trim()) return showToast('External payment reference is required.', 'error');
     if (!window.confirm(action === 'APPROVE' ? 'Approve this salary obligation for external payment?' : 'Confirm salary was paid outside TMS?')) return;
     setBusy(record.id); try { if (action === 'APPROVE') await hrApi.approve(record.id); else await hrApi.reconcile(record.id, references[record.id]); showToast('Payroll updated.', 'success'); await reload(); } catch (next) { showToast(errorMessage(next), 'error'); if (next instanceof ApiError && next.isConflict) await reload(); } finally { setBusy(''); }
   };
-  const calculate = async () => { setBusy('calculate'); try { await hrApi.calculate(month, year); showToast('Payroll calculated.', 'success'); await reload(); } catch (next) { showToast(errorMessage(next), 'error'); } finally { setBusy(''); } };
-  return <div style={{ display: 'grid', gap: 18 }}><Header title="Payroll" description="Calculate and approve obligations; salaries are paid outside TMS."/><Card hoverable={false}><div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}><input aria-label="Payroll month" style={{ ...input, width: 120 }} type="number" min="1" max="12" value={month} onChange={(e) => setMonth(Number(e.target.value))}/><input aria-label="Payroll year" style={{ ...input, width: 140 }} type="number" value={year} onChange={(e) => setYear(Number(e.target.value))}/><Button disabled={busy === 'calculate'} onClick={() => void calculate()}>Calculate period</Button></div></Card>
-    {loading ? <RemoteState kind="loading"/> : error ? <RemoteState kind="error" message={errorMessage(error)} onRetry={() => void reload()}/> : !data?.payrolls.length ? <RemoteState kind="empty" message="No payroll records yet."/> :
-    <Card hoverable={false}>{data.payrolls.map((record) => <div key={record.id} style={row}><div style={{ display: 'flex', justifyContent: 'space-between' }}><div><strong>{record.staffRecord.user.firstName} {record.staffRecord.user.lastName}</strong><p style={{ color: 'var(--text-muted)', fontSize: 12 }}>{record.month}/{record.year} · {record.staffRecord.designation}</p></div><div><strong>NPR {Number(record.netPayable).toLocaleString()}</strong><br/><StatusBadge variant="info">{record.status}</StatusBadge></div></div>
-      {record.status === 'PENDING' ? <Button disabled={busy === record.id} onClick={() => void mutate(record, 'APPROVE')}>Approve for external payment</Button> : null}
-      {record.status === 'APPROVED_FOR_MANUAL_PAYMENT' ? <div style={{ display: 'flex', gap: 8 }}><input style={input} placeholder="External payment reference" value={references[record.id] ?? ''} onChange={(e) => setReferences((old) => ({ ...old, [record.id]: e.target.value }))}/><Button disabled={busy === record.id} onClick={() => void mutate(record, 'RECONCILE')}>Reconcile</Button></div> : null}
-    </div>)}</Card>}</div>;
+  const loadPreview = async () => { setBusy('preview'); try { setPreview((await hrApi.preview(month, year)).payrolls); } catch (next) { showToast(errorMessage(next), 'error'); } finally { setBusy(''); } };
+  const calculate = async () => { setBusy('calculate'); try { await hrApi.calculate(month, year); setPreview(null); showToast('Payroll calculated.', 'success'); await reload(); } catch (next) { showToast(errorMessage(next), 'error'); } finally { setBusy(''); } };
+  const summary = data?.summary ?? { staffCount: 0, gross: 0, deductions: 0, netPayable: 0, counts: {} };
+  const periodLabel = new Date(year, month - 1).toLocaleDateString('en-NP', { month: 'long', year: 'numeric' });
+  const statusLabel = (value: string) => value === 'PENDING' ? 'Awaiting approval' : value === 'APPROVED_FOR_MANUAL_PAYMENT' ? 'Ready for payment' : 'Paid externally';
+  const statusVariant = (value: string) => value === 'MANUALLY_PAID' ? 'success' : value === 'PENDING' ? 'warning' : 'info';
+  return <div className="payroll-page">
+    <div className="payroll-heading"><Header title="Payroll" description="Preview, prepare, approve, and reconcile salary obligations by period."/><Button disabled={Boolean(busy)} aria-busy={busy === 'preview'} onClick={() => void loadPreview()}>{busy === 'preview' ? 'Preparing preview…' : `Preview ${periodLabel}`}</Button></div>
+    <Card hoverable={false}><div className="payroll-period-controls">
+      <label htmlFor="payroll-period">Payroll period<input id="payroll-period" type="month" min="2000-01" max="2100-12" value={period} onChange={(event) => setPeriod(event.target.value)} /></label>
+      <label htmlFor="payroll-status">Status<select id="payroll-status" value={status} onChange={(event) => setStatus(event.target.value)}><option value="">All statuses</option><option value="PENDING">Awaiting approval</option><option value="APPROVED_FOR_MANUAL_PAYMENT">Ready for payment</option><option value="MANUALLY_PAID">Paid externally</option></select></label>
+      <form className="payroll-search" onSubmit={(event) => { event.preventDefault(); setSearch(searchDraft.trim()); }}><label htmlFor="payroll-search">Search staff</label><div><span className="material-symbols-outlined" aria-hidden="true">search</span><input id="payroll-search" type="search" autoComplete="off" value={searchDraft} placeholder="Name or email" onChange={(event) => setSearchDraft(event.target.value)} /><Button type="submit" variant="secondary">Search</Button></div></form>
+    </div></Card>
+    <section className="payroll-summary" aria-label={`${periodLabel} payroll summary`}>
+      <article><span>Staff records</span><strong>{summary.staffCount}</strong><small>{summary.counts.PENDING ?? 0} awaiting approval</small></article>
+      <article><span>Gross payroll</span><strong>NPR {summary.gross.toLocaleString('en-NP')}</strong><small>Base salary plus bonuses</small></article>
+      <article><span>Deductions</span><strong>NPR {summary.deductions.toLocaleString('en-NP')}</strong><small>Recorded for this view</small></article>
+      <article><span>Net payable</span><strong>NPR {summary.netPayable.toLocaleString('en-NP')}</strong><small>{summary.counts.MANUALLY_PAID ?? 0} payments reconciled</small></article>
+    </section>
+    {preview ? <section className="payroll-preview"><header><div><span>Calculation preview</span><h3>{periodLabel} · {preview.length} staff members</h3><p>Review the exact calculation before writing payroll records.</p></div><div><Button variant="secondary" onClick={() => setPreview(null)}>Close</Button><Button disabled={Boolean(busy) || preview.some((item) => item.existingPayroll)} aria-busy={busy === 'calculate'} onClick={() => void calculate()}>{busy === 'calculate' ? 'Creating…' : 'Create payroll records'}</Button></div></header><div className="payroll-table-scroll"><table className="payroll-table"><thead><tr><th>Staff member</th><th>Contract</th><th>Base</th><th>Bonus</th><th>Deductions</th><th>Net payable</th><th>Availability</th></tr></thead><tbody>{preview.map((item) => <tr key={item.staffRecordId}><td><strong>{item.staffRecord.user.firstName} {item.staffRecord.user.lastName}</strong><small>{item.staffRecord.designation}</small></td><td>{String(item.breakdown.contractType).replace('_', ' ')}</td><td>NPR {item.baseSalary.toLocaleString('en-NP')}</td><td>NPR {item.bonuses.toLocaleString('en-NP')}</td><td>NPR {item.deductions.toLocaleString('en-NP')}</td><td className="payroll-net">NPR {item.netPayable.toLocaleString('en-NP')}</td><td><StatusBadge variant={item.existingPayroll ? 'warning' : 'success'}>{item.existingPayroll ? 'Already created' : 'Ready'}</StatusBadge></td></tr>)}</tbody></table></div></section> : null}
+    {loading ? <div className="payroll-list-skeleton" aria-label="Loading payroll records" aria-busy="true">{Array.from({ length: 4 }, (_, index) => <span key={index} />)}</div> : error ? <RemoteState kind="error" message={errorMessage(error)} onRetry={() => void reload()}/> : !data?.payrolls.length ? <div className="payroll-empty"><span className="material-symbols-outlined" aria-hidden="true">account_balance_wallet</span><strong>No payroll found for {periodLabel}</strong><p>{search || status ? 'Clear the search or status filter, or choose another period.' : 'Preview this period to review salary obligations for active staff.'}</p>{search || status ? <Button variant="secondary" onClick={() => { setSearch(''); setSearchDraft(''); setStatus(''); }}>Clear filters</Button> : <Button disabled={Boolean(busy)} onClick={() => void loadPreview()}>Preview payroll</Button>}</div> :
+    <Card hoverable={false}><div className="payroll-table-scroll"><table className="payroll-table"><thead><tr><th>Staff member</th><th>Period</th><th>Base salary</th><th>Deductions</th><th>Bonuses</th><th>Net payable</th><th>Status</th><th>Action</th></tr></thead><tbody>{data.payrolls.map((record) => <tr key={record.id}><td><strong>{record.staffRecord.user.firstName} {record.staffRecord.user.lastName}</strong><small>{record.staffRecord.designation} · {record.staffRecord.user.email}</small></td><td>{new Date(record.year, record.month - 1).toLocaleDateString('en-NP', { month: 'short', year: 'numeric' })}</td><td>NPR {Number(record.baseSalary).toLocaleString('en-NP')}</td><td>NPR {Number(record.attendanceDeductions).toLocaleString('en-NP')}</td><td>NPR {Number(record.bonuses).toLocaleString('en-NP')}</td><td className="payroll-net">NPR {Number(record.netPayable).toLocaleString('en-NP')}</td><td><StatusBadge variant={statusVariant(record.status)}>{statusLabel(record.status)}</StatusBadge></td><td>{record.status === 'PENDING' ? <Button disabled={busy === record.id} aria-busy={busy === record.id} onClick={() => void mutate(record, 'APPROVE')}>{busy === record.id ? 'Approving…' : 'Approve'}</Button> : record.status === 'APPROVED_FOR_MANUAL_PAYMENT' ? <div className="payroll-reconcile"><label htmlFor={`payroll-reference-${record.id}`}>Payment reference</label><input id={`payroll-reference-${record.id}`} autoComplete="off" maxLength={160} placeholder="e.g. BANK-12345" value={references[record.id] ?? ''} onChange={(event) => setReferences((old) => ({ ...old, [record.id]: event.target.value }))}/><Button disabled={busy === record.id || !references[record.id]?.trim()} aria-busy={busy === record.id} onClick={() => void mutate(record, 'RECONCILE')}>{busy === record.id ? 'Saving…' : 'Mark paid'}</Button></div> : <span className="payroll-complete"><span className="material-symbols-outlined" aria-hidden="true">check_circle</span>Complete</span>}</td></tr>)}</tbody></table></div></Card>}
+  </div>;
 }
 
-interface Branch { id: string; name: string; }
+interface Branch { id: string; name: string; admissionFee?: number; }
 export function TenantResourcesPage() {
   const [branches, setBranches] = useState<Branch[]>([]); const [branchId, setBranchId] = useState(''); const [tasks, setTasks] = useState<MaintenanceTask[]>([]); const [error, setError] = useState<unknown>(null); const [loading, setLoading] = useState(true);
   const load = useCallback(async () => { setLoading(true); setError(null); try { const result = await request<{ branches: Branch[] }>('/branches'); setBranches(result.branches); const selected = branchId || result.branches[0]?.id || ''; setBranchId(selected); setTasks(selected ? (await resourcesApi.tasks(selected)).tasks : []); } catch (next) { setError(next); } finally { setLoading(false); } }, [branchId]);
@@ -205,20 +233,21 @@ export function TenantResourcesPage() {
 
 export function TenantCalendarPage() {
   const { showToast } = useToast(); const loader = useCallback(() => academicEventsApi.list(), []); const { data, loading, error, reload } = useRemote(loader);
-  const [busy, setBusy] = useState(false); const [form, setForm] = useState({ title: '', description: '', eventType: 'EVENT' as EventType, startDate: '', endDate: '' });
-  const submit = async (event: FormEvent) => { event.preventDefault(); setBusy(true); try { await academicEventsApi.createTenantWide({ ...form, startDate: new Date(form.startDate).toISOString(), endDate: new Date(form.endDate).toISOString() }); showToast('Institution-wide event published.', 'success'); setForm({ title: '', description: '', eventType: 'EVENT', startDate: '', endDate: '' }); await reload(); } catch (next) { showToast(errorMessage(next), 'error'); } finally { setBusy(false); } };
+  const [busy, setBusy] = useState(false); const [form, setForm] = useState({ title: '', description: '', eventType: 'EVENT' as EventType, audience: 'ALL' as EventAudience, classId: '', startDate: '', endDate: '' });
+  const [calendarSystem, setCalendarSystem] = useState<CalendarSystem>('BS');
+  const submit = async (event: FormEvent) => { event.preventDefault(); setBusy(true); try { if (!form.startDate.split('T')[0] || !form.endDate.split('T')[0]) throw new Error('Choose the start and end dates.'); if (form.endDate < form.startDate) throw new Error('End must be after the start date and time.'); await academicEventsApi.createTenantWide({ ...form, startDate: nepalDateTimeInputToIso(form.startDate), endDate: nepalDateTimeInputToIso(form.endDate) }); showToast('Institution-wide event published.', 'success'); setForm({ title: '', description: '', eventType: 'EVENT', audience: 'ALL', classId: '', startDate: '', endDate: '' }); await reload(); } catch (next) { showToast(errorMessage(next), 'error'); } finally { setBusy(false); } };
   const events = data?.events ?? [];
   return <div style={{ display: 'grid', gap: 18 }}><Header title="Academic Calendar" description="Plan institution-wide events and review the complete academic month."/>
-    {error ? <RemoteState kind="error" message={errorMessage(error)} onRetry={() => void reload()}/> : null}
-    <TenantAcademicCalendar events={events} loading={loading} />
-    <div className="tenant-calendar-page__lower"><Card hoverable={false}><h3>New institution event</h3><form onSubmit={(e) => void submit(e)} style={{ display: 'grid', gap: 14, marginTop: 14 }}>
+    <TenantAcademicCalendar savingAudience={busy} onAudienceChange={async (event, audience) => { setBusy(true); try { await academicEventsApi.updateAudience(event.id, audience); await reload(); } catch (cause) { showToast(errorMessage(cause), 'error'); } finally { setBusy(false); } }} onCreateEvent={(date) => { setForm((old) => ({ ...old, startDate: `${date}T09:00`, endDate: `${date}T10:00` })); requestAnimationFrame(() => document.getElementById('tenant-event-form')?.scrollIntoView({ block: 'center' })); }} events={events} loading={loading} error={error ? errorMessage(error) : undefined} onRetry={() => void reload()} calendarSystem={calendarSystem} onCalendarSystemChange={setCalendarSystem} />
+    <div className="tenant-calendar-page__lower"><Card hoverable={false}><h3>New institution event</h3><form id="tenant-event-form" onSubmit={(e) => void submit(e)} style={{ display: 'grid', gap: 14, marginTop: 14 }}>
       <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700 }}>Event title<input style={input} placeholder="Parent orientation" value={form.title} onChange={(e) => setForm((old) => ({ ...old, title: e.target.value }))} required/></label>
       <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700 }}>Event type<select style={input} value={form.eventType} onChange={(e) => setForm((old) => ({ ...old, eventType: e.target.value as EventType }))}><option value="EVENT">Event</option><option value="HOLIDAY">Holiday</option><option value="EXAM">Exam</option><option value="FEE_DUE">Fee due</option></select></label>
-      <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700 }}>Starts<input style={input} type="datetime-local" value={form.startDate} onChange={(e) => setForm((old) => ({ ...old, startDate: e.target.value }))} required/></label>
-      <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700 }}>Ends<input style={input} type="datetime-local" value={form.endDate} onChange={(e) => setForm((old) => ({ ...old, endDate: e.target.value }))} required/></label>
+      <EventTargetFields audience={form.audience} classId={form.classId} onAudienceChange={(audience) => setForm((old) => ({ ...old, audience }))} onClassChange={(classId) => setForm((old) => ({ ...old, classId }))} />
+      <NepaliDateTimeField label="Starts" value={form.startDate} onChange={(value) => setForm((old) => ({ ...old, startDate: value }))} />
+      <NepaliDateTimeField label="Ends" value={form.endDate} onChange={(value) => setForm((old) => ({ ...old, endDate: value }))} />
       <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700 }}>Description<textarea style={{ ...input, minHeight: 92, resize: 'vertical' }} placeholder="What should branches know about this event?" value={form.description} onChange={(e) => setForm((old) => ({ ...old, description: e.target.value }))}/></label>
       <Button disabled={busy} aria-busy={busy} type="submit">{busy ? 'Publishing…' : 'Publish to all branches'}</Button></form></Card>
-      <Card hoverable={false}><h3>Published events</h3><p style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 13 }}>Institution and branch events currently visible on the calendar.</p>{events.map((item: AcademicEvent) => <div key={item.id} style={row}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}><div><strong>{item.title}</strong><p style={{ marginTop: 4, fontSize: 12, color: 'var(--text-muted)' }}>{new Date(item.startDate).toLocaleString()} · {item.eventType.replace('_', ' ')}</p></div><StatusBadge variant={item.branchId ? 'info' : 'success'}>{item.branchId ? 'Branch' : 'Institution-wide'}</StatusBadge></div></div>)}</Card>
+      <Card hoverable={false}><h3>Published events</h3><p style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 13 }}>Institution and branch events displayed in {calendarSystem}.</p>{events.map((item: AcademicEvent) => <div key={item.id} style={row}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}><div><strong>{item.title}</strong><p style={{ marginTop: 4, fontSize: 12, color: 'var(--text-muted)' }}>{calendarSystem === 'BS' ? nepaliDateHeading(nepalDateKey(item.startDate)) : englishDateLabel(nepalDateKey(item.startDate))} · {new Date(item.startDate).toLocaleTimeString([], { timeZone: NEPAL_TIME_ZONE, hour: '2-digit', minute: '2-digit' }) + ' NPT'} · {item.eventType.replace('_', ' ')}</p></div><StatusBadge variant={item.branchId ? 'info' : 'success'}>{item.branchId ? 'Branch' : 'Institution-wide'}</StatusBadge></div></div>)}</Card>
     </div>
   </div>;
 }
@@ -232,199 +261,256 @@ export function TenantHrPage() {
   </div>;
 }
 
-interface IssuedCredentials { student: { email: string; temporaryPassword: string }; parent: { email: string; temporaryPassword: string }; }
-interface GradeOption { id: string; name: string; admissionFee?: number | string; }
+interface GradeOption { id: string; name: string; monthlyFee: number; billingMode: 'GRADE' | 'SUBJECT'; }
+interface AdmissionClassOption { id: string; name: string; courseId: string; courseName: string; courseType: string; gradeId: string | null; branchId: string; feeStructure?: { monthlyBase?: number }; isTaxExempt?: boolean; taxPercentage?: number }
+interface AdmissionResult {
+  admission: {
+    studentId: string; admissionNumber: string; admittedAt: string; status: 'PENDING_PAYMENT' | 'READY_FOR_LOGIN' | 'ACTIVE'; admissionFee: number | string;
+    record: { institutionName: string; branchName: string; branchAddress: string; gradeName: string; className: string; admittedBy: { id: string; name: string }; primaryGuardian: { name: string; email: string; phone: string; relationship: string }; student: Record<string, string> };
+  };
+  loginDelivery: { delivered: boolean } | null;
+  message: string;
+}
+
+function AdmissionPrintRecord({ result }: { result: AdmissionResult }) {
+  const { admission } = result;
+  const { record } = admission;
+  const student = record.student;
+  const details = [
+    ['Admission number', admission.admissionNumber], ['Admitted', new Date(admission.admittedAt).toLocaleString('en-NP')],
+    ['Student', `${student.firstName} ${student.lastName}`], ['Date of birth', student.dateOfBirth], ['Gender', student.gender],
+    ['Blood group', student.bloodGroup || '—'], ['Nationality', student.nationality], ['Student phone', student.phone], ['Student email', student.email],
+    ['Grade', record.gradeName], ['Class', record.className], ['Permanent address', student.permanentAddress],
+    ['Temporary address', student.temporaryAddress || '—'], ['School', student.school || '—'], ['Medical/accessibility notes', student.medicalNotes || 'None recorded'],
+  ];
+  return <section className="admission-print-record" aria-label="Printable admission record">
+    <header><div><h1>{record.institutionName}</h1><p>{record.branchName} · {record.branchAddress}</p></div><div><strong>STUDENT ADMISSION RECORD</strong><span>{admission.admissionNumber}</span></div></header>
+    <h2>Student and admission information</h2><dl>{details.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+    <div className="admission-print-columns"><section><h2>Father</h2><p><strong>{student.fatherName}</strong><br />{student.fatherPhone}<br />{student.fatherEmail || 'No email'}<br />{student.fatherOccupation || 'Occupation not recorded'}</p></section><section><h2>Mother</h2><p><strong>{student.motherName}</strong><br />{student.motherPhone}<br />{student.motherEmail || 'No email'}<br />{student.motherOccupation || 'Occupation not recorded'}</p></section></div>
+    {student.optionalParentName ? <div className="admission-print-columns"><section><h2>Optional parent / guardian</h2><p><strong>{student.optionalParentName}</strong> ({student.optionalParentRelationship || 'Relationship not recorded'})<br />{student.optionalParentPhone || 'No phone'}<br />{student.optionalParentEmail || 'No email'}<br />{student.optionalParentOccupation || 'Occupation not recorded'}</p></section></div> : null}
+    <div className="admission-print-columns"><section><h2>Primary parent account</h2><p><strong>{record.primaryGuardian.name}</strong> ({record.primaryGuardian.relationship})<br />{record.primaryGuardian.phone}<br />{record.primaryGuardian.email}</p></section><section><h2>Emergency contact</h2><p><strong>{student.emergencyContactName}</strong> ({student.emergencyContactRelationship})<br />{student.emergencyContactPhone}</p></section></div>
+    <footer><div><span>Admitted by</span><strong>{record.admittedBy.name}</strong></div><div><span>Admission date and time</span><strong>{new Date(admission.admittedAt).toLocaleString('en-NP')}</strong></div><div className="admission-signature"><span>Parent/guardian signature</span></div><div className="admission-signature"><span>Authorized signature</span></div></footer>
+  </section>;
+}
 export function TenantAdmissionsPage() {
   const { showToast } = useToast();
-  const [branches, setBranches] = useState<Branch[]>([]); const [grades, setGrades] = useState<GradeOption[]>([]); const [classes, setClasses] = useState<any[]>([]);
-  const [busy, setBusy] = useState(false); const [credentials, setCredentials] = useState<IssuedCredentials | null>(null);
-  const [form, setForm] = useState({ branchId: '', gradeId: '', classId: '', studentFirst: '', studentLast: '', studentEmail: '', studentPhone: '', parentFirst: '', parentLast: '', parentEmail: '', parentPhone: '' });
+  const [branches, setBranches] = useState<Branch[]>([]); const [grades, setGrades] = useState<GradeOption[]>([]); const [classes, setClasses] = useState<AdmissionClassOption[]>([]);
+  const [subjectClasses, setSubjectClasses] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false); const [result, setResult] = useState<AdmissionResult | null>(null); const [printAfterSave, setPrintAfterSave] = useState(false);
+  const localDateTime = () => { const value = new Date(); value.setMinutes(value.getMinutes() - value.getTimezoneOffset()); return value.toISOString().slice(0, 16); };
+  const [form, setForm] = useState({ branchId: '', gradeId: '', classId: '', admittedAt: localDateTime(), studentFirst: '', studentLast: '', studentEmail: '', studentPhone: '', dateOfBirth: '', gender: '', bloodGroup: '', nationality: 'Nepali', permanentAddress: '', temporaryAddress: '', school: '', medicalNotes: '', fatherName: '', fatherPhone: '', fatherEmail: '', fatherOccupation: '', motherName: '', motherPhone: '', motherEmail: '', motherOccupation: '', optionalParentName: '', optionalParentPhone: '', optionalParentEmail: '', optionalParentOccupation: '', optionalParentRelationship: '', primaryParent: '', emergencyContactName: '', emergencyContactPhone: '', emergencyContactRelationship: '' });
   useEffect(() => { void Promise.all([request<{ branches: Branch[] }>('/branches'), request<{ grades: GradeOption[] }>('/grades'), request<{ classes: any[] }>('/courses/classes')]).then(([b, g, c]) => { setBranches(b.branches); setGrades(g.grades); setClasses(c.classes); const branchId = b.branches[0]?.id ?? ''; const gradeId = g.grades[0]?.id ?? ''; const classId = c.classes.find((item) => item.branchId === branchId && item.gradeId === gradeId && item.courseType === 'REGULAR')?.id ?? ''; setForm((old) => ({ ...old, branchId, gradeId, classId })); }).catch((next) => showToast(errorMessage(next), 'error')); }, []);
+  useEffect(() => { if (result && printAfterSave) { setPrintAfterSave(false); window.setTimeout(() => window.print(), 0); } }, [result, printAfterSave]);
   const availableClasses = classes.filter((item) => item.branchId === form.branchId && item.gradeId === form.gradeId && item.courseType === 'REGULAR');
+  const selectedGrade = grades.find((grade) => grade.id === form.gradeId);
+  const subjectBilling = selectedGrade?.billingMode === 'SUBJECT';
+  const selectedSubjectClassIds = Object.values(subjectClasses).filter(Boolean);
+  const requiredAdmissionFields = ['branchId','gradeId','admittedAt','studentFirst','studentLast','studentEmail','studentPhone','dateOfBirth','gender','nationality','permanentAddress','fatherName','fatherPhone','motherName','motherPhone','primaryParent','emergencyContactName','emergencyContactPhone','emergencyContactRelationship'] as const;
+  const primaryParentRequirements: Array<{ key: keyof typeof form; label: string }> = form.primaryParent === 'Father'
+    ? [{ key: 'fatherName', label: "father's name" }, { key: 'fatherPhone', label: "father's phone" }, { key: 'fatherEmail', label: "father's email" }]
+    : form.primaryParent === 'Mother'
+      ? [{ key: 'motherName', label: "mother's name" }, { key: 'motherPhone', label: "mother's phone" }, { key: 'motherEmail', label: "mother's email" }]
+      : form.primaryParent === 'Optional parent'
+        ? [{ key: 'optionalParentName', label: "guardian's name" }, { key: 'optionalParentPhone', label: "guardian's phone" }, { key: 'optionalParentEmail', label: "guardian's email" }, { key: 'optionalParentRelationship', label: "guardian's relationship" }]
+        : [];
+  const missingPrimaryParentFields = primaryParentRequirements.filter(({ key }) => !form[key].trim());
+  const primaryParentReady = Boolean(form.primaryParent) && missingPrimaryParentFields.length === 0;
+  const academicPlacementReady = subjectBilling ? selectedSubjectClassIds.length > 0 : true;
+  const canPrint = requiredAdmissionFields.every((key) => form[key].trim()) && academicPlacementReady && primaryParentReady && !busy;
   const submit = async (event: FormEvent) => {
-    event.preventDefault(); if (form.studentEmail === form.parentEmail) return showToast('Student and parent emails must be different.', 'error'); setBusy(true);
+    event.preventDefault();
+    const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    const shouldPrint = submitter?.value === 'save-and-print';
+    setPrintAfterSave(shouldPrint); setBusy(true);
     try {
-      const result = await request<{ credentials: IssuedCredentials }>('/users/admissions', { method: 'POST', body: JSON.stringify({ branchId: form.branchId, gradeId: form.gradeId, classId: form.classId, student: { firstName: form.studentFirst, lastName: form.studentLast, email: form.studentEmail, phone: form.studentPhone }, parent: { firstName: form.parentFirst, lastName: form.parentLast, email: form.parentEmail, phone: form.parentPhone } }) });
-      setCredentials(result.credentials); showToast('Admission completed and both login accounts were created.', 'success');
-    } catch (next) { showToast(errorMessage(next), 'error'); } finally { setBusy(false); }
+      const admissionDetails = Object.fromEntries(Object.entries(form).filter(([key]) => ['admittedAt','dateOfBirth','gender','bloodGroup','nationality','permanentAddress','temporaryAddress','school','medicalNotes','fatherName','fatherPhone','fatherEmail','fatherOccupation','motherName','motherPhone','motherEmail','motherOccupation','optionalParentName','optionalParentPhone','optionalParentEmail','optionalParentOccupation','optionalParentRelationship','primaryParent','emergencyContactName','emergencyContactPhone','emergencyContactRelationship'].includes(key)));
+      const selectedParent = form.primaryParent === 'Father' ? { name: form.fatherName, email: form.fatherEmail, phone: form.fatherPhone } : form.primaryParent === 'Mother' ? { name: form.motherName, email: form.motherEmail, phone: form.motherPhone } : { name: form.optionalParentName, email: form.optionalParentEmail, phone: form.optionalParentPhone };
+      if (form.studentEmail.trim().toLowerCase() === selectedParent.email.trim().toLowerCase()) throw new Error('Student and primary parent emails must be different.');
+      const nameParts = selectedParent.name.trim().split(/\s+/); const firstName = nameParts.shift() ?? ''; const lastName = nameParts.join(' ') || firstName;
+      const classIds = subjectBilling ? selectedSubjectClassIds : [];
+      const admission = await request<AdmissionResult>('/users/admissions', { method: 'POST', body: JSON.stringify({ branchId: form.branchId, gradeId: form.gradeId, classIds, student: { firstName: form.studentFirst, lastName: form.studentLast, email: form.studentEmail, phone: form.studentPhone }, parent: { firstName, lastName, email: selectedParent.email, phone: selectedParent.phone }, admissionDetails }) });
+      setResult(admission); showToast(admission.message, admission.loginDelivery && !admission.loginDelivery.delivered ? 'error' : 'success');
+    } catch (next) { setPrintAfterSave(false); showToast(errorMessage(next), 'error'); } finally { setBusy(false); }
   };
-  const acknowledge = () => { setCredentials(null); setForm((old) => ({ ...old, studentFirst: '', studentLast: '', studentEmail: '', studentPhone: '', parentFirst: '', parentLast: '', parentEmail: '', parentPhone: '' })); };
-  return <div style={{ display: 'grid', gap: 18 }}><Header title="Admissions" description="Admit a student into a regular class and create linked student and parent login accounts in one step."/>
-    {!credentials ? <Card hoverable={false}><form onSubmit={(e) => void submit(e)} style={{ display: 'grid', gap: 16 }} aria-busy={busy}>
+  const acknowledge = () => { setResult(null); setForm((old) => ({ ...old, admittedAt: localDateTime(), studentFirst: '', studentLast: '', studentEmail: '', studentPhone: '', dateOfBirth: '', gender: '', bloodGroup: '', permanentAddress: '', temporaryAddress: '', school: '', medicalNotes: '', fatherName: '', fatherPhone: '', fatherEmail: '', fatherOccupation: '', motherName: '', motherPhone: '', motherEmail: '', motherOccupation: '', optionalParentName: '', optionalParentPhone: '', optionalParentEmail: '', optionalParentOccupation: '', optionalParentRelationship: '', primaryParent: '', emergencyContactName: '', emergencyContactPhone: '', emergencyContactRelationship: '' })); };
+  const selectedBranch = branches.find((branch) => branch.id === form.branchId);
+  const subjectGroups = Array.from(new Map(availableClasses.map((item) => [item.courseId, { courseId: item.courseId, courseName: item.courseName, classes: availableClasses.filter((option) => option.courseId === item.courseId), fee: Number(item.feeStructure?.monthlyBase ?? 0) }])).values());
+  const recurringEstimate = subjectBilling ? subjectGroups.filter((group) => subjectClasses[group.courseId]).reduce((sum, group) => { const option = group.classes[0]; return sum + group.fee * (option?.isTaxExempt ? 1 : 1 + Number(option?.taxPercentage ?? 0) / 100); }, 0) : Number(selectedGrade?.monthlyFee ?? 0);
+  return <div style={{ display: 'grid', gap: 18 }}><Header title="Admissions" description="Complete admission first. Login IDs activate and are sent to the recorded phone numbers only after the branch fee is paid."/>
+    {!result ? <Card hoverable={false}><form onSubmit={(e) => void submit(e)} style={{ display: 'grid', gap: 16 }} aria-busy={busy}>
       <div style={grid}>
-        <label>Branch<select required style={input} value={form.branchId} onChange={(e) => { const branchId = e.target.value; const classId = classes.find((item) => item.branchId === branchId && item.gradeId === form.gradeId && item.courseType === 'REGULAR')?.id ?? ''; setForm((old) => ({ ...old, branchId, classId })); }}>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
-        <label>Grade<select required style={input} value={form.gradeId} onChange={(e) => { const gradeId = e.target.value; const classId = classes.find((item) => item.branchId === form.branchId && item.gradeId === gradeId && item.courseType === 'REGULAR')?.id ?? ''; setForm((old) => ({ ...old, gradeId, classId })); }}>{grades.map((grade) => <option key={grade.id} value={grade.id}>{grade.name}</option>)}</select></label>
-        <label>Regular class<select required style={input} value={form.classId} onChange={(e) => setForm((old) => ({ ...old, classId: e.target.value }))}><option value="">Select class</option>{availableClasses.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.courseName}</option>)}</select>{!availableClasses.length ? <small style={{ color: 'var(--color-error)' }}>Create a regular class for this branch and grade before admission.</small> : null}</label>
+        <label>Branch<select required style={input} value={form.branchId} onChange={(e) => { const branchId = e.target.value; const classId = classes.find((item) => item.branchId === branchId && item.gradeId === form.gradeId && item.courseType === 'REGULAR')?.id ?? ''; setSubjectClasses({}); setForm((old) => ({ ...old, branchId, classId })); }}>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
+        <label>Grade<select required style={input} value={form.gradeId} onChange={(e) => { const gradeId = e.target.value; const nextGrade = grades.find((grade) => grade.id === gradeId); const classId = nextGrade?.billingMode === 'GRADE' ? classes.find((item) => item.branchId === form.branchId && item.gradeId === gradeId && item.courseType === 'REGULAR')?.id ?? '' : ''; setSubjectClasses({}); setForm((old) => ({ ...old, gradeId, classId })); }}>{grades.map((grade) => <option key={grade.id} value={grade.id}>{grade.name}</option>)}</select></label>
+        {subjectBilling ? <div><strong style={{ fontSize: 13 }}>Subject selection *</strong><small style={{ display: 'block', marginTop: 6, color: 'var(--text-muted)' }}>{selectedSubjectClassIds.length} subject{selectedSubjectClassIds.length === 1 ? '' : 's'} selected</small></div> : <div><strong style={{ fontSize: 13 }}>Regular admission</strong><small style={{ display: 'block', marginTop: 6, color: 'var(--text-muted)' }}>The student is admitted to the selected grade. Extra-class enrollment is managed separately.</small></div>}
+        <label>Admission date and time *<input required type="datetime-local" style={input} value={form.admittedAt} onChange={(e) => setForm((old) => ({ ...old, admittedAt: e.target.value }))}/></label>
       </div>
-      <h3>Student details</h3><div style={grid}>{[['studentFirst','First name'],['studentLast','Last name'],['studentEmail','Email'],['studentPhone','Phone']].map(([key, text]) => <label key={key}>{text}<input required style={input} type={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : 'text'} autoComplete={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : key.includes('First') ? 'given-name' : 'family-name'} value={form[key as keyof typeof form]} onChange={(e) => setForm((old) => ({ ...old, [key]: e.target.value }))}/></label>)}</div>
-      <h3>Parent or guardian details</h3><div style={grid}>{[['parentFirst','First name'],['parentLast','Last name'],['parentEmail','Email'],['parentPhone','Phone']].map(([key, text]) => <label key={key}>{text}<input required style={input} type={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : 'text'} autoComplete={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : key.includes('First') ? 'given-name' : 'family-name'} value={form[key as keyof typeof form]} onChange={(e) => setForm((old) => ({ ...old, [key]: e.target.value }))}/></label>)}</div>
-      <Button disabled={busy || !form.branchId || !form.gradeId || !form.classId} type="submit">{busy ? 'Completing admission…' : 'Complete admission and generate logins'}</Button>
-    </form></Card> : <Card hoverable={false}><StatusBadge variant="success">Admission completed</StatusBadge><h3 style={{ marginTop: 12 }}>Student and parent login credentials</h3><div role="alert" style={{ padding: 16, marginTop: 12, background: 'var(--color-warning-soft)', borderRadius: 10 }}><strong>Copy these now. The temporary passwords are shown only once.</strong><p style={{ marginTop: 12 }}>Student: <strong>{credentials.student.email}</strong> · <code>{credentials.student.temporaryPassword}</code></p><p>Parent: <strong>{credentials.parent.email}</strong> · <code>{credentials.parent.temporaryPassword}</code></p><p style={{ marginTop: 10, color: 'var(--text-muted)' }}>The student is enrolled in the selected regular class and already receives its timetable.</p><Button style={{ marginTop: 12 }} onClick={acknowledge}>Credentials delivered securely</Button></div></Card>}
+      {subjectBilling ? <fieldset className="admission-fieldset"><legend>Class 11–12 subjects and classes</legend><p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Select the subjects this student will study. Each selected subject contributes to monthly billing.</p><div className="admission-subject-grid">{subjectGroups.map((group) => { const selectable = group.fee > 0 && group.classes.length > 0; return <label key={group.courseId} className={`admission-subject-card${subjectClasses[group.courseId] ? ' is-selected' : ''}${!selectable ? ' is-disabled' : ''}`}><span><input type="checkbox" disabled={!selectable} checked={Boolean(subjectClasses[group.courseId])} onChange={(event) => setSubjectClasses((current) => ({ ...current, [group.courseId]: event.target.checked ? group.classes[0]?.id ?? '' : '' }))} /><strong>{group.courseName}</strong></span><small>{group.fee <= 0 ? 'Set the subject price in Courses first' : !group.classes.length ? 'Create a class for this subject first' : `NPR ${group.fee.toLocaleString('en-NP')}/month before tax`}</small>{subjectClasses[group.courseId] ? <select aria-label={`${group.courseName} class`} value={subjectClasses[group.courseId]} onChange={(event) => setSubjectClasses((current) => ({ ...current, [group.courseId]: event.target.value }))}>{group.classes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select> : null}</label>; })}</div>{!subjectGroups.length ? <p role="alert" style={{ color: 'var(--color-error)' }}>Create priced subjects and classes for this grade before admission.</p> : null}</fieldset> : null}
+      <div role="note" style={{ padding: 14, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--color-surface)' }}>
+        <strong>Admission fee for this branch: NPR {Number(selectedBranch?.admissionFee ?? 0).toLocaleString()}</strong>
+        <p style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 13 }}>One-time amount due now. Estimated recurring tuition after activation: <strong>NPR {Math.round(recurringEstimate).toLocaleString('en-NP')}/month</strong>.</p>
+      </div>
+      <fieldset className="admission-fieldset"><legend>Student details</legend><div style={grid}>{[['studentFirst','First name'],['studentLast','Last name'],['studentEmail','Email'],['studentPhone','Phone']].map(([key, text]) => <label key={key}>{text} *<input required style={input} type={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : 'text'} autoComplete={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : key.includes('First') ? 'given-name' : 'family-name'} value={form[key as keyof typeof form]} onChange={(e) => setForm((old) => ({ ...old, [key]: e.target.value }))}/></label>)}<label>Date of birth *<input required type="date" max={new Date().toISOString().slice(0, 10)} style={input} value={form.dateOfBirth} onChange={(e) => setForm((old) => ({ ...old, dateOfBirth: e.target.value }))}/></label><label>Gender *<select required style={input} value={form.gender} onChange={(e) => setForm((old) => ({ ...old, gender: e.target.value }))}><option value="">Select gender</option><option>Male</option><option>Female</option><option>Other</option><option>Prefer not to say</option></select></label><label>Blood group<input style={input} value={form.bloodGroup} onChange={(e) => setForm((old) => ({ ...old, bloodGroup: e.target.value }))} placeholder="O+" /></label><label>Nationality *<input required style={input} value={form.nationality} onChange={(e) => setForm((old) => ({ ...old, nationality: e.target.value }))}/></label><label>School<input style={input} value={form.school} onChange={(e) => setForm((old) => ({ ...old, school: e.target.value }))}/></label></div><label>Permanent address *<textarea required style={{ ...input, minHeight: 72 }} value={form.permanentAddress} onChange={(e) => setForm((old) => ({ ...old, permanentAddress: e.target.value }))}/></label><label>Temporary address<textarea style={{ ...input, minHeight: 72 }} value={form.temporaryAddress} onChange={(e) => setForm((old) => ({ ...old, temporaryAddress: e.target.value }))}/></label><label>Medical conditions, allergies, or accessibility notes<textarea style={{ ...input, minHeight: 72 }} value={form.medicalNotes} onChange={(e) => setForm((old) => ({ ...old, medicalNotes: e.target.value }))}/></label></fieldset>
+      <fieldset className="admission-fieldset"><legend>Father's details</legend><div style={grid}>{[['fatherName','Full name *'],['fatherPhone','Phone *'],['fatherEmail',`Email${form.primaryParent === 'Father' ? ' *' : ''}`],['fatherOccupation','Occupation']].map(([key, text]) => <label key={key} htmlFor={`admission-${key}`}>{text}<input id={`admission-${key}`} required={key === 'fatherName' || key === 'fatherPhone' || (key === 'fatherEmail' && form.primaryParent === 'Father')} style={input} type={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : 'text'} autoComplete={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : 'off'} value={form[key as keyof typeof form]} onChange={(e) => setForm((old) => ({ ...old, [key]: e.target.value }))}/></label>)}</div></fieldset>
+      <fieldset className="admission-fieldset"><legend>Mother's details</legend><div style={grid}>{[['motherName','Full name *'],['motherPhone','Phone *'],['motherEmail',`Email${form.primaryParent === 'Mother' ? ' *' : ''}`],['motherOccupation','Occupation']].map(([key, text]) => <label key={key} htmlFor={`admission-${key}`}>{text}<input id={`admission-${key}`} required={key === 'motherName' || key === 'motherPhone' || (key === 'motherEmail' && form.primaryParent === 'Mother')} style={input} type={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : 'text'} autoComplete={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : 'off'} value={form[key as keyof typeof form]} onChange={(e) => setForm((old) => ({ ...old, [key]: e.target.value }))}/></label>)}</div></fieldset>
+      <fieldset className="admission-fieldset"><legend>Optional parent or guardian</legend><p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Leave this section empty if only the father and mother should be recorded.</p><div style={grid}>{[['optionalParentName',`Full name${form.primaryParent === 'Optional parent' ? ' *' : ''}`],['optionalParentPhone',`Phone${form.primaryParent === 'Optional parent' ? ' *' : ''}`],['optionalParentEmail',`Email${form.primaryParent === 'Optional parent' ? ' *' : ''}`],['optionalParentOccupation','Occupation'],['optionalParentRelationship',`Relationship${form.primaryParent === 'Optional parent' ? ' *' : ''}`]].map(([key, text]) => <label key={key} htmlFor={`admission-${key}`}>{text}<input id={`admission-${key}`} required={form.primaryParent === 'Optional parent' && key !== 'optionalParentOccupation'} style={input} type={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : 'text'} autoComplete={key.includes('Email') ? 'email' : key.includes('Phone') ? 'tel' : 'off'} value={form[key as keyof typeof form]} onChange={(e) => setForm((old) => ({ ...old, [key]: e.target.value }))}/></label>)}</div></fieldset>
+      <fieldset className="admission-fieldset"><legend>Primary parent account</legend><p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Choose who will receive the parent login. You can select them before completing their details; a valid email is required to create the account.</p><label htmlFor="admission-primary-parent">Parent receiving credentials *<select id="admission-primary-parent" required style={input} value={form.primaryParent} aria-describedby={form.primaryParent && !primaryParentReady ? 'admission-primary-parent-help' : undefined} onChange={(e) => setForm((old) => ({ ...old, primaryParent: e.target.value }))}><option value="">Choose father, mother, or guardian</option><option value="Father">Father</option><option value="Mother">Mother</option><option value="Optional parent">Optional parent or guardian</option></select></label>{form.primaryParent && !primaryParentReady ? <div id="admission-primary-parent-help" className="admission-parent-warning" role="status" aria-live="polite"><div><strong>Complete the selected parent account</strong><p>Add {missingPrimaryParentFields.map(({ label }) => label).join(', ')} before completing admission.</p></div><button type="button" onClick={() => document.getElementById(`admission-${missingPrimaryParentFields[0]?.key}`)?.focus()}>Add missing details</button></div> : form.primaryParent ? <p className="admission-parent-ready" role="status">Ready — {form.primaryParent} will receive the parent login credentials.</p> : null}</fieldset>
+      <fieldset className="admission-fieldset"><legend>Emergency contact</legend><div style={grid}>{[['emergencyContactName','Full name *'],['emergencyContactPhone','Phone *'],['emergencyContactRelationship','Relationship *']].map(([key, text]) => <label key={key}>{text}<input required style={input} type={key.includes('Phone') ? 'tel' : 'text'} value={form[key as keyof typeof form]} onChange={(e) => setForm((old) => ({ ...old, [key]: e.target.value }))}/></label>)}</div></fieldset>
+      <div className="admission-result-actions">
+        <Button disabled={busy || !form.branchId || !form.gradeId || !academicPlacementReady || !form.admittedAt} type="submit">{busy ? 'Saving admission…' : 'Complete admission'}</Button>
+        <Button variant="outline" type="submit" name="admission-action" value="save-and-print" disabled={!canPrint} title={canPrint ? 'Save the admission and open the printable record' : 'Complete every required field to enable printing'}><span className="material-symbols-outlined" aria-hidden="true">print</span>Save and print admission</Button>
+      </div>
+      {!canPrint && !busy ? <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 13 }}>Complete all required fields to enable printing.</p> : null}
+    </form></Card> : <Card hoverable={false}><StatusBadge variant={result.admission.status === 'ACTIVE' ? 'success' : 'warning'}>{result.admission.status === 'ACTIVE' ? 'Active' : 'Payment pending'}</StatusBadge><h3 style={{ marginTop: 12 }}>Admission recorded</h3><div role="status" style={{ padding: 16, marginTop: 12, background: 'var(--color-warning-soft)', borderRadius: 10 }}><strong>{result.message}</strong><p style={{ marginTop: 12 }}>Amount due: <strong>NPR {Number(result.admission.admissionFee).toLocaleString()}</strong></p><p style={{ marginTop: 10, color: 'var(--text-muted)' }}>After confirmed payment, student and parent login IDs and temporary passwords are sent automatically to their admission phone numbers.</p></div><AdmissionPrintRecord result={result} /><div className="admission-result-actions"><Button onClick={() => window.print()}><span className="material-symbols-outlined" aria-hidden="true">print</span>Print admission record</Button><Button variant="outline" onClick={acknowledge}>Start another admission</Button></div></Card>}
   </div>;
 }
 
-interface SocialPost { id: string; branchId: string; author: string; content: string; platforms: string[]; scheduledTime: string; status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'PUBLISHED'; }
-
-export function TenantSocialMediaPage() {
-  const { showToast } = useToast();
-  const loader = useCallback(async () => {
-    // Note: Mocking data if API is not yet wired
-    try {
-      const res = await request<{ posts: SocialPost[] }>('/social-media/posts?status=PENDING');
-      return res.posts;
-    } catch {
-      return [
-        { id: '1', branchId: 'BR-01', author: 'Sanjay Rai', content: 'Happy Independence Day from our branch!', platforms: ['Facebook', 'Instagram'], scheduledTime: '2026-08-15T10:00:00Z', status: 'PENDING' }
-      ] as SocialPost[];
-    }
-  }, []);
-  const { data, loading, error, reload } = useRemote(loader);
-  const [busy, setBusy] = useState('');
-
-  const mutate = async (id: string, action: 'APPROVE' | 'REJECT' | 'PUBLISH') => {
-    setBusy(id);
-    try {
-      const endpoint = `/social-media/posts/${id}/${action.toLowerCase()}`;
-      await request(endpoint, { method: 'POST' });
-      showToast(`Post ${action.toLowerCase()}d successfully.`, 'success');
-      await reload();
-    } catch (next) {
-      showToast(errorMessage(next), 'error');
-    } finally {
-      setBusy('');
-    }
-  };
-
-  const posts = data ?? [];
-
-  return (
-    <div style={{ display: 'grid', gap: 18 }}>
-      <Header title="Social Media Approval Queue" description="Review, approve, reject, or publish social media posts submitted by branch admins." />
-      {loading ? <RemoteState kind="loading" /> : error ? <RemoteState kind="error" message={errorMessage(error)} onRetry={() => void reload()} /> :
-        !posts.length ? <RemoteState kind="empty" message="No pending social media posts." /> :
-        <Card hoverable={false}>
-          {posts.map((post) => (
-            <div key={post.id} style={row}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                <div>
-                  <strong style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {post.platforms.map(p => <StatusBadge key={p} variant="info">{p}</StatusBadge>)}
-                  </strong>
-                  <p style={{ marginTop: 8, fontSize: 14 }}>{post.content}</p>
-                  <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
-                    Branch: {post.branchId} · Author: {post.author} · Scheduled: {new Date(post.scheduledTime).toLocaleString()}
-                  </p>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <StatusBadge variant="warning">{post.status}</StatusBadge>
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                <Button disabled={busy === post.id} onClick={() => void mutate(post.id, 'APPROVE')}>Approve (Queue for schedule)</Button>
-                <Button disabled={busy === post.id} variant="outline" onClick={() => void mutate(post.id, 'PUBLISH')}>Publish Now</Button>
-                <Button disabled={busy === post.id} variant="danger" onClick={() => void mutate(post.id, 'REJECT')}>Reject</Button>
-              </div>
-            </div>
-          ))}
-        </Card>}
-    </div>
-  );
-}
-
 export function TenantCertificatesPage() {
-  const [templates, setTemplates] = useState([
-    { id: '1', name: 'Course Completion Certificate', type: 'COMPLETION', status: 'ACTIVE' },
-    { id: '2', name: 'Certificate of Merit', type: 'MERIT', status: 'ACTIVE' },
-    { id: '3', name: 'Leaving Certificate', type: 'LEAVING', status: 'DRAFT' },
-  ]);
+  const { showToast } = useToast();
+  type CertificateOptions = Awaited<ReturnType<typeof api.branchAdmin.getCertificateOptions>>;
+  const [templates, setTemplates] = useState<Array<CertificateOptions['templates'][number] & { status: string }>>([]);
+  const [students, setStudents] = useState<CertificateOptions['students']>([]);
   const [form, setForm] = useState({ name: '', type: 'COMPLETION' });
+  const [sourceMode, setSourceMode] = useState<'FILE' | 'HTML'>('FILE');
+  const [file, setFile] = useState<File | null>(null);
+  const [html, setHtml] = useState('<!doctype html>\n<html lang="en">\n<head>\n  <meta charset="utf-8">\n  <style>\n    body { margin: 0; font-family: Georgia, serif; color: #17345c; }\n    .certificate { min-height: 680px; display: grid; place-items: center; padding: 56px; border: 16px double #1d5d9b; text-align: center; box-sizing: border-box; }\n    h1 { font-size: 44px; margin: 0 0 32px; }\n    .student { font-size: 38px; color: #b27b13; margin: 16px 0; }\n  </style>\n</head>\n<body><main class="certificate"><div><p>{{branchName}}</p><h1>{{templateName}}</h1><p>This certificate is proudly presented to</p><div class="student">{{studentName}}</div><p>{{gradeName}}</p><p>Issued {{issuedDate}} · Verification ID {{certificateId}}</p></div></main></body>\n</html>');
+  const [studentKey, setStudentKey] = useState('');
+  const [templateId, setTemplateId] = useState('');
+  const [issuedId, setIssuedId] = useState('');
+  const [issuing, setIssuing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
-  const addTemplate = (e: FormEvent) => {
+  const loadTemplates = useCallback(async () => {
+    setLoading(true); setLoadError('');
+    try { const result = await api.branchAdmin.getCertificateOptions(); setTemplates(result.templates.map((template) => ({ ...template, status: 'ACTIVE' }))); setStudents(result.students); }
+    catch (next) { const message = errorMessage(next); setLoadError(message); showToast(message, 'error'); }
+    finally { setLoading(false); }
+  }, [showToast]);
+  useEffect(() => { void loadTemplates(); }, [loadTemplates]);
+
+  const addTemplate = async (e: FormEvent) => {
     e.preventDefault();
-    if (!form.name.trim()) return;
-    setTemplates(old => [...old, { id: String(Date.now()), name: form.name, type: form.type, status: 'DRAFT' }]);
-    setForm({ name: '', type: 'COMPLETION' });
+    if (!form.name.trim() || (sourceMode === 'FILE' ? !file : !html.trim())) return;
+    setBusy(true);
+    try {
+      const layoutConfig = sourceMode === 'HTML'
+        ? { renderMode: 'HTML', html }
+        : await new Promise<{ renderMode: 'FILE'; sourceFile: { name: string; mimeType: string; dataUrl: string } }>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve({ renderMode: 'FILE', sourceFile: { name: file!.name, mimeType: file!.type, dataUrl: String(reader.result) } }); reader.onerror = () => reject(new Error('Certificate file could not be read.')); reader.readAsDataURL(file!); });
+      await request('/certificates/templates', { method: 'POST', body: JSON.stringify({ name: form.name.trim(), type: form.type, layoutConfig }) });
+      setForm({ name: '', type: 'COMPLETION' }); setFile(null); const inputElement = document.getElementById('certificate-file') as HTMLInputElement | null; if (inputElement) inputElement.value = '';
+      await loadTemplates(); showToast(sourceMode === 'HTML' ? 'HTML certificate template saved.' : 'Certificate template uploaded and saved.', 'success');
+    } catch (next) { showToast(errorMessage(next), 'error'); }
+    finally { setBusy(false); }
   };
 
+  const issueCertificate = async (event: FormEvent) => {
+    event.preventDefault();
+    const student = students.find((item) => `${item.studentId}:${item.branchId}` === studentKey);
+    if (!student || !templateId) return;
+    setIssuing(true); setIssuedId('');
+    try {
+      const result = await api.branchAdmin.issueCertificate({ studentId: student.studentId, templateId, branchId: student.branchId });
+      setIssuedId(result.certificate.certificateId); showToast(`Certificate allotted to ${student.studentName}.`, 'success');
+    } catch (next) { showToast(errorMessage(next), 'error'); }
+    finally { setIssuing(false); }
+  };
+
+  const previewHtml = html
+    .replaceAll('{{studentName}}', 'Sample Student')
+    .replaceAll('{{gradeName}}', 'Grade 10')
+    .replaceAll('{{branchName}}', 'Main Branch')
+    .replaceAll('{{templateName}}', form.name.trim() || 'Certificate of Achievement')
+    .replaceAll('{{certificateType}}', form.type)
+    .replaceAll('{{issuedDate}}', new Date().toLocaleDateString('en-GB'))
+    .replaceAll('{{certificateId}}', 'CERT-PREVIEW');
+  const issuedTemplate = templates.find((template) => template.id === templateId);
+
   return (
-    <div style={{ display: 'grid', gap: 18 }}>
-      <Header title="Master Certificate Templates" description="Create and manage certificate templates that branch admins can issue to students." />
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(300px, 1fr)', gap: 18 }}>
+    <div className="tenant-certificate-page">
+      <Header title="Certificates" description="Create PDF, image, or HTML templates and allot certificates directly to enrolled students." />
+      {loadError ? <RemoteState kind="error" message={`Certificate tools could not be loaded. ${loadError}`} onRetry={() => void loadTemplates()} /> : null}
+      <div className="tenant-certificate-layout">
         <Card hoverable={false}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ fontSize: '18px' }}>Existing Templates</h3>
-          </div>
-          <table style={{ width: '100%', marginTop: '16px', borderCollapse: 'collapse', fontSize: '14px' }}>
+          <div className="tenant-certificate-heading"><div><h3>Template library</h3><p>Reusable institution-level certificate designs.</p></div><StatusBadge variant="info">{templates.length} templates</StatusBadge></div>
+          <div className="tenant-certificate-table-wrap"><table className="tenant-certificate-table">
             <thead>
-              <tr style={{ borderBottom: '2px solid var(--border)', textAlign: 'left' }}>
-                <th style={{ padding: '8px' }}>Template Name</th>
-                <th style={{ padding: '8px' }}>Type</th>
-                <th style={{ padding: '8px' }}>Status</th>
-                <th style={{ padding: '8px', textAlign: 'right' }}>Actions</th>
-              </tr>
+              <tr><th>Template name</th><th>Type</th><th>Format</th><th>Status</th></tr>
             </thead>
             <tbody>
               {templates.map(t => (
-                <tr key={t.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td style={{ padding: '12px 8px', fontWeight: 600 }}>{t.name}</td>
-                  <td style={{ padding: '12px 8px' }}>{t.type}</td>
-                  <td style={{ padding: '12px 8px' }}>
-                    <StatusBadge variant={t.status === 'ACTIVE' ? 'success' : 'warning'}>{t.status}</StatusBadge>
-                  </td>
-                  <td style={{ padding: '12px 8px', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                    <Button variant="outline" style={{ padding: '4px 8px', minHeight: 'unset', height: '28px', fontSize: '12px' }}>Edit Design</Button>
-                    {t.status === 'DRAFT' && <Button style={{ padding: '4px 8px', minHeight: 'unset', height: '28px', fontSize: '12px' }} onClick={() => setTemplates(old => old.map(x => x.id === t.id ? { ...x, status: 'ACTIVE' } : x))}>Activate</Button>}
-                  </td>
+                <tr key={t.id}><td>{t.name}</td><td>{t.type}</td><td><span className="tenant-certificate-format"><span className="material-symbols-outlined" aria-hidden="true">{t.layoutConfig?.renderMode === 'HTML' ? 'code' : 'description'}</span>{t.layoutConfig?.renderMode === 'HTML' ? 'HTML' : t.layoutConfig?.sourceFile?.mimeType?.split('/').at(-1)?.toUpperCase() || 'File'}</span></td><td><StatusBadge variant={t.status === 'ACTIVE' ? 'success' : 'warning'}>{t.status}</StatusBadge></td>
                 </tr>
               ))}
+              {!loading && !templates.length ? <tr><td colSpan={4} className="tenant-certificate-empty">No certificate templates have been created.</td></tr> : null}
             </tbody>
-          </table>
+          </table></div>
         </Card>
-        
+
         <Card hoverable={false}>
-          <h3 style={{ fontSize: '18px' }}>Create Template</h3>
-          <p style={{ marginTop: '8px', color: 'var(--text-muted)', fontSize: '13px' }}>Define a new template structure for branches.</p>
-          <form onSubmit={addTemplate} style={{ display: 'grid', gap: '14px', marginTop: '16px' }}>
-            <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700 }}>
-              Template Name
-              <input style={input} placeholder="e.g. Special Achievement" value={form.name} onChange={e => setForm(old => ({ ...old, name: e.target.value }))} required />
-            </label>
-            <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700 }}>
-              Certificate Type
-              <select style={input} value={form.type} onChange={e => setForm(old => ({ ...old, type: e.target.value }))}>
+          <div className="tenant-certificate-heading"><div><h3>Create template</h3><p>Choose an uploaded design or author HTML.</p></div></div>
+          <form onSubmit={addTemplate} className="tenant-certificate-form">
+            <label htmlFor="certificate-name">Template name<input id="certificate-name" style={input} placeholder="Special Achievement" value={form.name} onChange={e => setForm(old => ({ ...old, name: e.target.value }))} required /></label>
+            <label htmlFor="certificate-type">Certificate type<select id="certificate-type" style={input} value={form.type} onChange={e => setForm(old => ({ ...old, type: e.target.value }))}>
                 <option value="COMPLETION">Course Completion</option>
-                <option value="MERIT">Merit / Achievement</option>
-                <option value="LEAVING">Leaving / Transfer</option>
-              </select>
-            </label>
-            <div style={{ padding: '12px', background: 'var(--color-surface)', border: '1px solid var(--border)', borderRadius: '8px' }}>
-              <strong style={{ fontSize: '13px' }}>Design Builder</strong>
-              <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>Visual template editor will open after creation to add branding and placeholders (e.g. {"{{studentName}}"}, {"{{branchName}}"}).</p>
-            </div>
-            <Button type="submit">Create Template</Button>
+                <option value="ACHIEVEMENT">Achievement</option>
+                <option value="ATTENDANCE">Attendance</option>
+                <option value="CUSTOM">Custom</option>
+              </select></label>
+            <fieldset className="tenant-certificate-source"><legend>Template format</legend><div><label><input type="radio" name="certificate-source" checked={sourceMode === 'FILE'} onChange={() => setSourceMode('FILE')} />Upload PDF or image</label><label><input type="radio" name="certificate-source" checked={sourceMode === 'HTML'} onChange={() => setSourceMode('HTML')} />Render from HTML</label></div></fieldset>
+            {sourceMode === 'FILE' ? <label htmlFor="certificate-file">Certificate file *<input id="certificate-file" type="file" accept="application/pdf,image/png,image/jpeg" required style={input} onChange={(event) => { const selected = event.target.files?.[0] ?? null; if (selected && selected.size > 5 * 1024 * 1024) { event.target.value = ''; setFile(null); showToast('Choose a PDF or image smaller than 5 MB.', 'error'); return; } setFile(selected); }} /><small>PDF, PNG, or JPG. Maximum 5 MB.</small></label> : <><label htmlFor="certificate-html">HTML template *<textarea id="certificate-html" rows={14} value={html} onChange={(event) => setHtml(event.target.value)} spellCheck={false} required /><small>Available placeholders: {'{{studentName}}'}, {'{{gradeName}}'}, {'{{branchName}}'}, {'{{templateName}}'}, {'{{certificateType}}'}, {'{{issuedDate}}'}, {'{{certificateId}}'}.</small></label><div className="tenant-certificate-preview"><span>Safe preview</span><iframe title="Certificate HTML preview" sandbox="" srcDoc={previewHtml} /></div></>}
+            <Button type="submit" disabled={busy || (sourceMode === 'FILE' ? !file : !html.trim())} aria-busy={busy}>{busy ? 'Saving template…' : sourceMode === 'HTML' ? 'Save HTML template' : 'Upload template'}</Button>
           </form>
         </Card>
       </div>
+      <Card hoverable={false}>
+        <div className="tenant-certificate-heading"><div><h3>Allot certificate to student</h3><p>The issued certificate is added immediately to the student and parent portals.</p></div></div>
+        <form onSubmit={issueCertificate} className="tenant-certificate-issue-form">
+          <label htmlFor="certificate-student">Student *<select id="certificate-student" style={input} value={studentKey} onChange={(event) => { setStudentKey(event.target.value); setIssuedId(''); }} required><option value="">Select enrolled student</option>{students.map((student) => <option key={`${student.studentId}:${student.branchId}`} value={`${student.studentId}:${student.branchId}`}>{student.studentName} · {student.gradeName} · {student.branchName}</option>)}</select></label>
+          <label htmlFor="certificate-template">Template *<select id="certificate-template" style={input} value={templateId} onChange={(event) => { setTemplateId(event.target.value); setIssuedId(''); }} required><option value="">Select certificate template</option>{templates.map((template) => <option key={template.id} value={template.id}>{template.name} · {template.layoutConfig?.renderMode === 'HTML' ? 'HTML' : 'PDF/image'}</option>)}</select></label>
+          <Button type="submit" disabled={issuing || !studentKey || !templateId} aria-busy={issuing}>{issuing ? 'Allotting…' : 'Allot certificate'}</Button>
+        </form>
+        {issuedId ? <div className="tenant-certificate-issued" role="status"><span className="material-symbols-outlined" aria-hidden="true">verified</span><div><strong>Certificate allotted successfully</strong><p>Verification ID: {issuedId}</p></div><div><Button type="button" variant="outline" onClick={() => window.open(`${API_BASE_URL}/certificates/${encodeURIComponent(issuedId)}/download`, '_blank', 'noopener,noreferrer')}>Download PDF</Button>{issuedTemplate?.layoutConfig?.renderMode === 'HTML' ? <Button type="button" onClick={() => window.open(`${API_BASE_URL}/certificates/${encodeURIComponent(issuedId)}/html`, '_blank', 'noopener,noreferrer')}>Open HTML</Button> : null}</div></div> : null}
+      </Card>
     </div>
   );
 }
 
 export function TenantLeaveRequestsPage() {
   const { showToast } = useToast();
-  // Mock data for leave requests escalated to Level 2
-  const [requests, setRequests] = useState([
-    { id: 'LR-101', staffName: 'Sanjay Rai', branch: 'BR-01', type: 'SICK_LEAVE', duration: '5 Days', startDate: '2026-08-20', status: 'PENDING_L2', reason: 'Severe viral infection, doctor recommended rest.', l1Approver: 'Branch Admin (Aisha)' },
-    { id: 'LR-102', staffName: 'Rina Karki', branch: 'BR-02', type: 'MATERNITY', duration: '90 Days', startDate: '2026-09-01', status: 'PENDING_L2', reason: 'Expected due date in early September.', l1Approver: 'Branch Admin (Bikash)' },
-  ]);
+  const [requests, setRequests] = useState<Awaited<ReturnType<typeof api.branchAdmin.getLeaves>>['leaves']>([]);
   const [busy, setBusy] = useState('');
+  const [decisionRemarks, setDecisionRemarks] = useState<Record<string, string>>({});
+  const [decisionErrors, setDecisionErrors] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [selectedDecision, setSelectedDecision] = useState<(typeof requests)[number] | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setLoadError('');
+    try { setRequests((await api.branchAdmin.getLeaves('L2')).leaves); }
+    catch (next) { setLoadError(errorMessage(next)); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => {
+    void load();
+    const interval = window.setInterval(() => { void load(); }, 15_000);
+    return () => window.clearInterval(interval);
+  }, [load]);
 
   const mutate = async (id: string, action: 'APPROVE' | 'REJECT') => {
-    setBusy(id);
+    const remarks = decisionRemarks[id]?.trim();
+    if (action === 'REJECT' && !remarks) {
+      setDecisionErrors((current) => ({ ...current, [id]: 'Add a reason so the teacher understands why this request was rejected.' }));
+      document.getElementById(`leave-remarks-${id}`)?.focus();
+      return;
+    }
+    setBusy(id); setDecisionErrors((current) => ({ ...current, [id]: '' }));
     try {
-      // Mock API delay
-      await new Promise(r => setTimeout(r, 800));
-      setRequests(old => old.map(r => r.id === id ? { ...r, status: action === 'APPROVE' ? 'APPROVED' : 'REJECTED' } : r));
-      showToast(`Leave request ${action.toLowerCase()}d at Level 2.`, 'success');
+      await api.branchAdmin.decideLeave(id, action, action === 'REJECT' ? remarks : undefined);
+      await load();
+      setDecisionRemarks((current) => ({ ...current, [id]: '' }));
+      showToast(action === 'APPROVE' ? 'Leave approved. The teacher can now see the final decision.' : 'Leave rejected. The teacher can now see the reason.', 'success');
     } catch (next) {
       showToast(errorMessage(next), 'error');
     } finally {
@@ -432,8 +518,8 @@ export function TenantLeaveRequestsPage() {
     }
   };
 
-  const pending = requests.filter(r => r.status === 'PENDING_L2');
-  const history = requests.filter(r => r.status !== 'PENDING_L2');
+  const pending = requests.filter(r => r.status === 'APPROVED_LEVEL1');
+  const history = requests.filter(r => r.status !== 'APPROVED_LEVEL1');
 
   return (
     <div style={{ display: 'grid', gap: 18 }}>
@@ -441,26 +527,27 @@ export function TenantLeaveRequestsPage() {
       
       <Card hoverable={false}>
         <h3 style={{ fontSize: '18px', marginBottom: '16px' }}>Pending Final Approval</h3>
-        {!pending.length ? <RemoteState kind="empty" message="No pending Level 2 leave requests." /> : 
+        {loading ? <RemoteState kind="loading" message="Loading Level 2 leave requests…" /> : loadError ? <RemoteState kind="error" message={loadError} onRetry={() => void load()} /> : !pending.length ? <RemoteState kind="empty" message="No pending Level 2 leave requests." /> :
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             {pending.map(req => (
               <div key={req.id} style={{ ...row, padding: '16px', border: '1px solid var(--border)', borderRadius: '8px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div>
-                    <strong style={{ fontSize: '15px' }}>{req.staffName}</strong> <span style={{ color: 'var(--text-muted)' }}>({req.branch})</span>
+                    <strong style={{ fontSize: '15px' }}>{req.staffName}</strong> <span style={{ color: 'var(--text-muted)' }}>({req.branchName})</span>
                     <div style={{ marginTop: '8px', display: 'flex', gap: '12px', fontSize: '13px' }}>
-                      <span style={{ fontWeight: 600 }}>{req.type.replace('_', ' ')}</span>
-                      <span>{req.duration}</span>
-                      <span>Starts: {req.startDate}</span>
+                      <span style={{ fontWeight: 600 }}>{req.leaveType.replaceAll('_', ' ')}</span>
+                      <span>{Math.max(1, Math.ceil((new Date(req.endDate).getTime() - new Date(req.startDate).getTime()) / 86_400_000) + 1)} days</span>
+                      <span>Starts: {new Date(req.startDate).toLocaleDateString('en-NP')}</span>
                     </div>
                     <p style={{ marginTop: '8px', fontSize: '14px', color: 'var(--text-muted)' }}>"{req.reason}"</p>
-                    <p style={{ marginTop: '8px', fontSize: '12px', color: 'var(--color-primary)' }}>Level 1 Approved by: {req.l1Approver}</p>
+                    <p style={{ marginTop: '8px', fontSize: '12px', color: 'var(--color-primary)' }}>Level 1 approval recorded by the assigned Branch Admin.</p>
                   </div>
                   <StatusBadge variant="warning">L2 Review</StatusBadge>
                 </div>
-                <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
-                  <Button disabled={busy === req.id} onClick={() => void mutate(req.id, 'APPROVE')}>Approve Leave</Button>
-                  <Button disabled={busy === req.id} variant="danger" onClick={() => void mutate(req.id, 'REJECT')}>Reject Leave</Button>
+                <label style={{ display: 'grid', gap: 6, marginTop: 16, fontSize: 13, fontWeight: 700 }} htmlFor={`leave-remarks-${req.id}`}>Reason for rejection <span style={{ color: 'var(--text-muted)', fontSize: 12, fontWeight: 400 }}>Required only when rejecting.</span><textarea id={`leave-remarks-${req.id}`} style={{ ...input, minHeight: 72 }} maxLength={2000} value={decisionRemarks[req.id] ?? ''} aria-invalid={Boolean(decisionErrors[req.id]) || undefined} aria-describedby={decisionErrors[req.id] ? `leave-remarks-error-${req.id}` : undefined} onChange={(event) => { setDecisionRemarks((old) => ({ ...old, [req.id]: event.target.value })); if (decisionErrors[req.id]) setDecisionErrors((current) => ({ ...current, [req.id]: '' })); }} placeholder="Explain the decision to the teacher" />{decisionErrors[req.id] ? <span id={`leave-remarks-error-${req.id}`} role="alert" style={{ color: 'var(--color-error)', fontSize: 12 }}>{decisionErrors[req.id]}</span> : null}</label>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '16px', flexWrap: 'wrap' }}>
+                  <Button disabled={busy === req.id} onClick={() => void mutate(req.id, 'APPROVE')}>{busy === req.id ? 'Saving decision…' : 'Approve leave'}</Button>
+                  <Button disabled={busy === req.id} variant="danger" onClick={() => void mutate(req.id, 'REJECT')}>{busy === req.id ? 'Saving decision…' : 'Reject leave'}</Button>
                 </div>
               </div>
             ))}
@@ -473,16 +560,18 @@ export function TenantLeaveRequestsPage() {
           <h3 style={{ fontSize: '18px', marginBottom: '16px' }}>Recent Decisions</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {history.map(req => (
-              <div key={req.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', borderBottom: '1px solid var(--border)' }}>
+              <button type="button" key={req.id} onClick={() => setSelectedDecision(req)} aria-label={`View leave request details for ${req.staffName}`} style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', padding: '12px', border: 0, borderBottom: '1px solid var(--border)', background: 'transparent', color: 'var(--color-text)', cursor: 'pointer', textAlign: 'left', minHeight: 48 }}>
                 <div>
-                  <strong>{req.staffName}</strong> · {req.type.replace('_', ' ')} ({req.duration})
+                  <strong>{req.staffName}</strong> · {req.leaveType.replaceAll('_', ' ')} ({req.branchName})
+                  <span style={{ display: 'block', marginTop: 4, color: 'var(--text-muted)', fontSize: 12 }}>View request details</span>
                 </div>
-                <StatusBadge variant={req.status === 'APPROVED' ? 'success' : 'error'}>{req.status}</StatusBadge>
-              </div>
+                <StatusBadge variant={req.status === 'APPROVED_LEVEL2' ? 'success' : 'error'}>{req.status === 'APPROVED_LEVEL2' ? 'Approved' : 'Rejected'}</StatusBadge>
+              </button>
             ))}
           </div>
         </Card>
       )}
+      {selectedDecision ? <div role="dialog" aria-modal="true" aria-labelledby="leave-decision-title" onClick={() => setSelectedDecision(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.5)', display: 'grid', placeItems: 'center', padding: 16 }}><div onClick={(event) => event.stopPropagation()} style={{ width: 'min(560px, 100%)' }}><Card hoverable={false}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}><div><StatusBadge variant={selectedDecision.status === 'APPROVED_LEVEL2' ? 'success' : 'error'}>{selectedDecision.status === 'APPROVED_LEVEL2' ? 'Approved' : 'Rejected'}</StatusBadge><h3 id="leave-decision-title" style={{ marginTop: 10 }}>{selectedDecision.staffName}</h3><p style={{ color: 'var(--text-muted)', marginTop: 4 }}>{selectedDecision.branchName}</p></div><Button variant="outline" onClick={() => setSelectedDecision(null)}>Close</Button></div><dl style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginTop: 20 }}><div><dt style={{ color: 'var(--text-muted)', fontSize: 12 }}>Leave type</dt><dd style={{ margin: '4px 0 0', fontWeight: 600 }}>{selectedDecision.leaveType.replaceAll('_', ' ')}</dd></div><div><dt style={{ color: 'var(--text-muted)', fontSize: 12 }}>Dates</dt><dd style={{ margin: '4px 0 0', fontWeight: 600 }}>{new Date(selectedDecision.startDate).toLocaleDateString('en-NP')} – {new Date(selectedDecision.endDate).toLocaleDateString('en-NP')}</dd></div></dl><div style={{ marginTop: 20, padding: 14, border: '1px solid var(--border)', borderRadius: 8 }}><strong style={{ fontSize: 12 }}>Request reason</strong><p style={{ marginTop: 6 }}>{selectedDecision.reason}</p></div></Card></div></div> : null}
     </div>
   );
 }

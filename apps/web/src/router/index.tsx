@@ -8,10 +8,12 @@ import {
   useNavigate,
 } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { DashboardShell } from '../components/patterns/DashboardShell';
 import { findNavigationItem, mapAuthRoleToDashboardRole, type DashboardRole } from '../components/patterns/dashboardNavigation';
-import { SessionTimeoutDialog } from '../components/ui/SessionTimeoutDialog';
 import type { UserRole } from '../features/auth/types';
+import { NotFoundPage, RouteFailurePage, SessionStatePage } from '../components/patterns/SystemStatePage';
+
+const DashboardShell = lazy(() => import('../components/patterns/DashboardShell').then((module) => ({ default: module.DashboardShell })));
+const SessionTimeoutDialog = lazy(() => import('../components/ui/SessionTimeoutDialog').then((module) => ({ default: module.SessionTimeoutDialog })));
 
 const LoginPage = lazy(() => import('../pages/auth/LoginPage').then((module) => ({ default: module.LoginPage })));
 const ForgotPasswordPage = lazy(() => import('../pages/auth/ForgotPasswordPage').then((module) => ({ default: module.ForgotPasswordPage })));
@@ -31,7 +33,6 @@ const TenantResourcesPage = lazy(() => import('../pages/TenantOperationsPages').
 const TenantCalendarPage = lazy(() => import('../pages/TenantOperationsPages').then((module) => ({ default: module.TenantCalendarPage })));
 const TenantHrPage = lazy(() => import('../pages/TenantOperationsPages').then((module) => ({ default: module.TenantHrPage })));
 const TenantAdmissionsPage = lazy(() => import('../pages/TenantOperationsPages').then((module) => ({ default: module.TenantAdmissionsPage })));
-const TenantSocialMediaPage = lazy(() => import('../pages/TenantOperationsPages').then((module) => ({ default: module.TenantSocialMediaPage })));
 const TenantCertificatesPage = lazy(() => import('../pages/TenantOperationsPages').then((module) => ({ default: module.TenantCertificatesPage })));
 const TenantLeaveRequestsPage = lazy(() => import('../pages/TenantOperationsPages').then((module) => ({ default: module.TenantLeaveRequestsPage })));
 const PeopleDirectory = lazy(() => import('../pages/PeopleDirectory').then((module) => ({ default: module.PeopleDirectory })));
@@ -40,9 +41,11 @@ const AcademicTimetables = lazy(() => import('../pages/AcademicTimetables').then
 const AcademicStudents = lazy(() => import('../pages/AcademicRoster').then((module) => ({ default: module.AcademicStudents })));
 const AcademicTeachers = lazy(() => import('../pages/AcademicRoster').then((module) => ({ default: module.AcademicTeachers })));
 const AcademicFees = lazy(() => import('../pages/AcademicFees').then((module) => ({ default: module.AcademicFees })));
+const TenantPaymentsPage = lazy(() => import('../pages/TenantPaymentsPage').then((module) => ({ default: module.TenantPaymentsPage })));
 const AcademicGrades = lazy(() => import('../pages/AcademicGrades').then((module) => ({ default: module.AcademicGrades })));
 const BranchAdminDashboard = lazy(() => import('../pages/BranchAdminDashboard').then((module) => ({ default: module.BranchAdminDashboard })));
 const BranchAdminWorkspace = lazy(() => import('../pages/BranchAdminWorkspace').then((module) => ({ default: module.BranchAdminWorkspace })));
+const TenantResultsPage = lazy(() => import('../pages/BranchAdminWorkspace').then((module) => ({ default: module.BranchResultsView })));
 const TeacherPortal = lazy(() => import('../pages/TeacherPortal').then((module) => ({ default: module.TeacherPortal })));
 const ParentStudentPortal = lazy(() => import('../pages/ParentStudentPortal').then((module) => ({ default: module.ParentStudentPortal })));
 const StudentPortal = lazy(() => import('../pages/StudentPortal').then((module) => ({ default: module.StudentPortal })));
@@ -52,9 +55,10 @@ const StaffTasksPage = lazy(() => import('../pages/StaffTasksPage').then((module
 const SuperAdminDashboard = lazy(() => import('../pages/SuperAdminDashboard').then((module) => ({ default: module.SuperAdminDashboard })));
 const SuperAdminTenants = lazy(() => import('../pages/SuperAdminTenants').then((module) => ({ default: module.SuperAdminTenants })));
 const SecurityPage = lazy(() => import('../pages/SecurityPage').then((module) => ({ default: module.SecurityPage })));
+const PaymentResultPage = lazy(() => import('../pages/PaymentResultPage').then((module) => ({ default: module.PaymentResultPage })));
 
 function RequireAuth() {
-  const { isAuthenticated, isLoading, isTwoFactorPending } = useAuth();
+  const { isAuthenticated, isLoading, isTwoFactorPending, sessionIssue } = useAuth();
 
   if (isLoading) {
     return <FullPageSpinner />;
@@ -65,12 +69,13 @@ function RequireAuth() {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    if (sessionIssue === 'signed-out') return <Navigate to="/login" replace />;
+    return <Navigate to={`/session-ended?reason=${sessionIssue === 'unavailable' ? 'unavailable' : 'missing'}`} replace />;
   }
 
   return (
     <>
-      <SessionTimeoutDialog />
+      <Suspense fallback={null}><SessionTimeoutDialog /></Suspense>
       <Outlet />
     </>
   );
@@ -135,9 +140,11 @@ function AuthenticatedLayout() {
   }
 
   return (
-    <DashboardShell role={dashboardRole}>
-      <Outlet />
-    </DashboardShell>
+    <Suspense fallback={<FullPageSpinner />}>
+      <DashboardShell role={dashboardRole}>
+        <Outlet />
+      </DashboardShell>
+    </Suspense>
   );
 }
 
@@ -212,6 +219,7 @@ function RoleWorkspacePlaceholder({ role }: { role: DashboardRole }) {
 
 const router = createBrowserRouter([
   {
+    errorElement: <RouteFailurePage />,
     element: <RedirectIfAuth />,
     children: [
       {
@@ -221,15 +229,18 @@ const router = createBrowserRouter([
           { path: '/forgot-password', element: <Suspense fallback={<FullPageSpinner />}><ForgotPasswordPage /></Suspense> },
           { path: '/reset-password', element: <Navigate to="/forgot-password" replace /> },
           { path: '/reset-password/:token', element: <Suspense fallback={<FullPageSpinner />}><ResetPasswordPage /></Suspense> },
+          { path: '/session-ended', element: <SessionStatePage /> },
         ],
       },
     ],
   },
   {
     path: '/force-change-password',
+    errorElement: <RouteFailurePage />,
     element: <Suspense fallback={<FullPageSpinner />}><ForceChangePasswordPage /></Suspense>,
   },
   {
+    errorElement: <RouteFailurePage />,
     element: <RequireTwoFactor />,
     children: [
       { path: '/2fa', element: <Suspense fallback={<FullPageSpinner />}><TwoFactorPage /></Suspense> },
@@ -237,6 +248,7 @@ const router = createBrowserRouter([
     ],
   },
   {
+    errorElement: <RouteFailurePage />,
     element: <RequireAuth />,
     children: [
       {
@@ -248,12 +260,12 @@ const router = createBrowserRouter([
           {
             element: <RequireRole allowedRoles={['SUPER_ADMIN']} />,
             children: [
-              { path: '/platform/overview', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard view="overview" /></Suspense> },
-              { path: '/platform/onboarding', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard view="onboarding" /></Suspense> },
-              { path: '/platform/support', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard view="support" /></Suspense> },
-              { path: '/platform/policies', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard view="policies" /></Suspense> },
-              { path: '/platform/billing', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard view="billing" /></Suspense> },
-              { path: '/platform/audit', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard view="audit" /></Suspense> },
+              { path: '/platform/overview', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminDashboard /></Suspense> },
+              { path: '/platform/onboarding', element: <Navigate to="/platform/overview" replace /> },
+              { path: '/platform/support', element: <Navigate to="/platform/overview" replace /> },
+              { path: '/platform/policies', element: <Navigate to="/platform/overview" replace /> },
+              { path: '/platform/billing', element: <Navigate to="/platform/overview" replace /> },
+              { path: '/platform/audit', element: <Navigate to="/platform/overview" replace /> },
               { path: '/platform/tenants', element: <Suspense fallback={<FullPageSpinner />}><SuperAdminTenants /></Suspense> },
               { path: '/platform/security', element: <Suspense fallback={<FullPageSpinner />}><SecurityPage /></Suspense> },
             ],
@@ -270,7 +282,9 @@ const router = createBrowserRouter([
               { path: '/tenant/courses', element: <Suspense fallback={<FullPageSpinner />}><AcademicCourses /></Suspense> },
               { path: '/tenant/timetables', element: <Suspense fallback={<FullPageSpinner />}><AcademicTimetables /></Suspense> },
               { path: '/tenant/fees', element: <Suspense fallback={<FullPageSpinner />}><AcademicFees /></Suspense> },
+              { path: '/tenant/payments', element: <Suspense fallback={<FullPageSpinner />}><TenantPaymentsPage /></Suspense> },
               { path: '/tenant/grades', element: <Suspense fallback={<FullPageSpinner />}><AcademicGrades /></Suspense> },
+              { path: '/tenant/results', element: <Suspense fallback={<FullPageSpinner />}><TenantResultsPage /></Suspense> },
               { path: '/tenant/control-center', element: <Suspense fallback={<FullPageSpinner />}><TenantControlCenter /></Suspense> },
               { path: '/tenant/settings', element: <Navigate to="/tenant/control-center" replace /> },
               { path: '/tenant/petty-cash', element: <Suspense fallback={<FullPageSpinner />}><TenantPettyCashPage /></Suspense> },
@@ -279,7 +293,6 @@ const router = createBrowserRouter([
               { path: '/tenant/hr-management', element: <Suspense fallback={<FullPageSpinner />}><TenantHrPage /></Suspense> },
               { path: '/tenant/resource-logs', element: <Suspense fallback={<FullPageSpinner />}><TenantResourcesPage /></Suspense> },
               { path: '/tenant/academic-calendar', element: <Suspense fallback={<FullPageSpinner />}><TenantCalendarPage /></Suspense> },
-              { path: '/tenant/social-media', element: <Suspense fallback={<FullPageSpinner />}><TenantSocialMediaPage /></Suspense> },
               { path: '/tenant/certificates', element: <Suspense fallback={<FullPageSpinner />}><TenantCertificatesPage /></Suspense> },
               { path: '/tenant/leave-requests', element: <Suspense fallback={<FullPageSpinner />}><TenantLeaveRequestsPage /></Suspense> },
               { path: '/tenant/security', element: <Suspense fallback={<FullPageSpinner />}><SecurityPage /></Suspense> },
@@ -293,6 +306,7 @@ const router = createBrowserRouter([
               { path: '/branch/staff', element: <Suspense fallback={<FullPageSpinner />}><PeopleDirectory /></Suspense> },
               { path: '/branch/admissions', element: <Suspense fallback={<FullPageSpinner />}><TenantAdmissionsPage /></Suspense> },
               { path: '/branch/students', element: <Suspense fallback={<FullPageSpinner />}><AcademicStudents /></Suspense> },
+              { path: '/branch/payments', element: <Suspense fallback={<FullPageSpinner />}><TenantPaymentsPage /></Suspense> },
               { path: '/branch/*', element: <Suspense fallback={<FullPageSpinner />}><BranchAdminWorkspace /></Suspense> },
             ],
           },
@@ -316,7 +330,13 @@ const router = createBrowserRouter([
             ],
           },
 
-          { path: '/staff/finance', element: <Suspense fallback={<FullPageSpinner />}><StaffFinancePage /></Suspense> },
+          {
+            element: <RequireRole allowedRoles={['ACCOUNTANT']} />,
+            children: [
+              { path: '/staff/finance', element: <Suspense fallback={<FullPageSpinner />}><StaffFinancePage /></Suspense> },
+            ],
+          },
+          { path: '/payment/result', element: <Suspense fallback={<FullPageSpinner />}><PaymentResultPage /></Suspense> },
           {
             element: <RequireRole allowedRoles={['RECEPTIONIST']} />,
             children: [
@@ -334,7 +354,7 @@ const router = createBrowserRouter([
     ],
   },
   { path: '/', element: <Navigate to="/login" replace /> },
-  { path: '*', element: <Navigate to="/login" replace /> },
+  { path: '*', element: <NotFoundPage />, errorElement: <RouteFailurePage /> },
 ]);
 
 export function AppRouter() {

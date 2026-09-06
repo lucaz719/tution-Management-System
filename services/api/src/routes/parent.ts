@@ -1,7 +1,11 @@
+import { calendarAccessWhere } from '../services/calendar-access';
 import { Router, Response } from 'express';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware } from '../middleware/auth';
+import { studentBillingSummary } from '../utils/student-billing-summary';
+import { invoiceLineItems } from '../utils/invoice-document';
+import { normalizeSchedule } from '../utils/schedule';
 
 const router = Router();
 
@@ -33,6 +37,18 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
     const parent = await prisma.parent.findFirst({
       where: { userId: req.user!.id, user: { tenantId: req.tenantId! } },
       include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            phone: true,
+            status: true,
+            emailVerified: true,
+            createdAt: true,
+          },
+        },
         studentParents: {
           include: {
             student: {
@@ -56,7 +72,7 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
                   orderBy: { date: 'desc' },
                   take: 60,
                 },
-                invoices: { orderBy: { dueDate: 'desc' }, take: 24 },
+                invoices: { include: { branch: { select: { name: true } } }, orderBy: { dueDate: 'desc' }, take: 24 },
                 certificates: { include: { template: true }, orderBy: { issuedDate: 'desc' } },
               },
             },
@@ -97,11 +113,21 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
     }
     const student = link.student;
     const child = children.find((item) => item.id === student.id)!;
-    const classIds = student.enrollments.map((enrollment) => enrollment.classId);
-    const branchIds = [...new Set(student.enrollments.map((enrollment) => enrollment.class.branchId))];
+    const academicEnrollment = student.enrollments.find((enrollment) => !enrollment.course.isExtraActivity);
+    const currentEnrollments = student.enrollments.filter((enrollment) => !enrollment.validUntil || enrollment.validUntil.getTime() > Date.now());
+    const billing = studentBillingSummary(student.grade, currentEnrollments);
+    const enrollmentAccess = {
+      status: !academicEnrollment?.validFrom || !academicEnrollment.validUntil
+        ? 'PENDING'
+        : academicEnrollment.validUntil.getTime() <= Date.now() ? 'EXPIRED' : 'ACTIVE',
+      validFrom: academicEnrollment?.validFrom ? formatDate(academicEnrollment.validFrom) : null,
+      validUntil: academicEnrollment?.validUntil ? formatDate(academicEnrollment.validUntil) : null,
+    };
+    const classIds = currentEnrollments.map((enrollment) => enrollment.classId);
+    const branchIds = [...new Set(currentEnrollments.map((enrollment) => enrollment.class.branchId))];
     const [events, leaves, appointments, messages, remarks, scores, tenant, branchAdmins] = await Promise.all([
       prisma.academicEvent.findMany({
-        where: { tenantId: req.tenantId!, OR: [{ branchId: null }, { branchId: { in: branchIds } }] },
+        where: await calendarAccessWhere(req.user!, req.tenantId!, { studentId: student.id, viewerRole: 'Parent' }),
         orderBy: { startDate: 'asc' },
         take: 100,
       }),
@@ -121,29 +147,29 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
         include: { author: { select: { firstName: true, lastName: true } } },
         orderBy: { createdAt: 'desc' },
       }),
-      prisma.studentScore.findMany({ where: { tenantId: req.tenantId!, studentId: student.id }, orderBy: { testDate: 'asc' } }),
-      prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { appointmentWindowHours: true } }),
+      prisma.studentScore.findMany({ where: { tenantId: req.tenantId!, studentId: student.id, publishedAt: { not: null } }, orderBy: { testDate: 'asc' } }),
+      prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { appointmentWindowHours: true, name: true } }),
       prisma.user.findMany({ where: { tenantId: req.tenantId!, status: 'ACTIVE', userRoles: { some: { branchId: { in: branchIds }, role: { name: 'Branch Admin' } } } }, select: { id: true, firstName: true, lastName: true } }),
     ]);
 
     const weekday = new Intl.DateTimeFormat('en', { weekday: 'long', timeZone: 'Asia/Kathmandu' }).format(new Date()).toLowerCase();
-    const sessions = student.enrollments.flatMap((enrollment) => {
-      const schedule = Array.isArray(enrollment.class.schedule) ? enrollment.class.schedule as Array<Record<string, unknown>> : [];
+    const sessions = currentEnrollments.flatMap((enrollment) => {
+      const schedule = normalizeSchedule(enrollment.class.schedule);
       return schedule.filter((slot) => {
         const day = typeof slot.day === 'string' ? slot.day.toLowerCase() : '';
         return day === weekday || day === weekday.slice(0, 3);
       }).map((slot, index) => ({
         id: `${enrollment.classId}-${index}`,
         childId: student.id,
-        time: typeof slot.start === 'string' ? slot.start : '—',
-        endTime: typeof slot.end === 'string' ? slot.end : '—',
+        time: slot.startTime,
+        endTime: slot.endTime,
         subject: enrollment.course.name,
         teacher: enrollment.class.assignedTeacher ? `${enrollment.class.assignedTeacher.firstName} ${enrollment.class.assignedTeacher.lastName}` : 'Teacher not assigned',
-        room: enrollment.class.name,
+        room: slot.room || enrollment.class.name,
         type: enrollment.course.type.split('_').map((part) => part[0] + part.slice(1).toLowerCase()).join('-'),
       }));
     }).sort((a, b) => a.time.localeCompare(b.time));
-    const teachers = [...new Map([...student.enrollments
+    const teachers = [...new Map([...currentEnrollments
       .filter((enrollment) => enrollment.class.assignedTeacher)
       .map((enrollment) => {
         const teacher = enrollment.class.assignedTeacher!;
@@ -163,9 +189,33 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
       id: invoice.id, childId: student.id,
       cycle: invoice.billingCycleStart.toLocaleDateString('en', { month: 'long', year: 'numeric', timeZone: 'Asia/Kathmandu' }),
       dueDate: formatDate(invoice.dueDate), state: invoiceState(invoice.status, invoice.dueDate),
+      invoiceType: invoice.invoiceType,
+      paymentDate: invoice.paymentDate ? formatDate(invoice.paymentDate) : null,
       reference: invoice.transactionId ?? invoice.id, netPayable: Number(invoice.netPayable), qrAvailable: invoice.status !== 'PAID',
+      document: {
+        id: invoice.id,
+        invoiceType: invoice.invoiceType,
+        status: invoice.status,
+        institutionName: tenant?.name ?? 'Institution',
+        panNumber: invoice.panNumberSnapshot,
+        vatRate: Number(invoice.vatRateSnapshot),
+        studentName: `${student.user.firstName} ${student.user.lastName}`,
+        admissionNumber: student.admissionNumber,
+        gradeName: student.grade?.name ?? null,
+        branchName: invoice.branch.name,
+        issuedAt: invoice.createdAt,
+        dueDate: invoice.dueDate,
+        paymentDate: invoice.paymentDate,
+        billingCycleStart: invoice.billingCycleStart,
+        billingCycleEnd: invoice.billingCycleEnd,
+        transactionId: invoice.transactionId,
+        lines: invoiceLineItems(invoice.lineItemsSnapshot, invoice.invoiceType, invoice.amount),
+        discount: Number(invoice.discount),
+        fine: Number(invoice.fine),
+        netPayable: Number(invoice.netPayable),
+      },
       lines: [
-        { label: `${invoice.invoiceType.charAt(0)}${invoice.invoiceType.slice(1).toLowerCase()} dues`, amount: Number(invoice.amount) },
+        ...invoiceLineItems(invoice.lineItemsSnapshot, invoice.invoiceType, invoice.amount),
         ...(Number(invoice.discount) ? [{ label: 'Discount', amount: -Number(invoice.discount) }] : []),
         ...(Number(invoice.fine) ? [{ label: 'Fine', amount: Number(invoice.fine) }] : []),
       ],
@@ -226,6 +276,7 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
       id: certificate.certificateId, childId: student.id, title: certificate.template.name,
       course: student.grade?.name ?? 'Student record', issuedDate: formatDate(certificate.issuedDate),
       fileName: `${certificate.certificateId}.pdf`, pdfUrl: `/certificates/${encodeURIComponent(certificate.certificateId)}/download`,
+      htmlUrl: (certificate.template.layoutConfig as { renderMode?: string }).renderMode === 'HTML' ? `/certificates/${encodeURIComponent(certificate.certificateId)}/html` : undefined,
     }));
     const mappedMessages = messages.map((message) => ({
       id: message.id, childId: student.id,
@@ -266,8 +317,20 @@ router.get('/portal', authMiddleware, async (req: TenantRequest, res: Response) 
     return res.json({
       generatedAt: new Date().toISOString(),
       bookingWindowHours: tenant?.appointmentWindowHours ?? 24,
+      profile: {
+        id: parent.user.id,
+        name: `${parent.user.firstName} ${parent.user.lastName}`.trim(),
+        initials: `${parent.user.firstName[0] ?? ''}${parent.user.lastName[0] ?? ''}`.toUpperCase(),
+        email: parent.user.email,
+        phone: parent.user.phone,
+        status: parent.user.status,
+        emailVerified: parent.user.emailVerified,
+        memberSince: formatDate(parent.user.createdAt),
+      },
       children,
       selected: child,
+      billing,
+      enrollmentAccess,
       sessions,
       attendance,
       remarks: visibleRemarks,

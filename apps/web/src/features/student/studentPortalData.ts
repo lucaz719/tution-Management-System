@@ -74,6 +74,8 @@ export interface InvoiceLine {
 
 export interface Invoice {
   id: string;
+  invoiceType: 'ADMISSION' | 'TUITION' | 'SUBJECT' | 'ACTIVITY';
+  paymentDate: string | null;
   cycle: string;
   dueDate: string;
   state: FeeState;
@@ -81,6 +83,7 @@ export interface Invoice {
   netPayable: number;
   qrAvailable: boolean;
   paymentReference?: string;
+  document: InvoiceDocumentData;
 }
 
 export interface NepalPayPayload {
@@ -111,6 +114,7 @@ export interface Certificate {
   issuedDate: string;
   fileName: string;
   pdfUrl?: string;
+  htmlUrl?: string;
 }
 
 export interface StudentNotification {
@@ -168,3 +172,4 @@ export function invoiceTotal(invoice: Invoice): number {
 export function resultPercentage(result: TestResult): number {
   return result.maximum === 0 ? 0 : Math.round((result.score / result.maximum) * 100);
 }
+import type { InvoiceDocumentData } from '../../components/InvoiceDocument';

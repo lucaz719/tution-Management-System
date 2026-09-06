@@ -16,6 +16,114 @@ function platformAdminOnly(_req: TenantRequest, res: Response, next: NextFunctio
   return next();
 }
 
+// Direct bootstrap flow used by the temporary development Super Admin.
+router.post(
+  '/provision',
+  platformAdminOnly,
+  authMiddleware,
+  hasPermission('super_admin_manage_tenants'),
+  async (req: TenantRequest, res: Response) => {
+    const {
+      institutionName,
+      panNumber,
+      adminFirstName,
+      adminLastName,
+      adminEmail,
+      adminPhone,
+      branchName,
+      branchAddress,
+      latitude,
+      longitude,
+    } = req.body ?? {};
+
+    const requiredFields: Array<[string, unknown]> = [
+      ['institutionName', institutionName],
+      ['panNumber', panNumber],
+      ['adminFirstName', adminFirstName],
+      ['adminLastName', adminLastName],
+      ['adminEmail', adminEmail],
+      ['adminPhone', adminPhone],
+      ['branchName', branchName],
+      ['branchAddress', branchAddress],
+    ];
+    const missing = requiredFields.filter(([, value]) => typeof value !== 'string' || !value.trim()).map(([name]) => name);
+    if (missing.length) {
+      return res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}.` });
+    }
+    const normalizedEmail = String(adminEmail).trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      return res.status(400).json({ error: 'Enter a valid Tenant Admin email address.' });
+    }
+    const parsedLatitude = latitude === undefined || latitude === '' ? null : Number(latitude);
+    const parsedLongitude = longitude === undefined || longitude === '' ? null : Number(longitude);
+    if ((parsedLatitude !== null && (!Number.isFinite(parsedLatitude) || parsedLatitude < -90 || parsedLatitude > 90)) ||
+        (parsedLongitude !== null && (!Number.isFinite(parsedLongitude) || parsedLongitude < -180 || parsedLongitude > 180))) {
+      return res.status(400).json({ error: 'Enter valid latitude and longitude values.' });
+    }
+
+    const tempPassword = `Tms!${crypto.randomBytes(12).toString('base64url')}A9`;
+    try {
+      const passwordHash = await bcrypt.hash(tempPassword, 10);
+      const provisioned = await prisma.$transaction(async (tx) => {
+        const tenant = await tx.tenant.create({
+          data: { name: String(institutionName).trim(), panNumber: String(panNumber).trim(), status: 'ACTIVE' },
+        });
+        const tenantAdminRole = await tx.role.create({
+          data: {
+            tenantId: tenant.id,
+            name: 'Tenant Admin',
+            permissions: ['manage_branches', 'manage_staff', 'manage_courses', 'manage_billing', 'view_reports', 'approve_petty_cash_l2'],
+          },
+        });
+        const branch = await tx.branch.create({
+          data: {
+            tenantId: tenant.id,
+            name: String(branchName).trim(),
+            address: String(branchAddress).trim(),
+            latitude: parsedLatitude ?? 0,
+            longitude: parsedLongitude ?? 0,
+            radiusMeters: 100,
+          },
+        });
+        const user = await tx.user.create({
+          data: {
+            tenantId: tenant.id,
+            email: normalizedEmail,
+            name: `${String(adminFirstName).trim()} ${String(adminLastName).trim()}`,
+            phone: String(adminPhone).trim(),
+            firstName: String(adminFirstName).trim(),
+            lastName: String(adminLastName).trim(),
+            passwordHash,
+            status: 'ACTIVE',
+          },
+        });
+        await tx.account.create({
+          data: { accountId: user.id, providerId: 'credential', userId: user.id, password: passwordHash },
+        });
+        await tx.userRole.create({ data: { userId: user.id, roleId: tenantAdminRole.id, branchId: null } });
+        return { tenant, branch, user };
+      });
+
+      return res.status(201).json({
+        message: 'Tenant and Tenant Admin created successfully.',
+        provisioned: {
+          tenantId: provisioned.tenant.id,
+          tenantName: provisioned.tenant.name,
+          primaryAdminUser: provisioned.user.email,
+          primaryAdminName: provisioned.user.name,
+          defaultBranch: provisioned.branch.name,
+          temporaryPassword: tempPassword,
+        },
+      });
+    } catch (error: any) {
+      if (error.code === 'P2002') {
+        return res.status(409).json({ error: 'A tenant or user with this PAN/email already exists.' });
+      }
+      return res.status(500).json({ error: 'Failed to create tenant and Tenant Admin.', details: error.message });
+    }
+  }
+);
+
 // 1. Public endpoint to submit onboarding request
 router.post('/request', async (req: TenantRequest, res: Response) => {
   if (process.env.PLATFORM_ADMIN_ENABLED !== 'true') {
@@ -251,60 +359,6 @@ router.get(
       });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to list tenants.', details: error.message });
-    }
-  }
-);
-
-// 4. Smart admin dashboard (Admin only)
-router.get(
-  '/dashboard',
-  authMiddleware,
-  async (req: TenantRequest, res: Response) => {
-    try {
-      const studentCount = await prisma.student.count({
-        where: { user: { tenantId: req.tenantId! } },
-      });
-      const teacherCount = await prisma.userRole.count({
-        where: {
-          user: { tenantId: req.tenantId! },
-          role: { name: 'Teacher' },
-        },
-      });
-      const overdueInvoices = await prisma.invoice.findMany({
-        where: { tenantId: req.tenantId!, status: 'OVERDUE' },
-      });
-      const overdueAmount = overdueInvoices.reduce((sum: number, inv: any) => sum + Number(inv.netPayable), 0);
-      const pendingLeaves = await prisma.leave.count({
-        where: { tenantId: req.tenantId!, status: 'PENDING' },
-      });
-
-      // Per-branch summary: students are linked to branches through their UserRole scope.
-      const branches = await prisma.branch.findMany({
-        where: { tenantId: req.tenantId! },
-        orderBy: { createdAt: 'asc' },
-      });
-      const branchSummary = await Promise.all(
-        branches.map(async (branch) => ({
-          branchId: branch.id,
-          branchName: branch.name,
-          activeStudents: await prisma.userRole.count({
-            where: { branchId: branch.id, role: { name: 'Student' } },
-          }),
-          staffRoles: await prisma.userRole.count({
-            where: { branchId: branch.id, role: { name: { not: 'Student' } } },
-          }),
-        }))
-      );
-
-      return res.status(200).json({
-        activeStudentsCount: studentCount,
-        activeTeachersCount: teacherCount,
-        totalOverdueAmountNpr: overdueAmount,
-        pendingLeaveRequestsCount: pendingLeaves,
-        branchSummary,
-      });
-    } catch (error: any) {
-      return res.status(500).json({ error: 'Failed to retrieve dashboard summaries.', details: error.message });
     }
   }
 );

@@ -2,35 +2,59 @@ import { Router, Response } from 'express';
 import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
+import { isTenantAdmin, managedBranchIds } from '../utils/access-control';
 
 const router = Router();
 
 // All branch operations are tenant-scoped: the tenant comes from the caller's
 // verified session, so client-controlled tenant headers cannot cross boundaries.
 
-// List branches for the current tenant
+// List only the branches the authenticated administrator is allowed to manage.
+// Lower-privilege roles must use their role-specific/self-service contracts;
+// this management projection includes attendance geofence configuration.
 router.get('/', authMiddleware, async (req: TenantRequest, res: Response) => {
+  const tenantWide = isTenantAdmin(req.user!);
+  const branchIds = managedBranchIds(req.user!);
+  if (!tenantWide && branchIds.length === 0) {
+    return res.status(403).json({ error: 'Only Tenant Admins and assigned Branch Admins may list branches.' });
+  }
+
   try {
     const branches = await prisma.branch.findMany({
-      where: { tenantId: req.tenantId! },
+      where: {
+        tenantId: req.tenantId!,
+        ...(tenantWide ? {} : { id: { in: branchIds } }),
+      },
       orderBy: { createdAt: 'asc' },
       include: {
-        _count: { select: { userRoles: true, courses: true } },
+        _count: { select: { courses: true } },
       },
     });
 
     return res.json({
-      branches: branches.map(branch => ({
-        id: branch.id,
-        name: branch.name,
-        address: branch.address,
-        latitude: branch.latitude,
-        longitude: branch.longitude,
-        radiusMeters: branch.radiusMeters,
-        gracePeriodMinutes: branch.gracePeriodMinutes,
-        createdAt: branch.createdAt,
-        staffCount: branch._count.userRoles,
-        courseCount: branch._count.courses,
+      branches: await Promise.all(branches.map(async branch => {
+        const staffCount = await prisma.user.count({
+          where: {
+            tenantId: req.tenantId!,
+            status: 'ACTIVE',
+            staffRecord: { isNot: null },
+            userRoles: { some: { branchId: branch.id, role: { name: { not: 'Student' } } } },
+          },
+        });
+
+        return {
+          id: branch.id,
+          name: branch.name,
+          address: branch.address,
+          latitude: branch.latitude,
+          longitude: branch.longitude,
+          radiusMeters: branch.radiusMeters,
+          gracePeriodMinutes: branch.gracePeriodMinutes,
+          admissionFee: branch.admissionFee,
+          createdAt: branch.createdAt,
+          staffCount,
+          courseCount: branch._count.courses,
+        };
       })),
     });
   } catch (error: any) {
@@ -40,7 +64,7 @@ router.get('/', authMiddleware, async (req: TenantRequest, res: Response) => {
 
 // Create a branch (Tenant Admin / manage_branches)
 router.post('/', authMiddleware, hasPermission('manage_branches'), async (req: TenantRequest, res: Response) => {
-  const { name, address, latitude, longitude, radiusMeters, gracePeriodMinutes } = req.body;
+  const { name, address, latitude, longitude, radiusMeters, gracePeriodMinutes, admissionFee } = req.body;
 
   if (!name || !address) {
     return res.status(400).json({ error: 'Branch name and address are required.' });
@@ -63,6 +87,7 @@ router.post('/', authMiddleware, hasPermission('manage_branches'), async (req: T
         radiusMeters: Number.isFinite(Number(radiusMeters)) && Number(radiusMeters) > 0 ? Number(radiusMeters) : 100,
         gracePeriodMinutes:
           Number.isFinite(Number(gracePeriodMinutes)) && Number(gracePeriodMinutes) >= 0 ? Number(gracePeriodMinutes) : 15,
+        admissionFee: Number.isFinite(Number(admissionFee)) && Number(admissionFee) >= 0 ? Math.round(Number(admissionFee)) : 0,
       },
     });
 
@@ -75,7 +100,7 @@ router.post('/', authMiddleware, hasPermission('manage_branches'), async (req: T
 // Update a branch (Tenant Admin / manage_branches)
 router.put('/:id', authMiddleware, hasPermission('manage_branches'), async (req: TenantRequest, res: Response) => {
   const { id } = req.params;
-  const { name, address, latitude, longitude, radiusMeters, gracePeriodMinutes } = req.body;
+  const { name, address, latitude, longitude, radiusMeters, gracePeriodMinutes, admissionFee } = req.body;
 
   try {
     const existing = await prisma.branch.findUnique({ where: { id } });
@@ -94,7 +119,9 @@ router.put('/:id', authMiddleware, hasPermission('manage_branches'), async (req:
     if (gracePeriodMinutes !== undefined && Number.isFinite(Number(gracePeriodMinutes)) && Number(gracePeriodMinutes) >= 0) {
       data.gracePeriodMinutes = Number(gracePeriodMinutes);
     }
-
+    if (admissionFee !== undefined && Number.isFinite(Number(admissionFee)) && Number(admissionFee) >= 0) {
+      data.admissionFee = Math.round(Number(admissionFee));
+    }
     if (Object.keys(data).length === 0) {
       return res.status(400).json({ error: 'No valid fields provided to update.' });
     }

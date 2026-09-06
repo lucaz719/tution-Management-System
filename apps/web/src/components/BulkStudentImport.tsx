@@ -158,7 +158,7 @@ export function BulkStudentImport({ branches, grades = [], onClose, onImported }
         <div className="people-drawer-head">
           <div>
             <h2>Bulk Import Students</h2>
-            <p>Download the Excel template, fill it in, and upload — one row per student.</p>
+            <p>Download the CSV template, fill it in, and upload — one row per student.</p>
           </div>
           <button type="button" className="people-drawer-close" onClick={onClose} aria-label="Close">
             <span className="material-symbols-outlined">close</span>
@@ -171,13 +171,13 @@ export function BulkStudentImport({ branches, grades = [], onClose, onImported }
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                 <Button variant="outline" onClick={() => void downloadTemplate()} style={{ flex: 1, minWidth: '200px' }}>
                   <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>download</span>
-                  Download Excel Template
+                  Download CSV Template
                 </Button>
                 <Button onClick={() => fileRef.current?.click()} disabled={isParsing} style={{ flex: 1, minWidth: '160px' }}>
                   <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>upload_file</span>
                   {isParsing ? 'Reading…' : 'Choose File'}
                 </Button>
-                <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleFile(f); e.target.value = ''; }} />
+                <input ref={fileRef} type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleFile(f); e.target.value = ''; }} />
               </div>
 
               <div style={{ fontSize: '12.5px', color: 'var(--text-muted)', lineHeight: 1.6 }}>

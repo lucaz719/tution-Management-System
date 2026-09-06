@@ -11,6 +11,7 @@ interface AuthContextValue {
   isLoading: boolean;
   isAuthenticated: boolean;
   isTwoFactorPending: boolean;
+  sessionIssue: 'missing' | 'unavailable' | 'signed-out' | null;
   attemptCount: number;
   login: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
   logout: () => void;
@@ -52,21 +53,30 @@ function cacheUser(user: AuthUser | null): void {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [sessionIssue, setSessionIssue] = useState<AuthContextValue['sessionIssue']>(null);
   const [attemptCount, setAttemptCount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     void authClient.getSession()
-      .then(({ data }) => {
+      .then(({ data, error }) => {
         if (!cancelled) {
+          if (error) {
+            setUser(null);
+            setSessionIssue(Number((error as { status?: number }).status) === 401 ? 'missing' : 'unavailable');
+            cacheUser(null);
+            return;
+          }
           const nextUser = data?.user ? mapSessionUser(data.user) : null;
           setUser(nextUser);
+          setSessionIssue(nextUser ? null : 'missing');
           cacheUser(nextUser);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setUser(null);
+          setSessionIssue('unavailable');
           cacheUser(null);
         }
       })
@@ -86,6 +96,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
     try {
       const result = await authClient.signIn.email({ email: email.trim().toLowerCase(), password, dontNavigate: true } as any);
+      if (result.error) {
+        const authError = result.error as { status?: number; code?: string; message?: string };
+        if (
+          authError.status === 0
+          || authError.code === 'FETCH_ERROR'
+          || /failed to fetch|network|unable to connect/i.test(authError.message || '')
+        ) {
+          throw new AuthFlowError(
+            'SERVICE_UNAVAILABLE',
+            'Unable to reach the TMS service. Check your connection and try again.',
+          );
+        }
+        throw new AuthFlowError('INVALID_CREDENTIALS', 'Invalid email or password.');
+      }
       if ((result?.data as any)?.twoFactorRedirect) {
         const otpResult = await authClient.twoFactor.sendOtp();
         if (otpResult.error) {
@@ -112,16 +136,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const nextUser = mapSessionUser(sessionData.user);
       cacheUser(nextUser);
       setUser(nextUser);
+      setSessionIssue(null);
       setAttemptCount(0);
 
     } catch (error) {
+      if (error instanceof AuthFlowError && error.code !== 'INVALID_CREDENTIALS') throw error;
+
+      if (!(error instanceof AuthFlowError)) {
+        throw new AuthFlowError(
+          'SERVICE_UNAVAILABLE',
+          'Unable to reach the TMS service. Check your connection and try again.',
+        );
+      }
+
       const nextAttemptCount = attemptCount + 1;
       setAttemptCount(nextAttemptCount);
       if (nextAttemptCount >= 5) {
         throw new AuthFlowError('ACCOUNT_LOCKED', 'Your account has been locked after 5 failed attempts.');
       }
-      if (error instanceof AuthFlowError) throw error;
-      throw new AuthFlowError('INVALID_CREDENTIALS', 'Invalid email or password.');
+      throw error;
     } finally {
       setIsLoading(false);
     }
@@ -134,6 +167,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       removeAuthToken();
       cacheUser(null);
       setUser(null);
+      setSessionIssue('signed-out');
       setAttemptCount(0);
     }
   }, []);
@@ -156,6 +190,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const verifiedUser = mapSessionUser(sessionData.user);
     cacheUser(verifiedUser);
     setUser(verifiedUser);
+    setSessionIssue(null);
   }, []);
 
   const value = useMemo<AuthContextValue>(() => ({
@@ -164,13 +199,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isLoading,
     isAuthenticated: Boolean(user && !user.requiresTwoFactor && !user.requiresPasswordChange),
     isTwoFactorPending: Boolean(user?.requiresTwoFactor),
+    sessionIssue,
     attemptCount,
     login,
     logout,
     roleRedirectPath,
     verify2FA,
     resetAttemptCount,
-  }), [attemptCount, isLoading, login, logout, roleRedirectPath, user, verify2FA, resetAttemptCount]);
+  }), [attemptCount, isLoading, login, logout, roleRedirectPath, sessionIssue, user, verify2FA, resetAttemptCount]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -7,7 +7,7 @@ export interface TenantDashboardData {
     branchId: string;
     branchName: string;
     activeStudents: number;
-    staffRoles: number;
+    staffCount: number;
   }>;
 }
 

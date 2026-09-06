@@ -1,17 +1,39 @@
+import { NepaliDateTimeField } from '../components/calendar/NepaliDateTimeField';
+import { EventTargetFields, AUDIENCE_LABELS } from '../components/calendar/EventTargetFields';
+import { academicEventsApi, type AcademicEvent, type EventAudience, type EventType } from '../services/api/academicEvents';
+import { englishDateLabel, nepalDateKey, nepalDateTimeInputToIso, nepaliDateHeading, NEPAL_TIME_ZONE } from '../utils/nepalCalendar';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { useToast } from '../components/ui/Toast';
 import { api } from '../services/api';
+import { type CalendarSystem } from '../utils/nepaliDate';
+import { CalendarSystemToggle } from '../components/CalendarSystemToggle';
 
 type Tab = 'policies' | 'approvals' | 'finance' | 'calendar' | 'hr';
 type Weights = Record<'attendance' | 'updateCompliance' | 'feedback' | 'leaveCompliance' | 'taskCompletion', number>;
+type Forecast = { billingCycle?: string; metrics?: { baseForecastNpr?: number; estimatedAttritionNpr?: number; attritionPercentage?: string; netForecastNpr?: number; actualCollectedNpr?: number; varianceNpr?: number; activeEnrollments?: number } };
+type FinancialAlert = { type?: string; severity?: string; message?: string; category?: string; currentAmountNpr?: number; baselineAmountNpr?: number };
+type FinancialSuggestions = { alerts?: FinancialAlert[]; budgetAnalysis?: { activeEnrollments?: number; projectedIncomeNpr?: number; projectedCostsNpr?: number; projectedSurplusNpr?: number; basis?: string } };
 
 const input: React.CSSProperties = { width: '100%', padding: '10px 12px', border: '1px solid #DCE4EE', borderRadius: '9px', background: '#fff', color: 'var(--color-text)' };
 const label: React.CSSProperties = { display: 'grid', gap: '6px', fontSize: '12px', fontWeight: 700, color: 'var(--color-text)' };
 const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '14px' };
 const defaultWeights: Weights = { attendance: 20, updateCompliance: 20, feedback: 20, leaveCompliance: 20, taskCompletion: 20 };
+const metricGrid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: '10px', marginTop: '16px' };
+const metricCard: React.CSSProperties = { minWidth: 0, padding: '14px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', background: 'var(--color-surface)' };
+
+function money(value: unknown) {
+  return `NPR ${Number(value ?? 0).toLocaleString('en-NP', { maximumFractionDigits: 2 })}`;
+}
+
+function Metric({ label: text, value, emphasis = false }: { label: string; value: string; emphasis?: boolean }) {
+  return <div style={metricCard}>
+    <p style={{ color: 'var(--text-muted)', fontSize: 12, fontWeight: 700 }}>{text}</p>
+    <strong style={{ display: 'block', marginTop: 6, color: emphasis ? 'var(--color-primary)' : 'var(--color-text)', fontSize: 20, lineHeight: 1.2, overflowWrap: 'anywhere' }}>{value}</strong>
+  </div>;
+}
 
 function downloadCsv(entries: any[]) {
   const columns = ['date', 'accountDebit', 'accountCredit', 'amount', 'description'];
@@ -28,17 +50,19 @@ function downloadCsv(entries: any[]) {
 export function TenantControlCenter() {
   const { showToast } = useToast();
   const [tab, setTab] = useState<Tab>('policies');
+  const [calendarSystem, setCalendarSystem] = useState<CalendarSystem>('BS');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [config, setConfig] = useState<any>(null);
   const [weights, setWeights] = useState<Weights>(defaultWeights);
   const [pettyCash, setPettyCash] = useState<any[]>([]);
   const [remarks, setRemarks] = useState<Record<string, string>>({});
-  const [forecast, setForecast] = useState<any>(null);
-  const [suggestions, setSuggestions] = useState<any>(null);
-  const [events, setEvents] = useState<any[]>([]);
+  const [forecast, setForecast] = useState<Forecast | null>(null);
+  const [suggestions, setSuggestions] = useState<FinancialSuggestions | null>(null);
+  const [events, setEvents] = useState<AcademicEvent[]>([]);
+  const [publishing, setPublishing] = useState(false);
   const [alerts, setAlerts] = useState<any[]>([]);
-  const [eventForm, setEventForm] = useState({ title: '', description: '', eventType: 'HOLIDAY', startDate: '', endDate: '' });
+  const [eventForm, setEventForm] = useState({ title: '', description: '', eventType: 'HOLIDAY' as EventType, audience: 'ALL' as EventAudience, classId: '', startDate: '', endDate: '' });
   const weightTotal = useMemo(() => Object.values(weights).reduce((sum, value) => sum + Number(value || 0), 0), [weights]);
 
   const load = async () => {
@@ -108,19 +132,28 @@ export function TenantControlCenter() {
 
   const publishEvent = async (event: FormEvent) => {
     event.preventDefault();
-    if (!eventForm.title || !eventForm.startDate || !eventForm.endDate) return;
+    if (publishing) return;
+    setPublishing(true);
     try {
-      await api.tenant.publishCalendarEvent({
+      if (!eventForm.title.trim() || !eventForm.startDate.split('T')[0] || !eventForm.endDate.split('T')[0]) throw new Error('Enter a title and choose both Nepali dates.');
+      const startDate = nepalDateTimeInputToIso(eventForm.startDate);
+      const endDate = nepalDateTimeInputToIso(eventForm.endDate);
+      if (endDate < startDate) throw new Error('End must be on or after the start date and time.');
+      await academicEventsApi.createTenantWide({
         ...eventForm,
-        startDate: new Date(eventForm.startDate).toISOString(),
-        endDate: new Date(eventForm.endDate).toISOString(),
+        title: eventForm.title.trim(),
+        classId: eventForm.classId || null,
+        startDate,
+        endDate,
       });
-      showToast('Institution event published read-only to every branch.', 'success');
-      setEventForm({ title: '', description: '', eventType: 'HOLIDAY', startDate: '', endDate: '' });
+      showToast('Event published to the selected audience.', 'success');
+      setEventForm({ title: '', description: '', eventType: 'HOLIDAY', audience: 'ALL', classId: '', startDate: '', endDate: '' });
       await load();
       setTab('calendar');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Event could not be published.', 'error');
+    } finally {
+      setPublishing(false);
     }
   };
 
@@ -190,22 +223,69 @@ export function TenantControlCenter() {
           </div>)}
       </Card> : null}
 
-      {tab === 'finance' ? <div style={grid}>
-        <Card hoverable={false}><h3>Fee income forecast</h3><pre style={{ marginTop: 12, whiteSpace: 'pre-wrap', fontFamily: 'var(--font-ui)', fontSize: 13 }}>{JSON.stringify(forecast, null, 2)}</pre></Card>
-        <Card hoverable={false}><h3>Expense anomaly signals</h3><pre style={{ marginTop: 12, whiteSpace: 'pre-wrap', fontFamily: 'var(--font-ui)', fontSize: 13 }}>{JSON.stringify(suggestions, null, 2)}</pre></Card>
-        <Card hoverable={false}><h3>Accountant reconciliation</h3><p style={{ color: 'var(--text-muted)', margin: '8px 0 16px' }}>Download the tenant-scoped double-entry ledger.</p><Button onClick={() => void api.finances.exportLedger().then((data) => downloadCsv(data.entries)).catch((error) => showToast(error.message, 'error'))}>Download CSV ledger</Button></Card>
+      {tab === 'finance' ? <div style={{ display: 'grid', gap: 16 }}>
+        <Card hoverable={false}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div><h3>Fee income forecast</h3><p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 4 }}>{forecast?.billingCycle ?? 'Current billing cycle'} · based on active course fees</p></div>
+            <StatusBadge variant="info">{forecast?.metrics?.activeEnrollments ?? 0} active enrollments</StatusBadge>
+          </div>
+          <div style={metricGrid}>
+            <Metric label="Expected fees" value={money(forecast?.metrics?.baseForecastNpr)} />
+            <Metric label="Attrition estimate" value={money(forecast?.metrics?.estimatedAttritionNpr)} />
+            <Metric label="Net forecast" value={money(forecast?.metrics?.netForecastNpr)} emphasis />
+            <Metric label="Collected" value={money(forecast?.metrics?.actualCollectedNpr)} />
+            <Metric label="Variance" value={money(forecast?.metrics?.varianceNpr)} />
+            <Metric label="Estimated attrition" value={forecast?.metrics?.attritionPercentage ?? '0.0%'} />
+          </div>
+        </Card>
+
+        <div style={grid}>
+          <Card hoverable={false}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+              <div><h3>Expense anomaly signals</h3><p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 4 }}>Compared with the previous three months.</p></div>
+              <StatusBadge variant={suggestions?.alerts?.length ? 'warning' : 'success'}>{suggestions?.alerts?.length ?? 0} alerts</StatusBadge>
+            </div>
+            {!suggestions?.alerts?.length ? <div role="status" style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '20px 0 4px' }}>
+              <span className="material-symbols-outlined" aria-hidden="true" style={{ color: 'var(--color-success)', fontSize: 24 }}>check_circle</span>
+              <div><strong>All clear</strong><p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 3 }}>No recurring expense or payroll anomalies were detected.</p></div>
+            </div> : <div style={{ display: 'grid', gap: 10, marginTop: 16 }}>{suggestions.alerts.map((alert, index) => <div key={`${alert.category}-${index}`} style={{ padding: 14, border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}><strong>{alert.category ?? 'Expense alert'}</strong><StatusBadge variant={alert.severity === 'HIGH' ? 'error' : 'warning'}>{alert.severity ?? 'Warning'}</StatusBadge></div>
+              <p style={{ color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.5, marginTop: 6 }}>{alert.message}</p>
+              <p style={{ fontSize: 12, marginTop: 8 }}>Current: <strong>{money(alert.currentAmountNpr)}</strong> · Baseline: <strong>{money(alert.baselineAmountNpr)}</strong></p>
+            </div>)}</div>}
+          </Card>
+
+          <Card hoverable={false}>
+            <h3>Operating outlook</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 4 }}>Income projection against costs recorded this month.</p>
+            <div style={metricGrid}>
+              <Metric label="Projected income" value={money(suggestions?.budgetAnalysis?.projectedIncomeNpr)} />
+              <Metric label="Recorded costs" value={money(suggestions?.budgetAnalysis?.projectedCostsNpr)} />
+              <Metric label="Projected surplus" value={money(suggestions?.budgetAnalysis?.projectedSurplusNpr)} emphasis />
+            </div>
+            <p style={{ color: 'var(--text-muted)', fontSize: 12, lineHeight: 1.5, marginTop: 12 }}>{suggestions?.budgetAnalysis?.basis ?? 'Calculated from current tenant finance records.'}</p>
+          </Card>
+        </div>
+
+        <Card hoverable={false}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+            <div><h3>Accountant reconciliation</h3><p style={{ color: 'var(--text-muted)', marginTop: 4, fontSize: 13 }}>Export the tenant-scoped double-entry ledger for reconciliation.</p></div>
+            <Button onClick={() => void api.finances.exportLedger().then((data) => downloadCsv(data.entries)).catch((error) => showToast(error.message, 'error'))}><span className="material-symbols-outlined" aria-hidden="true" style={{ fontSize: 18 }}>download</span>Download CSV ledger</Button>
+          </div>
+        </Card>
       </div> : null}
 
       {tab === 'calendar' ? <div style={grid}>
         <Card hoverable={false}><h3>Publish institution event</h3><form onSubmit={(e) => void publishEvent(e)} style={{ display: 'grid', gap: 12, marginTop: 14 }}>
           <label style={label}>Title<input style={input} value={eventForm.title} onChange={(e) => setEventForm((old) => ({ ...old, title: e.target.value }))} required /></label>
-          <label style={label}>Type<select style={input} value={eventForm.eventType} onChange={(e) => setEventForm((old) => ({ ...old, eventType: e.target.value }))}><option value="HOLIDAY">Holiday</option><option value="EXAM">Exam</option><option value="EVENT">Event</option><option value="FEE_DUE">Fee deadline</option></select></label>
-          <label style={label}>Starts<input style={input} type="datetime-local" value={eventForm.startDate} onChange={(e) => setEventForm((old) => ({ ...old, startDate: e.target.value }))} required /></label>
-          <label style={label}>Ends<input style={input} type="datetime-local" value={eventForm.endDate} onChange={(e) => setEventForm((old) => ({ ...old, endDate: e.target.value }))} required /></label>
+          <label style={label}>Type<select style={input} value={eventForm.eventType} onChange={(e) => setEventForm((old) => ({ ...old, eventType: e.target.value as EventType }))}><option value="HOLIDAY">Holiday</option><option value="EXAM">Exam</option><option value="EVENT">Event</option><option value="FEE_DUE">Fee deadline</option></select></label>
+          <EventTargetFields audience={eventForm.audience} classId={eventForm.classId} onAudienceChange={(audience) => setEventForm((old) => ({ ...old, audience }))} onClassChange={(classId) => setEventForm((old) => ({ ...old, classId }))} />
+          <NepaliDateTimeField label="Starts" value={eventForm.startDate} onChange={(startDate) => setEventForm((old) => ({ ...old, startDate }))} />
+          <NepaliDateTimeField label="Ends" value={eventForm.endDate} onChange={(endDate) => setEventForm((old) => ({ ...old, endDate }))} />
           <label style={label}>Description<textarea style={input} value={eventForm.description} onChange={(e) => setEventForm((old) => ({ ...old, description: e.target.value }))} /></label>
-          <Button type="submit">Publish to every branch</Button>
+          <Button type="submit" disabled={publishing} aria-busy={publishing}>{publishing ? 'Publishing...' : 'Publish event'}</Button>
         </form></Card>
-        <Card hoverable={false}><h3>Institution calendar</h3>{events.map((item) => <div key={item.id} style={{ borderTop: '1px solid #E8EDF3', padding: '12px 0' }}><strong>{item.title}</strong><p style={{ fontSize: 12, color: 'var(--text-muted)' }}>{new Date(item.startDate).toLocaleString()} · {item.eventType}</p>{!item.branchId ? <StatusBadge variant="info">Read-only institution event</StatusBadge> : null}</div>)}</Card>
+        <Card hoverable={false}><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}><h3>Institution calendar</h3><CalendarSystemToggle value={calendarSystem} onChange={setCalendarSystem} /></div>{events.map((item) => <div key={item.id} style={{ borderTop: '1px solid #E8EDF3', padding: '12px 0' }}><strong>{item.title}</strong><p style={{ fontSize: 12, color: 'var(--text-muted)' }}>{calendarSystem === 'BS' ? nepaliDateHeading(nepalDateKey(item.startDate)) : englishDateLabel(nepalDateKey(item.startDate))} · {new Date(item.startDate).toLocaleTimeString([], { timeZone: NEPAL_TIME_ZONE, hour: '2-digit', minute: '2-digit' }) + ' NPT'} · {item.eventType} / {AUDIENCE_LABELS[item.audience ?? 'STAFF']}</p>{!item.branchId ? <StatusBadge variant="info">Read-only institution event</StatusBadge> : null}</div>)}</Card>
       </div> : null}
 
       {tab === 'hr' ? <Card hoverable={false}><h3>Contracts & documents expiring within 30 days</h3>

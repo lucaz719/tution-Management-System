@@ -227,6 +227,8 @@
 .parent-leave-list,
 .parent-certificate-list,
 .parent-calendar-list { display: flex; flex-direction: column; }
+.parent-calendar-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-4); }
+.parent-academic-calendar{overflow:hidden}.parent-calendar-toolbar{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-4);margin-top:var(--sp-5);padding:var(--sp-4) 0;border-top:1px solid var(--parent-border)}.parent-calendar-toolbar h3{color:var(--parent-navy);font-size:18px}.parent-calendar-toolbar>div{display:flex;gap:var(--sp-2)}.parent-calendar-toolbar button{display:grid;place-items:center;min-width:40px;padding:0 var(--sp-3);border:1px solid var(--parent-border);border-radius:var(--radius-sm);background:var(--parent-surface);color:var(--parent-text);font:inherit;font-size:13px;font-weight:800;cursor:pointer}.parent-calendar-layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;border:1px solid var(--parent-border);border-radius:var(--radius-md);overflow:hidden}.parent-calendar-grid-wrap{min-width:0;padding:var(--sp-4)}.parent-calendar-weekdays,.parent-calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}.parent-calendar-weekdays span{padding:0 var(--sp-1) var(--sp-2);color:var(--parent-muted);font-size:12px;font-weight:800;text-align:center}.parent-calendar-grid{border-top:1px solid var(--parent-border);border-left:1px solid var(--parent-border)}.parent-calendar-grid button{position:relative;min-width:0;min-height:68px;padding:var(--sp-2);border:0;border-right:1px solid var(--parent-border);border-bottom:1px solid var(--parent-border);background:var(--parent-surface);color:var(--parent-text);font:inherit;text-align:left;cursor:pointer}.parent-calendar-grid button:hover{background:var(--color-surface)}.parent-calendar-grid button.is-outside{background:var(--color-surface);color:var(--parent-muted);opacity:.62}.parent-calendar-grid button.is-selected{z-index:1;background:var(--color-primary-soft);box-shadow:inset 0 0 0 2px var(--parent-blue)}.parent-calendar-grid button.is-today>span{display:grid;place-items:center;width:28px;height:28px;margin:-4px 0 0 -4px;border-radius:50%;background:var(--parent-blue);color:var(--color-primary-contrast,#fff)}.parent-calendar-grid button>span{font-weight:800}.parent-calendar-grid button>i{position:absolute;bottom:var(--sp-2);left:var(--sp-2);display:flex;gap:4px}.parent-calendar-grid button>i b{width:7px;height:7px;border-radius:50%;background:var(--parent-blue)}.parent-calendar-grid button>i b[data-kind="Holiday"]{background:var(--parent-success)}.parent-calendar-grid button>i b[data-kind="Exam"]{background:var(--parent-error)}.parent-calendar-grid button>i b[data-kind="Fee due"]{background:var(--parent-warning)}.parent-calendar-selected{padding:var(--sp-5);border-left:1px solid var(--parent-border);background:var(--color-surface)}.parent-calendar-selected>span{color:var(--parent-blue);font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase}.parent-calendar-selected>h3{margin-top:var(--sp-1);color:var(--parent-navy);font-size:17px}.parent-calendar-selected>div{display:grid;gap:var(--sp-3);margin-top:var(--sp-4)}.parent-calendar-selected article{padding:var(--sp-3);border:1px solid var(--parent-border);border-left:4px solid var(--parent-blue);border-radius:var(--radius-sm);background:var(--parent-surface)}.parent-calendar-selected h4{margin-top:var(--sp-2);font-size:14px}.parent-calendar-selected article p{margin-top:var(--sp-1);color:var(--parent-muted);font-size:12px;line-height:1.5}
 .parent-remark-list article { padding: var(--sp-4) var(--sp-1); border-bottom: 1px solid var(--parent-border); }
 .parent-remark-list article:last-child { border-bottom: 0; }
 .parent-remark-list h3 { margin-top: var(--sp-2); font-size: 14px; }
@@ -380,7 +382,16 @@
 .parent-payment-calendar article b { display: block; }
 .parent-payment-calendar article span { color: var(--parent-muted); font-size: 11px; }
 .parent-payment-calendar article b { margin-top: var(--sp-3); color: var(--parent-navy); font-size: 13px; }
-.parent-payment-calendar article > button { margin-top: var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--parent-border); border-radius: var(--radius-sm); background: transparent; color: var(--parent-blue); font-weight: 700; cursor: pointer; }
+.parent-invoice-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); margin: var(--sp-4) 0 0 !important; padding-top: var(--sp-3); border-top: 1px solid var(--parent-border); }
+.parent-invoice-action { min-height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--parent-border); border-radius: var(--radius-sm); font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; transition: background-color 120ms var(--ease-silk), border-color 120ms var(--ease-silk), transform 120ms var(--ease-silk); }
+.parent-invoice-action .material-symbols-outlined { font-size: 18px; }
+.parent-invoice-action--secondary { background: var(--parent-surface); color: var(--parent-blue); }
+.parent-invoice-action--secondary:hover { border-color: var(--parent-blue); background: var(--color-primary-soft); }
+.parent-invoice-action--primary { border-color: var(--parent-blue); background: var(--parent-blue); color: var(--color-primary-contrast, #fff); }
+.parent-invoice-action--primary:hover { background: var(--parent-navy); }
+.parent-invoice-action:active { transform: translateY(1px); }
+.parent-invoice-action:focus-visible,
+.parent-fee-hero > button:focus-visible { outline: 3px solid var(--parent-gold); outline-offset: 2px; }
 .parent-fees-layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, .75fr); gap: 20px; align-items: start; }
 .parent-invoice-lines { display: flex; flex-direction: column; gap: 13px; }
 .parent-invoice-lines > div { display: flex; justify-content: space-between; gap: var(--sp-4); color: var(--parent-muted); font-size: 13px; }
@@ -394,7 +405,25 @@
 .parent-payment-help dl { margin-top: var(--sp-4); }
 .parent-payment-help dl div { display: flex; justify-content: space-between; gap: var(--sp-3); padding: 10px 0; border-top: 1px solid var(--parent-border); font-size: 11px; }
 
-.parent-modal-backdrop { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: var(--sp-5); background: rgba(0, 20, 52, .56); backdrop-filter: blur(4px); }
+.parent-profile-card { padding: 0; overflow: hidden; }
+.parent-profile-identity { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--sp-4); padding: var(--sp-5); background: var(--color-primary-soft); }
+.parent-profile-avatar { width: 64px; height: 64px; display: grid; place-items: center; border-radius: var(--radius-full); background: var(--parent-blue); color: var(--color-primary-contrast, #fff); font-family: var(--font-display); font-size: 20px; font-weight: 800; }
+.parent-profile-identity h2 { margin-top: var(--sp-1); color: var(--parent-navy); font-family: var(--font-display); font-size: 22px; }
+.parent-profile-identity p { max-width: 65ch; margin-top: var(--sp-1); color: var(--parent-muted); font-size: 12px; }
+.parent-profile-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; padding: var(--sp-5); gap: var(--sp-3); }
+.parent-profile-details > div { min-width: 0; padding: var(--sp-4); border: 1px solid var(--parent-border); border-radius: var(--radius-sm); background: var(--parent-surface); }
+.parent-profile-details dt { display: flex; align-items: center; gap: var(--sp-2); color: var(--parent-muted); font-size: 11px; font-weight: 800; text-transform: uppercase; }
+.parent-profile-details dt .material-symbols-outlined { color: var(--parent-blue); font-size: 18px; }
+.parent-profile-details dd { margin: var(--sp-2) 0 0; overflow-wrap: anywhere; color: var(--parent-text); font-size: 14px; font-weight: 800; }
+.parent-profile-details small { display: block; margin-top: var(--sp-1); color: var(--parent-muted); font-size: 11px; }
+.parent-profile-children { display: grid; gap: var(--sp-2); }
+.parent-profile-children article { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--sp-3); padding: var(--sp-3); border: 1px solid var(--parent-border); border-radius: var(--radius-sm); }
+.parent-profile-children article > span:first-child { width: 42px; height: 42px; display: grid; place-items: center; border-radius: var(--radius-full); background: var(--color-primary-soft); color: var(--parent-blue); font-weight: 800; }
+.parent-profile-children h3 { font-size: 14px; }
+.parent-profile-children p,
+.parent-profile-children small { display: block; margin-top: 2px; color: var(--parent-muted); font-size: 11px; }
+
+.parent-modal-backdrop { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: var(--sp-5); background: rgba(0, 20, 52, .56); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
 .parent-modal { position: relative; width: min(100%, 430px); padding: 28px; border-radius: var(--radius-lg); background: var(--color-surface); color: var(--parent-text); text-align: center; box-shadow: var(--shadow-modal); animation: parent-modal-enter 220ms var(--ease-silk) both; }
 @keyframes parent-modal-enter { from { opacity: 0; transform: scale(.96) translateY(8px); } to { opacity: 1; transform: scale(1) translateY(0); } }
 .parent-modal h2 { margin-top: 6px; color: var(--parent-navy); font-family: var(--font-display); }
@@ -406,6 +435,7 @@
 .parent-modal .parent-primary-button { width: 100%; margin-top: 20px; }
 
 .parent-certificate-list article { gap: var(--sp-4); padding: var(--sp-4) var(--sp-1); border-bottom: 1px solid var(--parent-border); }
+.parent-certificate-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-2); }
 .parent-certificate-list article > div { flex: 1; }
 .parent-certificate-list h3 { font-size: 15px; }
 .parent-certificate-list p { margin-top: var(--sp-1); color: var(--parent-muted); font-size: 12px; }
@@ -413,6 +443,7 @@
 .parent-certificate-list button { display: inline-flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--parent-border); border-radius: var(--radius-sm); background: transparent; color: var(--parent-muted); }
 
 .parent-calendar-list article { gap: var(--sp-4); padding: 17px var(--sp-1); border-bottom: 1px solid var(--parent-border); }
+.parent-calendar-list>button{display:flex;align-items:center;gap:var(--sp-4);width:100%;padding:17px var(--sp-1);border:0;border-bottom:1px solid var(--parent-border);background:transparent;color:var(--parent-text);font:inherit;text-align:left;cursor:pointer}.parent-calendar-list>button:last-child{border-bottom:0}.parent-calendar-list>button:hover{background:var(--color-surface)}.parent-calendar-list>button>div:first-child{width:54px;height:58px;display:grid;place-content:center;flex:0 0 auto;border-radius:var(--radius-sm);background:var(--color-primary-soft);color:var(--parent-blue);text-align:center}.parent-calendar-list>button>div:nth-child(2){flex:1}.parent-calendar-list>button>div:first-child strong,.parent-calendar-list>button>div:first-child span{display:block}.parent-calendar-list>button time{color:var(--parent-muted);font-size:12px}.parent-calendar-list>button>.material-symbols-outlined{color:var(--parent-muted)}
 .parent-calendar-list article > div:first-child { width: 54px; height: 58px; display: grid; place-content: center; border-radius: var(--radius-sm); background: rgba(21, 96, 189, .08); color: var(--parent-blue); text-align: center; }
 .parent-calendar-list article > div:nth-child(2) { flex: 1; }
 .parent-calendar-list article > div:first-child strong,
@@ -420,6 +451,8 @@
 .parent-calendar-list h3 { margin: 7px 0 3px; font-size: 15px; }
 .parent-calendar-list p,
 .parent-calendar-list time { color: var(--parent-muted); font-size: 12px; }
+.parent-calendar-list time span, .parent-calendar-list time small { display: block; text-align: right; }
+.parent-calendar-list time small { margin-top: 3px; font-weight: 700; color: var(--parent-blue); }
 
 .parent-notification-actions { justify-content: space-between; gap: var(--sp-4); }
 .parent-notification-actions p { color: var(--parent-muted); font-size: 12px; }
@@ -492,16 +525,58 @@
   .parent-participant-fieldset > div { grid-template-columns: 1fr; }
   .parent-leave-list article,
   .parent-certificate-list article,
+  .parent-calendar-heading { flex-direction: column; }
   .parent-calendar-list article { align-items: flex-start; flex-wrap: wrap; }
   .parent-certificate-list article > div { flex: 1 0 calc(100% - 56px); }
   .parent-certificate-list button { margin-left: 56px; }
-  .parent-calendar-list time { display: none; }
+  .parent-calendar-list time { display: block; width: 100%; }
+  .parent-calendar-list time span, .parent-calendar-list time small { text-align: left; }
   .parent-notification-actions { align-items: flex-start; flex-direction: column; }
   .parent-notification-list > button { grid-template-columns: 8px 36px 1fr; padding: 14px; }
   .parent-notification-list > button > .material-symbols-outlined:last-child { display: none; }
+  .parent-profile-identity { grid-template-columns: auto minmax(0, 1fr); }
+  .parent-profile-identity .parent-status { grid-column: 1 / -1; justify-self: start; }
+  .parent-profile-details { grid-template-columns: 1fr; padding: var(--sp-4); }
+  .parent-profile-children article { grid-template-columns: auto minmax(0, 1fr); }
+  .parent-profile-children .parent-status { grid-column: 2; justify-self: start; }
+  .parent-invoice-actions { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .parent-view,
   .parent-modal { animation: none; }
 }
+/* Shared recurring-plan summary shown above issued invoices. */
+.parent-billing-plan { display: grid; gap: 14px; }
+.parent-billing-plan.is-incomplete { border-color: var(--color-gold-text); background: var(--color-gold-bg); }
+.parent-billing-plan__total { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 14px; border-radius: var(--radius-md); background: var(--color-bg); }
+.parent-billing-plan__total span { color: var(--text-muted); font-size: 13px; }
+.parent-billing-plan__total strong { color: var(--color-primary); font-size: 19px; }
+.parent-billing-plan > p { margin: 0; color: var(--color-gold-text); font-size: 13px; }
+.parent-billing-plan .parent-invoice-lines small { display: block; margin-top: 2px; color: var(--text-muted); font-size: 11.5px; }
+.parent-admission-summary { display: grid; gap: var(--space-4); }
+.parent-admission-summary__payment { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.parent-admission-summary__payment > span { display: grid; gap: var(--space-1); }
+.parent-admission-summary__payment small { color: var(--text-muted); }
+.parent-admission-summary__payment strong { font-size: 1.4rem; }
+.parent-admission-summary dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); margin: 0; padding-top: var(--space-3); border-top: 1px solid var(--border); }
+.parent-admission-summary dl > div { display: grid; gap: var(--space-1); }
+.parent-admission-summary dt { color: var(--text-muted); font-size: .75rem; font-weight: 700; text-transform: uppercase; }
+.parent-admission-summary dd { margin: 0; font-weight: 600; }
+@media (max-width: 540px) { .parent-admission-summary dl { grid-template-columns: 1fr; } }
+.parent-payment-dialog { width: min(680px, calc(100vw - 32px)); }
+.parent-payment-methods { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 20px 0; }
+.parent-payment-methods > button { display: flex; align-items: center; gap: 10px; min-height: 82px; padding: 14px; border: 1px solid var(--parent-border); border-radius: 14px; color: var(--parent-ink); background: var(--parent-card); text-align: left; cursor: pointer; }
+.parent-payment-methods > button.is-active { border-color: var(--parent-primary); background: var(--parent-primary-soft); box-shadow: inset 0 0 0 1px var(--parent-primary); }
+.parent-payment-methods > button:focus-visible { outline: 3px solid var(--parent-primary); outline-offset: 2px; }
+.parent-payment-methods span { display: grid; gap: 3px; }
+.parent-payment-methods small { color: var(--parent-muted); }
+.parent-payment-online { display: flex; gap: 12px; margin: 22px 0; padding: 16px; border-radius: 14px; background: var(--parent-primary-soft); }
+.parent-payment-online p { margin: 0; }
+.parent-payment-bank { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 14px 0; }
+.parent-payment-bank > div { padding: 10px; border: 1px solid var(--parent-border); border-radius: 10px; }
+.parent-payment-bank dt { color: var(--parent-muted); font-size: 10px; text-transform: uppercase; }
+.parent-payment-bank dd { margin: 4px 0 0; font-weight: 700; overflow-wrap: anywhere; }
+@media (max-width: 560px) { .parent-payment-methods, .parent-payment-bank { grid-template-columns: 1fr; } }
+@media (max-width:760px){.parent-calendar-layout{grid-template-columns:1fr}.parent-calendar-selected{border-top:1px solid var(--parent-border);border-left:0}}
+@media (max-width:520px){.parent-calendar-toolbar{align-items:flex-start;flex-direction:column}.parent-calendar-grid-wrap{padding:var(--sp-2)}.parent-calendar-grid button{min-height:52px;padding:6px}.parent-calendar-list>button{align-items:flex-start;flex-wrap:wrap}.parent-calendar-list>button time{width:100%}.parent-calendar-list>button>.material-symbols-outlined{display:none}}

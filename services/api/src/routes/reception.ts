@@ -4,6 +4,7 @@ import prisma from '../utils/db';
 import { authMiddleware } from '../middleware/auth';
 import { TenantRequest } from '../middleware/tenant';
 import { hasRole } from '../utils/access-control';
+import { normalizeSchedule } from '../utils/schedule';
 
 const router = Router();
 
@@ -32,6 +33,8 @@ router.get('/today', authMiddleware, async (req: TenantRequest, res: Response) =
   const branchId = receptionistBranch(req, res);
   if (!branchId) return;
   const { start, end } = todayRange();
+  const appointmentHorizon = new Date(start);
+  appointmentHorizon.setDate(appointmentHorizon.getDate() + 30);
 
   try {
     const [branch, enrollments, checkIns, appointments, announcements, academicAttendance] = await Promise.all([
@@ -47,7 +50,9 @@ router.get('/today', authMiddleware, async (req: TenantRequest, res: Response) =
       prisma.receptionCheckIn.findMany({ where: { tenantId: req.tenantId!, branchId, checkInDate: start } }),
       prisma.appointment.findMany({
         where: {
-          tenantId: req.tenantId!, scheduledTime: { gte: start, lt: end },
+          tenantId: req.tenantId!,
+          status: { in: ['APPROVED', 'CONFIRMED'] },
+          scheduledTime: { gte: start, lt: appointmentHorizon },
           student: { enrollments: { some: { class: { branchId } } } },
         },
         select: {
@@ -60,7 +65,7 @@ router.get('/today', authMiddleware, async (req: TenantRequest, res: Response) =
       prisma.academicEvent.findMany({
         where: {
           tenantId: req.tenantId!, eventType: 'EVENT',
-          OR: [{ branchId }, { branchId: null }], startDate: { lte: end }, endDate: { gte: start },
+          OR: [{ branchId }, { branchId: null }], startDate: { lte: appointmentHorizon }, endDate: { gte: start },
         },
         select: { id: true, title: true, description: true }, orderBy: { startDate: 'asc' },
       }),
@@ -81,7 +86,7 @@ router.get('/today', authMiddleware, async (req: TenantRequest, res: Response) =
         checkedInAt: checkedByStudent.get(item.student.id) ?? null,
       };
       if (!current.classNames.includes(item.class.name)) current.classNames.push(item.class.name);
-      current.schedules.push(item.class.schedule);
+      current.schedules.push(normalizeSchedule(item.class.schedule));
       rosterByStudent.set(item.student.id, current);
     }
     const roster = Array.from(rosterByStudent.values()).map((item) => ({

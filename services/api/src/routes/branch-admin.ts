@@ -3,6 +3,7 @@ import prisma from '../utils/db';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware } from '../middleware/auth';
 import { hasBranchPermission, isTenantAdmin, managedBranchIds } from '../utils/access-control';
+import { normalizeSchedule } from '../utils/schedule';
 
 const router = Router();
 router.use(authMiddleware);
@@ -110,30 +111,138 @@ router.get('/teacher-workflows', async (req: TenantRequest, res: Response) => {
     prisma.studentAttendance.findMany({ where: { date: { gte: start, lt: end }, class: { branchId, course: { tenantId: req.tenantId! } } }, include: { student: { include: { user: { select: { firstName: true, lastName: true } } } }, class: { include: { course: { select: { name: true } }, assignedTeacher: { select: { firstName: true, lastName: true } } } } }, orderBy: [{ class: { name: 'asc' } }, { student: { user: { firstName: 'asc' } } }] }),
     prisma.syllabus.findMany({ where: { class: { branchId, course: { tenantId: req.tenantId! } } }, include: { class: { include: { assignedTeacher: { select: { firstName: true, lastName: true } } } }, chapters: { orderBy: { position: 'asc' }, include: { topics: { orderBy: { position: 'asc' }, include: { logs: { orderBy: { logDate: 'desc' }, take: 1 } } } } } }, orderBy: { updatedAt: 'desc' } }),
     prisma.homework.findMany({ where: { class: { branchId, course: { tenantId: req.tenantId! } } }, include: { class: { include: { assignedTeacher: { select: { firstName: true, lastName: true } } } } }, orderBy: { createdAt: 'desc' }, take: 100 }),
-    prisma.resultDefinition.findMany({ where: { tenantId: req.tenantId!, branchId }, orderBy: { testDate: 'desc' } }),
+    prisma.resultDefinition.findMany({ where: { tenantId: req.tenantId!, branchId }, include: { scores: { select: { publishedAt: true } } }, orderBy: { testDate: 'desc' } }),
     prisma.leave.findMany({ where: { tenantId: req.tenantId!, branchId, user: { userRoles: { some: { role: { name: 'Teacher' } } } } }, include: { user: { select: { firstName: true, lastName: true } } }, orderBy: { createdAt: 'desc' }, take: 100 }),
-    prisma.class.findMany({ where: { branchId, course: { tenantId: req.tenantId! }, teacherId: { not: null } }, include: { course: { select: { name: true } }, assignedTeacher: { select: { firstName: true, lastName: true } } }, orderBy: { name: 'asc' } }),
+    prisma.class.findMany({ where: { branchId, archivedAt: null, course: { tenantId: req.tenantId! }, teacherId: { not: null } }, include: { course: { select: { name: true } }, assignedTeacher: { select: { firstName: true, lastName: true } } }, orderBy: { name: 'asc' } }),
     prisma.user.findMany({
       where: { tenantId: req.tenantId!, userRoles: { some: { branchId, role: { name: 'Teacher' } } } },
       select: {
         id: true, firstName: true, lastName: true, email: true, phone: true, status: true, image: true, createdAt: true,
         staffRecord: { select: { joiningDate: true, designation: true, contractType: true, salaryStructure: true, payrolls: { orderBy: [{ year: 'desc' }, { month: 'desc' }], take: 6 } } },
-        assignedClasses: { where: { branchId }, select: { id: true, name: true, schedule: true, course: { select: { name: true } }, _count: { select: { enrollments: true } } }, orderBy: { name: 'asc' } },
+        assignedClasses: { where: { branchId, archivedAt: null }, select: { id: true, name: true, schedule: true, course: { select: { name: true } }, _count: { select: { enrollments: true } } }, orderBy: { name: 'asc' } },
         teacherAttendance: { where: { branchId, timestamp: { gte: attendanceSince } }, select: { stampType: true, timestamp: true }, orderBy: { timestamp: 'desc' } },
       },
       orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
     }),
   ]);
-  return res.json({ branches, selectedBranch: branches.find((branch) => branch.id === branchId), date: start.toISOString(), attendance: attendance.map((row) => ({ id: row.id, studentName: `${row.student.user.firstName} ${row.student.user.lastName}`.trim(), className: row.class.name, subject: row.class.course.name, teacherName: row.class.assignedTeacher ? `${row.class.assignedTeacher.firstName} ${row.class.assignedTeacher.lastName}`.trim() : 'Unassigned', status: row.status })), syllabi, homework, resultDefinitions, leaves, classes, teachers });
+  return res.json({ branches, selectedBranch: branches.find((branch) => branch.id === branchId), date: start.toISOString(), attendance: attendance.map((row) => ({ id: row.id, studentName: `${row.student.user.firstName} ${row.student.user.lastName}`.trim(), className: row.class.name, subject: row.class.course.name, teacherName: row.class.assignedTeacher ? `${row.class.assignedTeacher.firstName} ${row.class.assignedTeacher.lastName}`.trim() : 'Unassigned', status: row.status })), syllabi, homework, resultDefinitions: resultDefinitions.map(({ scores, ...definition }) => ({ ...definition, scoreCount: scores.length, draftCount: scores.filter((score) => !score.publishedAt).length, publishedCount: scores.filter((score) => score.publishedAt).length })), leaves, classes, teachers: teachers.map((teacher) => ({ ...teacher, assignedClasses: teacher.assignedClasses.map((klass) => ({ ...klass, schedule: normalizeSchedule(klass.schedule) })) })) });
 });
 
 router.post('/result-definitions', async (req: TenantRequest, res: Response) => {
-  const { branchId, classId } = req.body; const title = String(req.body?.title || '').trim(); const subject = String(req.body?.subject || '').trim(); const testDate = new Date(req.body?.testDate);
+  const { branchId, classId } = req.body; const title = String(req.body?.title || '').trim(); const testDate = new Date(req.body?.testDate);
   if (!branchAllowed(req, branchId, 'manage_branch_calendar')) return res.status(403).json({ error: 'You cannot create results for this branch.' });
-  if (!classId || !title || !subject || Number.isNaN(testDate.getTime())) return res.status(400).json({ error: 'Class, result title, subject, and test date are required.' });
-  const klass = await prisma.class.findFirst({ where: { id: classId, branchId, course: { tenantId: req.tenantId! } } }); if (!klass) return res.status(404).json({ error: 'Class not found in this branch.' });
-  const definition = await prisma.resultDefinition.create({ data: { tenantId: req.tenantId!, branchId, classId, createdBy: req.user!.id, title, subject, testDate } });
+  if (!classId || !title || Number.isNaN(testDate.getTime())) return res.status(400).json({ error: 'Class, result title, and test date are required.' });
+  const klass = await prisma.class.findFirst({ where: { id: classId, branchId, archivedAt: null, course: { tenantId: req.tenantId! } }, include: { course: { select: { name: true } } } }); if (!klass) return res.status(404).json({ error: 'Active class not found in this branch.' });
+  const definition = await prisma.resultDefinition.create({ data: { tenantId: req.tenantId!, branchId, classId, createdBy: req.user!.id, title, subject: klass.course.name, testDate } });
   return res.status(201).json({ message: 'Result created and made available to the assigned teacher.', definition });
+});
+
+async function loadManagedResult(req: TenantRequest, resultId: string) {
+  const definition = await prisma.resultDefinition.findFirst({
+    where: { id: resultId, tenantId: req.tenantId! },
+    include: {
+      class: {
+        include: {
+          branch: { select: { id: true, name: true } },
+          course: { include: { grade: { select: { id: true, name: true } } } },
+          enrollments: {
+            where: { status: { in: ['ACTIVE', 'BLOCKED'] } },
+            include: { student: { include: { user: { select: { firstName: true, lastName: true } } } } },
+            orderBy: { student: { user: { firstName: 'asc' } } },
+          },
+        },
+      },
+      scores: { include: { student: { include: { user: { select: { firstName: true, lastName: true } } } }, recorder: { select: { firstName: true, lastName: true } } } },
+    },
+  });
+  if (!definition || !branchAllowed(req, definition.branchId, 'manage_branch_calendar')) return null;
+  return definition;
+}
+
+router.get('/result-definitions/:id/template', async (req: TenantRequest, res: Response) => {
+  const definition = await loadManagedResult(req, req.params.id);
+  if (!definition) return res.status(404).json({ error: 'Result event not found in a branch you manage.' });
+  return res.json({
+    filename: `${definition.title}-${definition.class.name}-${definition.subject}`.replace(/[^A-Za-z0-9_-]+/g, '-').toLowerCase() + '.csv',
+    columns: ['student_id', 'admission_number', 'student_name', 'score', 'remarks'],
+    event: { id: definition.id, title: definition.title, subject: definition.subject, testDate: definition.testDate, className: definition.class.name, gradeName: definition.class.course.grade?.name ?? 'Ungraded', branchName: definition.class.branch.name },
+    rows: definition.class.enrollments.map((entry) => ({
+      student_id: entry.student.id,
+      admission_number: entry.student.admissionNumber ?? '',
+      student_name: `${entry.student.user.firstName} ${entry.student.user.lastName}`.trim(),
+      score: '',
+      remarks: '',
+    })),
+  });
+});
+
+router.post('/result-definitions/:id/import', async (req: TenantRequest, res: Response) => {
+  const definition = await loadManagedResult(req, req.params.id);
+  if (!definition) return res.status(404).json({ error: 'Result event not found in a branch you manage.' });
+  if (!definition.isOpen) return res.status(409).json({ error: 'Mark changes are paused for this event. Allow changes before uploading another file.' });
+  const maximum = Number(req.body?.maximum);
+  const passMarks = Number(req.body?.passMarks);
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  if (!Number.isFinite(maximum) || maximum <= 0 || maximum > 10_000 || !Number.isFinite(passMarks) || passMarks < 0 || passMarks > maximum) {
+    return res.status(400).json({ error: 'Full marks and pass marks must be valid, and pass marks cannot exceed full marks.' });
+  }
+  if (!rows.length || rows.length > 500) return res.status(400).json({ error: 'Upload between 1 and 500 student rows.' });
+  const enrolledIds = new Set(definition.class.enrollments.map((entry) => entry.studentId));
+  const normalized: Array<{ row: number; studentId: string; score: number }> = rows.map((row: any, index: number) => ({ row: index + 2, studentId: String(row?.studentId || '').trim(), score: Number(row?.score) }));
+  const duplicateIds = normalized.filter((row: { studentId: string }, index: number) => normalized.findIndex((candidate: { studentId: string }) => candidate.studentId === row.studentId) !== index).map((row: { studentId: string }) => row.studentId);
+  if (duplicateIds.length) return res.status(422).json({ error: `Duplicate student IDs: ${[...new Set(duplicateIds)].join(', ')}` });
+  const invalid = normalized.filter((row) => !enrolledIds.has(row.studentId) || !Number.isFinite(row.score) || row.score < 0 || row.score > maximum);
+  if (invalid.length) return res.status(422).json({ error: `Invalid student or score on CSV row${invalid.length === 1 ? '' : 's'} ${invalid.map((row) => row.row).join(', ')}.` });
+  const publishedIds = new Set(definition.scores.filter((score) => score.publishedAt).map((score) => score.studentId));
+  const locked = normalized.filter((row) => publishedIds.has(row.studentId));
+  if (locked.length) return res.status(409).json({ error: `Published marks are locked. Remove student${locked.length === 1 ? '' : 's'} ${locked.map((row) => row.studentId).join(', ')} from this upload.` });
+  const sorted = normalized.map((row) => row.score).sort((a, b) => a - b);
+  await prisma.$transaction(normalized.map((row) => prisma.studentScore.upsert({
+    where: { resultDefinitionId_studentId: { resultDefinitionId: definition.id, studentId: row.studentId } },
+    create: { tenantId: req.tenantId!, studentId: row.studentId, recordedBy: req.user!.id, resultDefinitionId: definition.id, subject: definition.subject, assessment: definition.title, score: row.score, maximum, passMarks, percentile: Math.round((sorted.filter((value) => value <= row.score).length / sorted.length) * 10000) / 100, testDate: definition.testDate },
+    update: { recordedBy: req.user!.id, score: row.score, maximum, passMarks, percentile: Math.round((sorted.filter((value) => value <= row.score).length / sorted.length) * 10000) / 100, publishedAt: null },
+  })));
+  return res.json({ message: `${normalized.length} result rows validated and saved as drafts.`, imported: normalized.length });
+});
+
+router.get('/result-definitions/:id/report', async (req: TenantRequest, res: Response) => {
+  const definition = await loadManagedResult(req, req.params.id);
+  if (!definition) return res.status(404).json({ error: 'Result event not found in a branch you manage.' });
+  const tenant = await prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { name: true } });
+  return res.json({
+    institutionName: tenant?.name ?? 'Tuition Management System',
+    event: { id: definition.id, title: definition.title, subject: definition.subject, testDate: definition.testDate, className: definition.class.name, gradeName: definition.class.course.grade?.name ?? 'Ungraded', branchName: definition.class.branch.name },
+    results: definition.scores.map((score) => ({ id: score.id, studentId: score.studentId, admissionNumber: definition.class.enrollments.find((entry) => entry.studentId === score.studentId)?.student.admissionNumber ?? '', studentName: `${score.student.user.firstName} ${score.student.user.lastName}`.trim(), teacherName: `${score.recorder.firstName} ${score.recorder.lastName}`.trim(), score: Number(score.score), maximum: Number(score.maximum), passMarks: Number(score.passMarks ?? 0), percentile: Number(score.percentile ?? 0), resultSheetUrl: score.resultSheetUrl, published: Boolean(score.publishedAt) })).sort((a, b) => a.studentName.localeCompare(b.studentName)),
+  });
+});
+
+router.put('/result-definitions/:id', async (req: TenantRequest, res: Response) => {
+  const definition = await loadManagedResult(req, req.params.id);
+  if (!definition) return res.status(404).json({ error: 'Result event not found in a branch you manage.' });
+  const title = req.body?.title === undefined ? definition.title : String(req.body.title).trim();
+  const testDate = req.body?.testDate === undefined ? definition.testDate : new Date(req.body.testDate);
+  const isOpen = req.body?.isOpen === undefined ? definition.isOpen : req.body.isOpen;
+  if (!title || title.length > 160 || Number.isNaN(testDate.getTime()) || typeof isOpen !== 'boolean') return res.status(400).json({ error: 'Use a valid title, test date, and open status.' });
+  const updated = await prisma.resultDefinition.update({ where: { id: definition.id }, data: { title, testDate, isOpen } });
+  return res.json({ message: 'Result event updated.', definition: updated });
+});
+
+router.post('/result-definitions/:id/publish', async (req: TenantRequest, res: Response) => {
+  const definition = await loadManagedResult(req, req.params.id);
+  if (!definition) return res.status(404).json({ error: 'Result event not found in a branch you manage.' });
+  if (!definition.scores.length) return res.status(409).json({ error: 'Upload at least one result before publishing.' });
+  const publishedAt = new Date();
+  const update = await prisma.studentScore.updateMany({ where: { tenantId: req.tenantId!, resultDefinitionId: definition.id, publishedAt: null }, data: { publishedAt } });
+  if (update.count === 0) return res.status(409).json({ error: 'No unpublished result drafts are available. Upload or update result rows before publishing.' });
+  return res.json({ message: `${update.count} result${update.count === 1 ? '' : 's'} published.`, published: update.count });
+});
+
+router.delete('/result-definitions/:id', async (req: TenantRequest, res: Response) => {
+  const definition = await loadManagedResult(req, req.params.id);
+  if (!definition) return res.status(404).json({ error: 'Result event not found in a branch you manage.' });
+  if (definition.scores.some((score) => score.publishedAt)) return res.status(409).json({ error: 'Published result events cannot be deleted. Close the event to prevent further entry.' });
+  await prisma.$transaction([prisma.studentScore.deleteMany({ where: { tenantId: req.tenantId!, resultDefinitionId: definition.id } }), prisma.resultDefinition.delete({ where: { id: definition.id } })]);
+  return res.status(204).send();
 });
 
 router.post('/fee-overrides', async (req: TenantRequest, res: Response) => {
@@ -153,33 +262,6 @@ router.get('/students/:studentId/fee-history', async (req: TenantRequest, res: R
   if (!branchAllowed(req, branchId, 'manage_student_exceptions')) return res.status(403).json({ error: 'You cannot view fee history for this branch.' });
   const history = await prisma.feeAccessOverride.findMany({ where: { tenantId: req.tenantId!, branchId, studentId: req.params.studentId }, orderBy: { createdAt: 'desc' } });
   return res.json({ history });
-});
-
-router.get('/social-drafts', async (req: TenantRequest, res: Response) => {
-  const branchId = String(req.query.branchId || '');
-  if (!branchAllowed(req, branchId, 'draft_social_media')) return res.status(403).json({ error: 'You cannot view drafts for this branch.' });
-  return res.json({ drafts: await prisma.branchSocialDraft.findMany({ where: { tenantId: req.tenantId!, branchId, authorId: req.user!.id }, orderBy: { updatedAt: 'desc' } }) });
-});
-
-router.post('/social-drafts', async (req: TenantRequest, res: Response) => {
-  const { branchId, platforms, mediaUrls, proposedTime } = req.body; const text = String(req.body.text || '').trim();
-  if (!branchAllowed(req, branchId, 'draft_social_media')) return res.status(403).json({ error: 'You cannot draft posts for this branch.' });
-  if (!text || !Array.isArray(platforms) || platforms.length === 0) return res.status(400).json({ error: 'Post text and at least one platform are required.' });
-  const draft = await prisma.branchSocialDraft.create({ data: { tenantId: req.tenantId!, branchId, authorId: req.user!.id, text, platforms, mediaUrls: Array.isArray(mediaUrls) ? mediaUrls : [], proposedTime: proposedTime ? new Date(proposedTime) : null, status: 'PENDING_APPROVAL' } });
-  return res.status(201).json({ message: 'Draft submitted to Tenant Admin. It has not been published.', draft });
-});
-
-router.put('/social-drafts/:id', async (req: TenantRequest, res: Response) => {
-  const existing = await prisma.branchSocialDraft.findFirst({ where: { id: req.params.id, tenantId: req.tenantId!, authorId: req.user!.id, status: { in: ['DRAFT', 'PENDING_APPROVAL'] } } });
-  if (!existing) return res.status(409).json({ error: 'Only your own unreviewed drafts can be edited.' });
-  const draft = await prisma.branchSocialDraft.update({ where: { id: existing.id }, data: { text: String(req.body.text || existing.text).trim(), platforms: Array.isArray(req.body.platforms) ? req.body.platforms : existing.platforms, proposedTime: req.body.proposedTime ? new Date(req.body.proposedTime) : existing.proposedTime } });
-  return res.json({ message: 'Draft updated.', draft });
-});
-
-router.delete('/social-drafts/:id', async (req: TenantRequest, res: Response) => {
-  const result = await prisma.branchSocialDraft.deleteMany({ where: { id: req.params.id, tenantId: req.tenantId!, authorId: req.user!.id, status: { in: ['DRAFT', 'PENDING_APPROVAL'] } } });
-  if (!result.count) return res.status(409).json({ error: 'Only your own unreviewed drafts can be deleted.' });
-  return res.status(204).send();
 });
 
 export default router;

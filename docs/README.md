@@ -18,6 +18,7 @@ docs/
 
 ## Quick Links
 
+- [Nepali Academic Calendar Requirements](nepali-calendar-requirements.md)
 - [Architecture Overview](architecture/README.md)
 - [Adaptive UI Guidelines](adaptive-ui/README.md)
 - [API Documentation](api/README.md)

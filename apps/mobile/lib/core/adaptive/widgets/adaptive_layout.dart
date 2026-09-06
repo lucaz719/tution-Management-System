@@ -40,6 +40,7 @@ class AdaptiveScaffold extends StatelessWidget {
     required this.destinations,
     required this.body,
     this.sidebar,
+    this.appBar,
   });
 
   final int selectedIndex;
@@ -47,6 +48,7 @@ class AdaptiveScaffold extends StatelessWidget {
   final List<AdaptiveNavigationDestination> destinations;
   final Widget Function(BuildContext context, int index) body;
   final Widget? sidebar;
+  final PreferredSizeWidget? appBar;
 
   @override
   Widget build(BuildContext context) {
@@ -56,6 +58,7 @@ class AdaptiveScaffold extends StatelessWidget {
 
     if (isCompact) {
       return Scaffold(
+        appBar: appBar,
         body: content,
         bottomNavigationBar: NavigationBar(
           selectedIndex: selectedIndex,
@@ -73,6 +76,7 @@ class AdaptiveScaffold extends StatelessWidget {
     }
 
     return Scaffold(
+      appBar: appBar,
       body: Row(
         children: [
           NavigationRail(

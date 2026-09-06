@@ -1,315 +1,139 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { useToast } from '../components/ui/Toast';
 import { api } from '../services/api';
 
-interface Grade {
-  id: string;
-  name: string;
-  sortOrder: number;
-  monthlyFee: number;
-  studentCount: number;
-  courseCount: number;
-}
-
-interface GradeDetail {
-  id: string;
-  name: string;
-  studentCount: number;
-  courseCount: number;
-  teacherCount: number;
-  students: Array<{ studentId: string; userId: string; name: string; email: string }>;
-  courses: Array<{ id: string; name: string; branchName: string; classCount: number; enrollmentCount: number }>;
-  teachers: Array<{ id: string; name: string }>;
-}
+type BillingMode = 'GRADE' | 'SUBJECT';
+interface Grade { id: string; name: string; sortOrder: number; monthlyFee: number; billingMode: BillingMode; studentCount: number; courseCount: number }
+interface GradeDetail { courses: Array<{ id: string; name: string; branchName: string; enrollmentCount: number }>; teachers: Array<{ id: string; name: string }> }
+const money = (value: number) => `NPR ${value.toLocaleString('en-NP')}`;
+const standardBillingMode = (name: string): BillingMode | null => {
+  if (/^UKG$/i.test(name.trim())) return 'GRADE';
+  const match = name.trim().match(/^(?:Class|Grade)\s*(\d{1,2})$/i);
+  const level = Number(match?.[1]);
+  return level >= 1 && level <= 10 ? 'GRADE' : level === 11 || level === 12 ? 'SUBJECT' : null;
+};
 
 export function AcademicGrades() {
   const { showToast } = useToast();
   const [grades, setGrades] = useState<Grade[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState('');
-  const [busy, setBusy] = useState(false);
-
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [busyId, setBusyId] = useState('');
   const [newName, setNewName] = useState('');
+  const [expandedId, setExpandedId] = useState('');
   const [editingId, setEditingId] = useState('');
+  const [deleteId, setDeleteId] = useState('');
   const [editName, setEditName] = useState('');
   const [editFee, setEditFee] = useState('');
+  const [editMode, setEditMode] = useState<BillingMode>('GRADE');
   const [detail, setDetail] = useState<GradeDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
-  const openDetail = async (grade: Grade) => {
-    setDetailLoading(true);
-    setDetail({ id: grade.id, name: grade.name, studentCount: grade.studentCount, courseCount: grade.courseCount, teacherCount: 0, students: [], courses: [], teachers: [] });
-    try {
-      setDetail((await api.grades.getDetail(grade.id)) as GradeDetail);
-    } catch (error: unknown) {
-      showToast(error instanceof Error ? error.message : 'Failed to load grade detail.', 'error');
-      setDetail(null);
-    } finally {
-      setDetailLoading(false);
-    }
+  const load = async () => {
+    setLoading(true); setError('');
+    try { setGrades((await api.grades.list()) as Grade[]); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Grades could not be loaded.'); }
+    finally { setLoading(false); }
   };
+  useEffect(() => { void load(); }, []);
 
-  const loadGrades = async () => {
-    setIsLoading(true);
-    setErrorMsg('');
-    try {
-      setGrades((await api.grades.list()) as Grade[]);
-    } catch (error: unknown) {
-      setErrorMsg(error instanceof Error ? error.message : 'Failed to load grades.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void loadGrades();
-  }, []);
+  const totals = useMemo(() => ({
+    students: grades.reduce((sum, grade) => sum + grade.studentCount, 0),
+    packages: grades.filter((grade) => (standardBillingMode(grade.name) ?? grade.billingMode) === 'GRADE').length,
+    subjects: grades.filter((grade) => (standardBillingMode(grade.name) ?? grade.billingMode) === 'SUBJECT').length,
+  }), [grades]);
 
   const seedDefaults = async () => {
-    setBusy(true);
-    try {
-      const r = await api.grades.seedDefaults();
-      showToast(r.message, r.created > 0 ? 'success' : 'info');
-      await loadGrades();
-    } catch (error: unknown) {
-      showToast(error instanceof Error ? error.message : 'Failed to add default grades.', 'error');
-    } finally {
-      setBusy(false);
-    }
+    setBusyId('seed');
+    try { const result = await api.grades.seedDefaults(); showToast(result.message, result.created ? 'success' : 'info'); await load(); }
+    catch (cause) { showToast(cause instanceof Error ? cause.message : 'Standard grades could not be added.', 'error'); }
+    finally { setBusyId(''); }
   };
 
-  const addGrade = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!newName.trim()) return;
-    setBusy(true);
+  const addGrade = async (event: FormEvent) => {
+    event.preventDefault(); const name = newName.trim(); if (!name) return;
+    setBusyId('new');
     try {
-      await api.grades.create(newName.trim(), grades.length + 90);
-      setNewName('');
-      showToast('Grade added.', 'success');
-      await loadGrades();
-    } catch (error: unknown) {
-      showToast(error instanceof Error ? error.message : 'Failed to add grade.', 'error');
-    } finally {
-      setBusy(false);
-    }
+      await api.grades.create(name, grades.length, 0, /(?:11|12)$/.test(name) ? 'SUBJECT' : 'GRADE');
+      setNewName(''); showToast(`${name} added. Configure its billing below.`, 'success'); await load();
+    } catch (cause) { showToast(cause instanceof Error ? cause.message : 'Grade could not be added.', 'error'); }
+    finally { setBusyId(''); }
   };
 
-  const saveEdit = async (id: string) => {
-    if (!editName.trim()) return;
-    setBusy(true);
-    try {
-      await api.grades.update(id, { name: editName.trim(), monthlyFee: Number(editFee) || 0 });
-      setEditingId('');
-      showToast('Grade updated.', 'success');
-      await loadGrades();
-    } catch (error: unknown) {
-      showToast(error instanceof Error ? error.message : 'Failed to rename grade.', 'error');
-    } finally {
-      setBusy(false);
-    }
+  const toggle = async (grade: Grade) => {
+    if (expandedId === grade.id) { setExpandedId(''); setEditingId(''); setDeleteId(''); return; }
+    setExpandedId(grade.id); setEditingId(''); setDeleteId(''); setDetail(null); setDetailLoading(true);
+    try { setDetail((await api.grades.getDetail(grade.id)) as GradeDetail); }
+    catch (cause) { showToast(cause instanceof Error ? cause.message : 'Grade details could not be loaded.', 'error'); }
+    finally { setDetailLoading(false); }
   };
 
-  const removeGrade = async (grade: Grade) => {
-    if (!window.confirm(`Delete "${grade.name}"?`)) return;
-    setBusy(true);
-    try {
-      await api.grades.remove(grade.id);
-      showToast('Grade deleted.', 'success');
-      await loadGrades();
-    } catch (error: unknown) {
-      showToast(error instanceof Error ? error.message : 'Failed to delete grade.', 'error');
-    } finally {
-      setBusy(false);
-    }
+  const beginEdit = (grade: Grade) => {
+    setEditingId(grade.id); setDeleteId(''); setEditName(grade.name); setEditFee(String(grade.monthlyFee)); setEditMode(standardBillingMode(grade.name) ?? grade.billingMode);
   };
 
-  return (
-    <div className="people-page">
-      <div className="people-header">
-        <div>
-          <h1 className="people-title">Grades</h1>
-          <p className="people-subtitle">Grade levels students are assigned to (Nursery … Class 12).</p>
-        </div>
-        {grades.length === 0 ? (
-          <Button onClick={() => void seedDefaults()} disabled={busy} style={{ height: '42px' }}>
-            <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>auto_awesome</span>
-            Add Standard Grades
-          </Button>
-        ) : null}
-      </div>
+  const save = async (grade: Grade) => {
+    const fee = Number(editFee);
+    if (!editName.trim()) return showToast('Grade name is required.', 'error');
+    if (!Number.isFinite(fee) || fee < 0) return showToast('Enter a valid monthly fee.', 'error');
+    setBusyId(grade.id);
+    try {
+      const resolvedMode = standardBillingMode(editName.trim()) ?? editMode;
+      await api.grades.update(grade.id, { name: editName.trim(), monthlyFee: resolvedMode === 'GRADE' ? fee : 0, billingMode: resolvedMode });
+      setEditingId(''); showToast('Billing settings saved.', 'success'); await load();
+    } catch (cause) { showToast(cause instanceof Error ? cause.message : 'Billing settings could not be saved.', 'error'); }
+    finally { setBusyId(''); }
+  };
 
-      {errorMsg ? <StatusBadge variant="error">{errorMsg}</StatusBadge> : null}
+  const remove = async (grade: Grade) => {
+    setBusyId(grade.id);
+    try { await api.grades.remove(grade.id); setExpandedId(''); setDeleteId(''); showToast(`${grade.name} deleted.`, 'success'); await load(); }
+    catch (cause) { showToast(cause instanceof Error ? cause.message : 'Grade could not be deleted.', 'error'); }
+    finally { setBusyId(''); }
+  };
 
-      <form onSubmit={addGrade} style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '12px 14px', marginBottom: '22px' }}>
-        <input
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          placeholder="Add a grade (e.g. Class 11)"
-          style={{ flex: 1, minWidth: '200px', padding: '10px 16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', background: 'var(--bg-background)', color: 'var(--text-foreground)', fontFamily: 'inherit', fontSize: '14px', outline: 'none' }}
-        />
-        <Button type="submit" disabled={busy || !newName.trim()} style={{ height: '42px' }}>
-          <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>add</span>
-          Add Grade
-        </Button>
-        {grades.length > 0 ? (
-          <Button type="button" variant="outline" onClick={() => void seedDefaults()} disabled={busy} style={{ height: '42px' }}>
-            Fill Standard Set
-          </Button>
-        ) : null}
-      </form>
+  return <div className="people-page grade-settings-page">
+    <header className="people-header">
+      <div><h1 className="people-title">Grade billing</h1><p className="people-subtitle">UKG–Class 10 use one monthly package. Class 11–12 charge for each selected subject.</p></div>
+      <Button variant="outline" onClick={() => void seedDefaults()} disabled={Boolean(busyId)}><span className="material-symbols-outlined" aria-hidden="true">auto_awesome</span>{busyId === 'seed' ? 'Adding…' : 'Fill standard grades'}</Button>
+    </header>
 
-      <div className="people-table-wrap">
-        <div className="people-table-scroll">
-          <table className="people-table">
-            <thead>
-              <tr>
-                <th style={{ width: '28%' }}>Grade</th>
-                <th style={{ width: '20%' }}>Monthly Tuition</th>
-                <th style={{ textAlign: 'center', width: '13%' }}>Students</th>
-                <th style={{ textAlign: 'center', width: '13%' }}>Courses</th>
-                <th style={{ textAlign: 'right', width: '26%' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {grades.length === 0 ? (
-                <tr>
-                  <td colSpan={5}>
-                    <div className="people-empty">
-                      <span className="material-symbols-outlined">stairs</span>
-                      {isLoading ? 'Loading grades…' : 'No grades yet. Click "Add Standard Grades" for Nursery through Class 12.'}
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                grades.map((grade) => (
-                  <tr key={grade.id}>
-                    <td>
-                      {editingId === grade.id ? (
-                        <input
-                          value={editName}
-                          onChange={(e) => setEditName(e.target.value)}
-                          autoFocus
-                          style={{ padding: '8px 12px', borderRadius: 'var(--radius-md)', border: '1.5px solid var(--brand)', background: 'var(--bg-background)', color: 'var(--text-foreground)', fontFamily: 'inherit', fontSize: '14px', outline: 'none' }}
-                        />
-                      ) : (
-                        <button type="button" onClick={() => void openDetail(grade)} style={{ fontSize: '14.5px', fontWeight: 700, color: 'var(--color-primary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>
-                          {grade.name}
-                        </button>
-                      )}
-                    </td>
-                    <td>
-                      {editingId === grade.id ? (
-                        <input value={editFee} onChange={(e) => setEditFee(e.target.value)} inputMode="numeric" placeholder="0"
-                          style={{ width: '110px', padding: '8px 12px', borderRadius: 'var(--radius-md)', border: '1.5px solid var(--brand)', background: 'var(--bg-background)', color: 'var(--text-foreground)', fontFamily: 'inherit', fontSize: '14px', outline: 'none' }} />
-                      ) : (
-                        <span style={{ fontSize: '14px', fontWeight: 700 }}>NPR {grade.monthlyFee.toLocaleString()}<span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 500 }}>/mo</span></span>
-                      )}
-                    </td>
-                    <td style={{ textAlign: 'center' }}><StatusBadge variant={grade.studentCount > 0 ? 'info' : 'success'}>{grade.studentCount}</StatusBadge></td>
-                    <td style={{ textAlign: 'center' }}><StatusBadge variant="gold">{grade.courseCount}</StatusBadge></td>
-                    <td style={{ textAlign: 'right' }}>
-                      <div style={{ display: 'inline-flex', gap: '8px' }}>
-                        {editingId === grade.id ? (
-                          <>
-                            <Button onClick={() => void saveEdit(grade.id)} disabled={busy} style={{ minHeight: '34px', height: '34px', padding: '6px 14px' }}>Save</Button>
-                            <Button variant="outline" onClick={() => setEditingId('')} style={{ minHeight: '34px', height: '34px', padding: '6px 12px' }}>Cancel</Button>
-                          </>
-                        ) : (
-                          <>
-                            <Button variant="outline" onClick={() => { setEditingId(grade.id); setEditName(grade.name); setEditFee(String(grade.monthlyFee)); }} style={{ minHeight: '34px', height: '34px', padding: '6px 12px' }}>
-                              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>edit</span>
-                            </Button>
-                            <Button variant="outline" onClick={() => void removeGrade(grade)} disabled={busy} style={{ minHeight: '34px', height: '34px', padding: '6px 12px', color: 'var(--color-error)', borderColor: 'rgba(230, 57, 70, 0.4)' }}>
-                              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>delete</span>
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+    <section className="grade-summary" aria-label="Grade billing summary">
+      <div><span>Grades</span><strong>{grades.length}</strong></div><div><span>Monthly packages</span><strong>{totals.packages}</strong></div><div><span>Per-subject grades</span><strong>{totals.subjects}</strong></div><div><span>Students</span><strong>{totals.students}</strong></div>
+    </section>
 
-      {detail ? (
-        <>
-          <div className="people-drawer-overlay" onClick={() => setDetail(null)} />
-          <aside className="people-drawer" role="dialog" aria-modal="true">
-            <div className="people-drawer-head">
-              <div>
-                <h2>{detail.name}</h2>
-                <p>{detail.studentCount} student{detail.studentCount === 1 ? '' : 's'} · {detail.courseCount} course{detail.courseCount === 1 ? '' : 's'} · {detail.teacherCount} teacher{detail.teacherCount === 1 ? '' : 's'}</p>
-              </div>
-              <button type="button" className="people-drawer-close" onClick={() => setDetail(null)} aria-label="Close">
-                <span className="material-symbols-outlined">close</span>
-              </button>
-            </div>
-            <div className="people-drawer-body">
-              {detailLoading ? (
-                <p style={{ color: 'var(--text-muted)', fontSize: '14px', textAlign: 'center', padding: '24px 0' }}>Loading…</p>
-              ) : (
-                <>
-                  <div>
-                    <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '10px' }}>Courses ({detail.courses.length})</div>
-                    {detail.courses.length === 0 ? (
-                      <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>No courses assigned to this grade yet.</p>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        {detail.courses.map((c) => (
-                          <div key={c.id} style={{ padding: '12px 14px', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--color-bg)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <div>
-                              <div style={{ fontSize: '13.5px', fontWeight: 700 }}>{c.name}</div>
-                              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{c.branchName}</div>
-                            </div>
-                            <div style={{ display: 'flex', gap: '6px' }}>
-                              <StatusBadge variant="info">{c.classCount} classes</StatusBadge>
-                              <StatusBadge variant="success">{c.enrollmentCount} enrolled</StatusBadge>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+    <form className="grade-add-card" onSubmit={addGrade} aria-busy={busyId === 'new'}>
+      <div><label htmlFor="new-grade-name">Add another grade</label><p>Class 11 and 12 automatically start with per-subject billing.</p></div>
+      <div className="grade-add-controls"><input id="new-grade-name" value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Example: Foundation" autoComplete="off" /><Button type="submit" disabled={Boolean(busyId) || !newName.trim()}><span className="material-symbols-outlined" aria-hidden="true">add</span>Add grade</Button></div>
+    </form>
 
-                  <div>
-                    <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '10px' }}>Teachers ({detail.teachers.length})</div>
-                    {detail.teachers.length === 0 ? (
-                      <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>No teachers assigned to this grade's classes yet.</p>
-                    ) : (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                        {detail.teachers.map((t) => (
-                          <span key={t.id} className="people-role-tag">{t.name}</span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+    {error ? <section className="grade-error" role="alert"><div><strong>Grades could not be loaded</strong><p>{error}</p></div><Button variant="outline" onClick={() => void load()}>Try again</Button></section> : null}
 
-                  <div>
-                    <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '10px' }}>Students ({detail.students.length})</div>
-                    {detail.students.length === 0 ? (
-                      <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>No students in this grade yet.</p>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        {detail.students.map((s) => (
-                          <div key={s.studentId} style={{ padding: '10px 14px', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--color-bg)' }}>
-                            <div style={{ fontSize: '13.5px', fontWeight: 600 }}>{s.name}</div>
-                            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{s.email}</div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          </aside>
-        </>
-      ) : null}
-    </div>
-  );
+    <section className="grade-list" aria-label="Configured grades">
+      {loading ? Array.from({ length: 5 }, (_, index) => <div className="grade-card-skeleton" key={index} />) : null}
+      {!loading && !grades.length ? <div className="people-empty grade-empty"><span className="material-symbols-outlined" aria-hidden="true">stairs</span><strong>No grades configured</strong><p>Add the standard UKG–Class 12 ladder to begin.</p><Button onClick={() => void seedDefaults()}>Add standard grades</Button></div> : null}
+      {!loading && grades.map((grade) => {
+        const expanded = expandedId === grade.id; const editing = editingId === grade.id; const fixedMode = standardBillingMode(grade.name); const subjectBilling = (fixedMode ?? grade.billingMode) === 'SUBJECT';
+        return <article className={`grade-card${expanded ? ' is-expanded' : ''}`} key={grade.id}>
+          <button className="grade-card-summary" type="button" onClick={() => void toggle(grade)} aria-expanded={expanded} aria-controls={`grade-panel-${grade.id}`}>
+            <span className="grade-card-title"><span className="grade-icon material-symbols-outlined" aria-hidden="true">school</span><span><strong>{grade.name}</strong><small>{subjectBilling ? 'Students pay for selected subjects' : 'One monthly tuition package'}</small></span></span>
+            <span className="grade-card-metric"><small>Billing</small><strong className={!subjectBilling && grade.monthlyFee <= 0 ? 'is-warning' : ''}>{subjectBilling ? 'Per subject' : grade.monthlyFee > 0 ? money(grade.monthlyFee) : 'Fee required'}</strong></span><span className="grade-card-metric"><small>Students</small><strong>{grade.studentCount}</strong></span><span className="grade-card-metric"><small>Subjects</small><strong>{grade.courseCount}</strong></span><span className="grade-chevron material-symbols-outlined" aria-hidden="true">expand_more</span>
+          </button>
+          {expanded ? <div className="grade-card-panel" id={`grade-panel-${grade.id}`}>
+            <div className="grade-panel-head"><div><h2>Billing and subjects</h2><p>Set how monthly charges are calculated for this grade.</p></div>{!editing ? <Button variant="outline" onClick={() => beginEdit(grade)}><span className="material-symbols-outlined" aria-hidden="true">edit</span>Edit billing</Button> : null}</div>
+            {editing ? <form className="grade-edit-form" onSubmit={(event) => { event.preventDefault(); void save(grade); }} aria-busy={busyId === grade.id}>
+              <label htmlFor={`grade-name-${grade.id}`}>Grade name<input id={`grade-name-${grade.id}`} value={editName} onChange={(event) => setEditName(event.target.value)} autoComplete="off" /></label>
+              {fixedMode ? <div className="grade-locked-policy"><span className="material-symbols-outlined" aria-hidden="true">lock</span><span><strong>{fixedMode === 'GRADE' ? 'Monthly grade package' : 'Per selected subject'}</strong><small>Fixed institutional billing policy</small></span></div> : <label htmlFor={`grade-mode-${grade.id}`}>Billing method<select id={`grade-mode-${grade.id}`} value={editMode} onChange={(event) => setEditMode(event.target.value as BillingMode)}><option value="GRADE">Monthly grade package</option><option value="SUBJECT">Per selected subject</option></select><small>{editMode === 'GRADE' ? 'All regular subjects are included in one fee.' : 'Monthly total comes from active subject enrolments.'}</small></label>}
+              <label htmlFor={`grade-fee-${grade.id}`}>Monthly package fee (NPR)<input id={`grade-fee-${grade.id}`} value={editFee} onChange={(event) => setEditFee(event.target.value)} inputMode="numeric" pattern="[0-9]*" disabled={(fixedMode ?? editMode) === 'SUBJECT'} /><small>{(fixedMode ?? editMode) === 'SUBJECT' ? 'Set individual prices from Courses.' : 'Regular subjects will not add separate charges.'}</small></label>
+              <div className="grade-form-actions"><Button type="submit" disabled={busyId === grade.id}>{busyId === grade.id ? 'Saving…' : 'Save billing'}</Button><Button type="button" variant="outline" onClick={() => setEditingId('')}>Cancel</Button></div>
+            </form> : <div className={`grade-billing-callout${!subjectBilling && grade.monthlyFee <= 0 ? ' is-warning' : ''}`}><span className="material-symbols-outlined" aria-hidden="true">{subjectBilling ? 'receipt_long' : grade.monthlyFee > 0 ? 'inventory_2' : 'warning'}</span><div><strong>{subjectBilling ? 'Subject billing is active' : grade.monthlyFee > 0 ? `${money(grade.monthlyFee)} per month` : 'Monthly package fee is required'}</strong><p>{subjectBilling ? 'Only selected subjects should appear on each student invoice.' : grade.monthlyFee > 0 ? 'This package covers every regular subject. Activities remain separate.' : 'Set the grade fee before generating monthly invoices. Subject enrolment is not required for package grades.'}</p></div></div>}
+            <div className="grade-detail-grid"><section><h3>Subjects</h3>{detailLoading ? <p>Loading subjects…</p> : detail?.courses.length ? detail.courses.map((course) => <div className="grade-detail-row" key={course.id}><span><strong>{course.name}</strong><small>{course.branchName}</small></span><StatusBadge variant="info">{subjectBilling ? `${course.enrollmentCount} selected` : 'Included'}</StatusBadge></div>) : <p>No subjects are attached yet.</p>}</section><section><h3>Teaching team</h3>{detailLoading ? <p>Loading teachers…</p> : detail?.teachers.length ? detail.teachers.map((teacher) => <div className="grade-detail-row" key={teacher.id}><strong>{teacher.name}</strong></div>) : <p>No teachers are assigned yet.</p>}</section></div>
+            <div className="grade-danger-zone"><div><strong>Delete grade</strong><p>Deletion is blocked while students are assigned.</p></div>{deleteId === grade.id ? <div className="grade-delete-confirm"><span>Delete {grade.name}?</span><Button variant="danger" onClick={() => void remove(grade)} disabled={busyId === grade.id}>{busyId === grade.id ? 'Deleting…' : 'Confirm delete'}</Button><Button variant="outline" onClick={() => setDeleteId('')}>Cancel</Button></div> : <Button variant="outline" onClick={() => setDeleteId(grade.id)}>Delete grade</Button>}</div>
+          </div> : null}
+        </article>;
+      })}
+    </section>
+  </div>;
 }
