@@ -133,6 +133,8 @@ class ParentPortalRepository {
   ParentPortalRepository({Dio? dio}) : _dio = dio ?? ApiClient.instance.dio;
 
   final Dio _dio;
+  int _portalGeneration = 0;
+  bool _disposed = false;
 
   /// Consolidated parent portal path (identity from session cookie).
   static const String portalPath = '/api/parent/portal';
@@ -143,12 +145,20 @@ class ParentPortalRepository {
 
   final List<ParentInvoice> _invoiceCache = [];
 
+  /// Drops session-scoped snapshot data owned by this repository.
+  void dispose() {
+    _disposed = true;
+    _portalGeneration++;
+    _invoiceCache.clear();
+  }
+
   /// Loads the portal snapshot. When [studentId] is given it is sent as a
   /// selector only (`?studentId=`); the server authorizes the link.
   Future<ParentPortal> fetchPortal({
     String? studentId,
     CancelToken? cancelToken,
   }) async {
+    final generation = ++_portalGeneration;
     try {
       final response = await _dio.get<dynamic>(
         portalPath,
@@ -165,9 +175,11 @@ class ParentPortalRepository {
         );
       }
       final portal = ParentPortal.fromJson(body);
-      _invoiceCache
-        ..clear()
-        ..addAll(portal.invoices);
+      if (!_disposed && generation == _portalGeneration) {
+        _invoiceCache
+          ..clear()
+          ..addAll(portal.invoices);
+      }
       return portal;
     } on DioException catch (error) {
       throw ApiException.from(error);

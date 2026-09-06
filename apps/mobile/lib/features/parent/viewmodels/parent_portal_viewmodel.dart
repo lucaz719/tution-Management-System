@@ -12,6 +12,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:tms_mobile/core/network/api_exception.dart';
 import 'package:tms_mobile/core/network/request_cancellation.dart';
+import 'package:tms_mobile/core/providers/auth_provider.dart';
 import 'package:tms_mobile/core/viewmodel/base_viewmodel.dart';
 
 import '../data/parent_portal_repository.dart';
@@ -53,6 +54,7 @@ class ParentPortalState extends ViewModelState {
 
   ParentPortalState copyWith({
     ParentPortal? portal,
+    bool clearPortal = false,
     String? selectedChildId,
     bool? isRefreshing,
     ApiErrorKind? errorKind,
@@ -62,7 +64,7 @@ class ParentPortalState extends ViewModelState {
     bool clearError = false,
   }) {
     return ParentPortalState(
-      portal: portal ?? this.portal,
+      portal: clearPortal ? null : (portal ?? this.portal),
       selectedChildId: selectedChildId ?? this.selectedChildId,
       isRefreshing: isRefreshing ?? this.isRefreshing,
       errorKind: clearErrorKind ? null : (errorKind ?? this.errorKind),
@@ -85,29 +87,38 @@ class ParentPortalViewModel extends BaseViewModel<ParentPortalState> {
 
   final ParentPortalRepository _repository;
   final RequestCanceller _canceller;
+  int _requestGeneration = 0;
+  bool _disposed = false;
 
   ParentPortalRepository get repository => _repository;
 
   Future<void> load() async {
+    final generation = ++_requestGeneration;
+    final studentId = state.selectedChildId;
+    _canceller.cancel('portal', 'Superseded by a newer portal request.');
     state = state.copyWith(
       isLoading: true,
+      isRefreshing: false,
       clearError: true,
       clearErrorKind: true,
     );
     try {
       final portal = await _repository.fetchPortal(
-        studentId: state.selectedChildId,
+        studentId: studentId,
         cancelToken: _canceller.tokenFor('portal'),
       );
+      if (!_isCurrent(generation)) return;
       state = state.copyWith(
         isLoading: false,
         portal: portal,
-        selectedChildId: portal.selected?.id ?? state.selectedChildId,
+        selectedChildId: portal.selected?.id ?? studentId,
         clearError: true,
         clearErrorKind: true,
       );
     } on ApiException catch (error) {
-      if (error.kind == ApiErrorKind.cancelled) return;
+      if (!_isCurrent(generation) || error.kind == ApiErrorKind.cancelled) {
+        return;
+      }
       state = state.copyWith(
         isLoading: false,
         isRefreshing: false,
@@ -115,6 +126,7 @@ class ParentPortalViewModel extends BaseViewModel<ParentPortalState> {
         errorKind: error.kind,
       );
     } catch (error) {
+      if (!_isCurrent(generation)) return;
       state = state.copyWith(
         isLoading: false,
         isRefreshing: false,
@@ -128,37 +140,53 @@ class ParentPortalViewModel extends BaseViewModel<ParentPortalState> {
   /// selector only; the server authorizes the parent link.
   Future<void> selectChild(String childId) async {
     if (childId.isEmpty || childId == state.selectedChildId) return;
-    state = state.copyWith(selectedChildId: childId);
+    state = state.copyWith(
+      selectedChildId: childId,
+      clearPortal: true,
+      isLoading: true,
+      isRefreshing: false,
+      clearError: true,
+      clearErrorKind: true,
+    );
     await load();
   }
 
   Future<void> refresh() async {
     if (state.isRefreshing) return;
+    final generation = ++_requestGeneration;
+    final studentId = state.selectedChildId;
+    _canceller.cancel('portal', 'Superseded by a newer portal request.');
     state = state.copyWith(isRefreshing: true, clearError: true);
     try {
       final portal = await _repository.fetchPortal(
-        studentId: state.selectedChildId,
+        studentId: studentId,
         cancelToken: _canceller.tokenFor('portal'),
       );
+      if (!_isCurrent(generation)) return;
       state = state.copyWith(
+        isLoading: false,
         isRefreshing: false,
         portal: portal,
-        selectedChildId: portal.selected?.id ?? state.selectedChildId,
+        selectedChildId: portal.selected?.id ?? studentId,
         clearError: true,
         clearErrorKind: true,
       );
     } on ApiException catch (error) {
+      if (!_isCurrent(generation)) return;
       if (error.kind == ApiErrorKind.cancelled) {
-        state = state.copyWith(isRefreshing: false);
+        state = state.copyWith(isLoading: false, isRefreshing: false);
         return;
       }
       state = state.copyWith(
+        isLoading: false,
         isRefreshing: false,
         error: error.message,
         errorKind: error.kind,
       );
     } catch (error) {
+      if (!_isCurrent(generation)) return;
       state = state.copyWith(
+        isLoading: false,
         isRefreshing: false,
         error: 'Failed to refresh the parent dashboard: $error',
         clearErrorKind: true,
@@ -166,15 +194,36 @@ class ParentPortalViewModel extends BaseViewModel<ParentPortalState> {
     }
   }
 
+  bool _isCurrent(int generation) =>
+      !_disposed && generation == _requestGeneration;
+
   @override
   void dispose() {
+    _disposed = true;
+    _requestGeneration++;
     _canceller.cancelAll();
+    _repository.dispose();
     super.dispose();
   }
 }
 
-/// Shared provider for the parent portal snapshot.
+String? _authenticatedParentSession(AuthState auth) =>
+    auth.isAuthenticated ? auth.user?.id : null;
+
+/// Session-scoped repository so invoice snapshots cannot cross users.
+final parentPortalRepositoryProvider =
+    Provider.autoDispose<ParentPortalRepository>((ref) {
+  ref.watch(authProvider.select(_authenticatedParentSession));
+  return ParentPortalRepository();
+});
+
+/// Shared only while parent screens are mounted and for one authenticated user.
 final parentPortalProvider =
-    StateNotifierProvider<ParentPortalViewModel, ParentPortalState>(
-  (ref) => ParentPortalViewModel(),
+    StateNotifierProvider.autoDispose<ParentPortalViewModel, ParentPortalState>(
+  (ref) {
+    ref.watch(authProvider.select(_authenticatedParentSession));
+    return ParentPortalViewModel(
+      repository: ref.watch(parentPortalRepositoryProvider),
+    );
+  },
 );

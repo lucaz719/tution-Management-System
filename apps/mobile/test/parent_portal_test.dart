@@ -1,10 +1,15 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tms_mobile/core/network/api_client.dart';
+import 'package:tms_mobile/core/network/api_exception.dart';
+import 'package:tms_mobile/core/providers/auth_provider.dart';
 import 'package:tms_mobile/core/providers/feature_flags_provider.dart';
+import 'package:tms_mobile/features/auth/data/auth_service.dart';
 import 'package:tms_mobile/features/parent/data/parent_portal_repository.dart';
 import 'package:tms_mobile/features/parent/models/parent_portal.dart';
 import 'package:tms_mobile/features/parent/screens/parent_academics_screen.dart';
@@ -16,6 +21,7 @@ import 'package:tms_mobile/features/parent/viewmodels/parent_portal_viewmodel.da
 Map<String, dynamic> _portalJson({
   String selectedId = 'student-1',
   String selectedName = 'API Child One',
+  String invoiceId = 'invoice-api',
 }) =>
     {
       'bookingWindowHours': 36,
@@ -83,7 +89,7 @@ Map<String, dynamic> _portalJson({
       ],
       'invoices': [
         {
-          'id': 'invoice-api',
+          'id': invoiceId,
           'cycle': 'September 2026',
           'dueDate': '20 Sep 2026',
           'state': 'Due soon',
@@ -130,6 +136,72 @@ class _FakeParentPortalRepository extends ParentPortalRepository {
       ),
     );
   }
+}
+
+class _PendingPortalRequest {
+  _PendingPortalRequest(this.studentId, this.cancelToken);
+
+  final String? studentId;
+  final CancelToken? cancelToken;
+  final Completer<ParentPortal> completer = Completer<ParentPortal>();
+}
+
+class _ControlledParentPortalRepository extends ParentPortalRepository {
+  _ControlledParentPortalRepository() : super(dio: Dio());
+
+  final List<_PendingPortalRequest> requests = [];
+
+  @override
+  Future<ParentPortal> fetchPortal({
+    String? studentId,
+    CancelToken? cancelToken,
+  }) {
+    final request = _PendingPortalRequest(studentId, cancelToken);
+    requests.add(request);
+    return request.completer.future;
+  }
+
+  void complete(int index, String selectedId) {
+    requests[index].completer.complete(
+          ParentPortal.fromJson(
+            _portalJson(
+              selectedId: selectedId,
+              selectedName:
+                  selectedId == 'student-2' ? 'API Child Two' : 'API Child One',
+            ),
+          ),
+        );
+  }
+}
+
+class _TestAuthNotifier extends AuthNotifier {
+  _TestAuthNotifier(AuthUser user) : super() {
+    state = AuthState(user: user, isAuthenticated: true, isLoading: false);
+  }
+
+  void authenticate(AuthUser user) {
+    state = AuthState(user: user, isAuthenticated: true, isLoading: false);
+  }
+
+  void logOutLocally() {
+    state = const AuthState(isLoading: false);
+  }
+}
+
+AuthUser _parentUser(String id) => AuthUser(
+      id: id,
+      email: '$id@example.test',
+      firstName: 'Parent',
+      lastName: id,
+      role: 'PARENT',
+      requiresTwoFactor: false,
+    );
+
+Future<_TestAuthNotifier> _settledAuth(String id) async {
+  final auth = _TestAuthNotifier(_parentUser(id));
+  await Future<void>.delayed(const Duration(milliseconds: 20));
+  auth.authenticate(_parentUser(id));
+  return auth;
 }
 
 Future<void> _pumpPortalScreen(
@@ -195,6 +267,89 @@ void main() {
       expect(portal.outstandingTotal, 4250);
       expect(portal.bookingWindowHours, 36);
     });
+
+    test('out-of-order portal responses cannot overwrite the invoice cache',
+        () async {
+      final options = <RequestOptions>[];
+      final handlers = <RequestInterceptorHandler>[];
+      final dio = ApiClient.buildDio(
+        baseUrl: 'https://test.invalid',
+        extraInterceptors: [
+          InterceptorsWrapper(
+            onRequest: (requestOptions, handler) {
+              options.add(requestOptions);
+              handlers.add(handler);
+            },
+          ),
+        ],
+      );
+      final repository = ParentPortalRepository(dio: dio);
+
+      final older = repository.fetchPortal(studentId: 'student-1');
+      final newer = repository.fetchPortal(studentId: 'student-2');
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      handlers[1].resolve(
+        Response<dynamic>(
+          requestOptions: options[1],
+          statusCode: 200,
+          data: _portalJson(
+            selectedId: 'student-2',
+            selectedName: 'API Child Two',
+            invoiceId: 'newer-invoice',
+          ),
+        ),
+      );
+      await newer;
+      handlers[0].resolve(
+        Response<dynamic>(
+          requestOptions: options[0],
+          statusCode: 200,
+          data: _portalJson(invoiceId: 'older-invoice'),
+        ),
+      );
+      await older;
+
+      expect(repository.invoiceDetail('newer-invoice').id, 'newer-invoice');
+      expect(
+        () => repository.invoiceDetail('older-invoice'),
+        throwsA(isA<ApiException>()),
+      );
+    });
+
+    test('response completing after repository disposal cannot restore cache',
+        () async {
+      late RequestOptions options;
+      late RequestInterceptorHandler handler;
+      final dio = ApiClient.buildDio(
+        baseUrl: 'https://test.invalid',
+        extraInterceptors: [
+          InterceptorsWrapper(
+            onRequest: (requestOptions, requestHandler) {
+              options = requestOptions;
+              handler = requestHandler;
+            },
+          ),
+        ],
+      );
+      final repository = ParentPortalRepository(dio: dio);
+
+      final pending = repository.fetchPortal();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      repository.dispose();
+      handler.resolve(
+        Response<dynamic>(
+          requestOptions: options,
+          statusCode: 200,
+          data: _portalJson(invoiceId: 'disposed-invoice'),
+        ),
+      );
+      await pending;
+
+      expect(
+        () => repository.invoiceDetail('disposed-invoice'),
+        throwsA(isA<ApiException>()),
+      );
+    });
   });
 
   test('parent portal provider keeps child selection for the session',
@@ -208,6 +363,8 @@ void main() {
       ],
     );
     addTearDown(container.dispose);
+    final subscription = container.listen(parentPortalProvider, (_, __) {});
+    addTearDown(subscription.close);
 
     await Future<void>.delayed(const Duration(milliseconds: 20));
     await container
@@ -219,6 +376,157 @@ void main() {
     expect(
       container.read(parentPortalProvider).selectedChild?.name,
       'API Child Two',
+    );
+  });
+
+  test('child switch clears old child-scoped snapshot while request is pending',
+      () async {
+    final repository = _ControlledParentPortalRepository();
+    final viewModel = ParentPortalViewModel(repository: repository);
+    addTearDown(viewModel.dispose);
+
+    repository.complete(0, 'student-1');
+    await Future<void>.delayed(Duration.zero);
+
+    final switchFuture = viewModel.selectChild('student-2');
+
+    expect(viewModel.state.selectedChildId, 'student-2');
+    expect(viewModel.state.portal, isNull);
+    expect(viewModel.state.selectedChild, isNull);
+
+    repository.complete(1, 'student-2');
+    await switchFuture;
+  });
+
+  test('newer child request wins when responses complete out of order',
+      () async {
+    final repository = _ControlledParentPortalRepository();
+    final viewModel = ParentPortalViewModel(repository: repository);
+    addTearDown(viewModel.dispose);
+
+    final switchFuture = viewModel.selectChild('student-2');
+    expect(repository.requests, hasLength(2));
+    expect(repository.requests.first.cancelToken?.isCancelled, isTrue);
+
+    repository.complete(1, 'student-2');
+    await switchFuture;
+    repository.complete(0, 'student-1');
+    await Future<void>.delayed(Duration.zero);
+
+    expect(viewModel.state.selectedChildId, 'student-2');
+    expect(viewModel.state.portal?.selected?.id, 'student-2');
+  });
+
+  test('refresh supersedes an overlapping switch without leaving loading stuck',
+      () async {
+    final repository = _ControlledParentPortalRepository();
+    final viewModel = ParentPortalViewModel(repository: repository);
+    addTearDown(viewModel.dispose);
+
+    final switchFuture = viewModel.selectChild('student-2');
+    final refreshFuture = viewModel.refresh();
+    expect(repository.requests, hasLength(3));
+    expect(repository.requests[1].cancelToken?.isCancelled, isTrue);
+
+    repository.complete(2, 'student-2');
+    await refreshFuture;
+    repository.complete(1, 'student-1');
+    await switchFuture;
+    repository.complete(0, 'student-1');
+    await Future<void>.delayed(Duration.zero);
+
+    expect(viewModel.state.isLoading, isFalse);
+    expect(viewModel.state.isRefreshing, isFalse);
+    expect(viewModel.state.selectedChildId, 'student-2');
+    expect(viewModel.state.portal?.selected?.id, 'student-2');
+  });
+
+  test('logout and next login create an empty user-scoped portal repository',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final auth = await _settledAuth('parent-a');
+    final repositories = <String, _ControlledParentPortalRepository>{};
+    final container = ProviderContainer(
+      overrides: [
+        authProvider.overrideWith((ref) => auth),
+        parentPortalRepositoryProvider.overrideWith((ref) {
+          final userId = ref.watch(
+            authProvider.select(
+              (value) => value.isAuthenticated ? value.user?.id : null,
+            ),
+          );
+          return repositories.putIfAbsent(
+            userId ?? 'logged-out',
+            _ControlledParentPortalRepository.new,
+          );
+        }),
+      ],
+    );
+    addTearDown(container.dispose);
+    final subscription = container.listen(parentPortalProvider, (_, __) {});
+    addTearDown(subscription.close);
+
+    repositories['parent-a']!.complete(0, 'student-1');
+    await Future<void>.delayed(Duration.zero);
+    expect(container.read(parentPortalProvider).portal, isNotNull);
+
+    auth.logOutLocally();
+    await Future<void>.delayed(Duration.zero);
+    expect(container.read(parentPortalProvider).portal, isNull);
+
+    auth.authenticate(_parentUser('parent-b'));
+    await Future<void>.delayed(Duration.zero);
+    expect(container.read(parentPortalProvider).portal, isNull);
+    expect(repositories['parent-a'], isNot(same(repositories['parent-b'])));
+    expect(
+      () => repositories['parent-b']!.invoiceDetail('invoice-api'),
+      throwsA(isA<ApiException>()),
+    );
+  });
+
+  test('provider-container disposal cannot retain portal or invoice cache',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    var repositoryCreations = 0;
+    final repositories = <_ControlledParentPortalRepository>[];
+    final authNotifiers = [
+      await _settledAuth('parent-a'),
+      await _settledAuth('parent-a'),
+    ];
+
+    ProviderContainer makeContainer() => ProviderContainer(
+          overrides: [
+            authProvider.overrideWith(
+              (ref) => authNotifiers.removeAt(0),
+            ),
+            parentPortalRepositoryProvider.overrideWith((ref) {
+              repositoryCreations++;
+              final repository = _ControlledParentPortalRepository();
+              repositories.add(repository);
+              return repository;
+            }),
+          ],
+        );
+
+    final first = makeContainer();
+    final firstSubscription = first.listen(parentPortalProvider, (_, __) {});
+    repositories.single.complete(0, 'student-1');
+    await Future<void>.delayed(Duration.zero);
+    expect(first.read(parentPortalProvider).portal, isNotNull);
+    firstSubscription.close();
+    first.dispose();
+
+    final second = makeContainer();
+    addTearDown(second.dispose);
+    final secondSubscription = second.listen(parentPortalProvider, (_, __) {});
+    addTearDown(secondSubscription.close);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(repositoryCreations, 2);
+    expect(second.read(parentPortalProvider).portal, isNull);
+    expect(
+      () => repositories.last.invoiceDetail('invoice-api'),
+      throwsA(isA<ApiException>()),
     );
   });
 
