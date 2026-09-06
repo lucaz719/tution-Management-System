@@ -103,12 +103,12 @@ class AppDatabase extends _$AppDatabase {
 AppDatabase? _registeredDb;
 String? _pendingWipeUserId;
 
-void registerOfflineDatabase(AppDatabase db) {
+Future<void> registerOfflineDatabase(AppDatabase db) async {
   _registeredDb = db;
   final pending = _pendingWipeUserId;
   if (pending != null) {
     _pendingWipeUserId = null;
-    db.clearUserData(pending);
+    await db.clearUserData(pending);
   }
 }
 
