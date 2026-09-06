@@ -12,6 +12,7 @@ import { isInvoiceOverdue, recurringInvoiceType } from '../utils/billing-rules';
 import { createConnectIpsForm, validateAndConfirmConnectIps } from '../utils/connectips';
 import { parsePlainRecord, parseStrictKeys, parseStrictObject, readBoolean, readFiniteNumber, readTrimmedString } from '../utils/request-validation';
 import { activateAdmissionAndSendLogins } from '../utils/admission-logins';
+import { reconcileBranchBillingAccess } from '../services/billing-access';
 import { buildFinancialIntelligence } from '../utils/financial-intelligence';
 import { invoiceTypeLabel } from '../utils/invoice-document';
 import {
@@ -22,6 +23,16 @@ import {
 } from '../services/payroll-service';
 
 const router = Router();
+
+async function deliverPaidAdmission(invoice: { invoiceType: string; tenantId: string; studentId: string }) {
+  if (invoice.invoiceType !== 'ADMISSION') return null;
+  const student = await prisma.student.findFirst({
+    where: { id: invoice.studentId, user: { tenantId: invoice.tenantId } },
+    select: { admissionStatus: true },
+  });
+  if (student?.admissionStatus === 'ACTIVE') return null;
+  return activateAdmissionAndSendLogins(invoice.tenantId, invoice.studentId);
+}
 
 type PaymentSettings = {
   connectIpsEnabled: boolean;
@@ -305,6 +316,10 @@ router.post('/manual-payments/:id/decision', authMiddleware, async (req: TenantR
     if (claimed.count !== 1) throw new Error('Payment was already reviewed.');
     const paid = await tx.invoice.updateMany({ where: { id: attempt.invoiceId, tenantId: req.tenantId!, status: { in: ['UNPAID', 'OVERDUE', 'BLOCKED_OVERRIDE'] } }, data: { status: 'PAID', transactionId: attempt.referenceId, paymentDate: paidAt, ...(admissionTenure ? { billingCycleStart: admissionTenure.start, billingCycleEnd: admissionTenure.end } : {}) } });
     if (paid.count !== 1) throw new Error('Invoice is already paid or unavailable.');
+    if (attempt.invoice.invoiceType === 'ADMISSION') {
+      await tx.student.updateMany({ where: { id: attempt.invoice.studentId, admissionStatus: 'PENDING_PAYMENT' }, data: { admissionStatus: 'READY_FOR_LOGIN' } });
+    }
+    await reconcileBranchBillingAccess(tx, attempt.tenantId, attempt.invoice.studentId, attempt.invoice.branchId, paidAt);
   });
   if (attempt.invoice.invoiceType === 'ADMISSION') await activateAdmissionAndSendLogins(req.tenantId!, attempt.invoice.studentId);
   return res.json({ message: 'Payment approved and invoice marked paid.' });
@@ -955,6 +970,7 @@ router.post(
         });
         if (transition.count !== 1) return null;
         const paid = await tx.invoice.findUniqueOrThrow({ where: { id } });
+        await reconcileBranchBillingAccess(tx, paid.tenantId, paid.studentId, paid.branchId, paidAt);
         if (paid.invoiceType === 'ADMISSION') {
           await tx.student.update({
             where: { id: paid.studentId },
@@ -1327,17 +1343,27 @@ router.post(
         if (!invoice) {
           return res.status(404).json({ error: 'Invoice not found.' });
         }
-        if (invoice.status === 'PAID') {
-          return res.status(200).json({ message: 'Payment was already recorded.', invoiceId: invoiceId.data });
-        }
         if (Number(invoice.netPayable) !== paymentAmount.data) {
           return res.status(422).json({ error: 'Payment amount does not match the invoice.' });
+        }
+        if (invoice.status === 'PAID') {
+          if (invoice.transactionId !== transactionId.data) {
+            return res.status(409).json({ error: 'Invoice was paid using a different transaction.' });
+          }
+          const admissionDelivery = await deliverPaidAdmission(invoice);
+          return res.status(admissionDelivery && !admissionDelivery.delivered ? 503 : 200).json({
+            message: admissionDelivery && !admissionDelivery.delivered
+              ? 'Payment recorded; admission login delivery is pending. Retry this callback.'
+              : 'Payment was already recorded.',
+            invoiceId: invoice.id,
+          });
         }
 
         const confirmed = await prisma.$transaction(async (tx) => {
           const transition = await tx.invoice.updateMany({
             where: {
               id: invoiceId.data,
+              tenantId: invoice.tenantId,
               status: { in: ['UNPAID', 'OVERDUE', 'BLOCKED_OVERRIDE'] },
             },
             data: {
@@ -1348,25 +1374,23 @@ router.post(
           });
           if (transition.count !== 1) return false;
 
-          await tx.enrollment.updateMany({
-            where: { studentId: invoice.studentId, status: 'BLOCKED' },
-            data: { status: 'ACTIVE' },
-          });
+          await reconcileBranchBillingAccess(tx, invoice.tenantId, invoice.studentId, invoice.branchId);
           if (invoice.invoiceType === 'ADMISSION') {
-            await tx.student.update({
-              where: { id: invoice.studentId },
+            await tx.student.updateMany({
+              where: { id: invoice.studentId, admissionStatus: 'PENDING_PAYMENT' },
               data: { admissionStatus: 'READY_FOR_LOGIN' },
             });
           }
           return true;
         });
         if (!confirmed) {
-          return res.status(200).json({ message: 'Payment was already recorded.', invoiceId: invoiceId.data });
+          return res.status(409).json({ error: 'Invoice changed during payment confirmation. Retry this callback.' });
         }
 
-        const admissionDelivery = invoice.invoiceType === 'ADMISSION'
-          ? await activateAdmissionAndSendLogins(req.tenantId!, invoice.studentId)
-          : null;
+        const admissionDelivery = await deliverPaidAdmission(invoice);
+        if (admissionDelivery && !admissionDelivery.delivered) {
+          return res.status(503).json({ error: 'Payment recorded; admission login delivery is pending. Retry this callback.', invoiceId: invoice.id });
+        }
 
         const smsSender = new MockSmsSender();
         await smsSender.sendSms(
@@ -1379,7 +1403,7 @@ router.post(
             ? admissionDelivery.delivered
               ? 'Payment confirmed and admission login IDs were sent by SMS.'
               : 'Payment confirmed, but admission login SMS delivery failed.'
-            : 'Payment confirmed and enrollment unblocked.',
+            : 'Payment confirmed and branch enrollment access reconciled.',
           payment: {
             invoiceId: invoiceId.data,
             transactionId: transactionId.data,

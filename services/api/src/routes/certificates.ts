@@ -238,20 +238,24 @@ router.post(
     if (!canAccessBranch(req.user!, branchId)) {
       return res.status(403).json({ error: 'You may only issue certificates for your assigned branch.' });
     }
-    const [student, template, branch] = await Promise.all([
-      prisma.student.findFirst({ where: { id: studentId, user: { tenantId: req.tenantId! } } }),
-      prisma.certificateTemplate.findFirst({ where: { id: templateId, tenantId: req.tenantId! } }),
-      prisma.branch.findFirst({ where: { id: branchId, tenantId: req.tenantId! } }),
-    ]);
-    if (!student || !template || !branch) {
-      return res.status(404).json({ error: 'Student, template, or branch was not found in your institution.' });
-    }
-
-    // Generate unique verification ID
-    const uniqueHash = Math.random().toString(36).substr(2, 9).toUpperCase();
-    const verificationId = `CERT-2026-${uniqueHash}`;
-
     try {
+      const [student, template, branch] = await Promise.all([
+        prisma.student.findFirst({ where: {
+          id: studentId,
+          user: { tenantId: req.tenantId! },
+          enrollments: { some: { status: { in: ['ACTIVE', 'BLOCKED'] }, class: { branchId } } },
+        } }),
+        prisma.certificateTemplate.findFirst({ where: { id: templateId, tenantId: req.tenantId! } }),
+        prisma.branch.findFirst({ where: { id: branchId, tenantId: req.tenantId! } }),
+      ]);
+      if (!student || !template || !branch) {
+        return res.status(404).json({ error: 'Student, template, or branch was not found, or the student is not enrolled in this branch.' });
+      }
+
+      // Generate unique verification ID
+      const uniqueHash = Math.random().toString(36).substr(2, 9).toUpperCase();
+      const verificationId = `CERT-2026-${uniqueHash}`;
+
       const certificate = await prisma.certificate.create({
         data: {
           certificateId: verificationId,

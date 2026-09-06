@@ -26,10 +26,13 @@ router.post('/student/scores', authMiddleware, hasPermission('manage_grades'), a
       where: {
         id: studentId,
         user: { tenantId: req.tenantId! },
-        enrollments: { some: { class: { teacherId: req.user!.id }, status: { in: ['ACTIVE', 'BLOCKED'] } } },
+        // Admin privileges bypass teaching assignments, never tenant ownership.
+        ...(isTenantAdmin(req.user!) ? {} : {
+          enrollments: { some: { class: { teacherId: req.user!.id }, status: { in: ['ACTIVE', 'BLOCKED'] } } },
+        }),
       },
     });
-    if (!student && !isTenantAdmin(req.user!)) return res.status(403).json({ error: 'You may only score students assigned to your classes.' });
+    if (!student) return res.status(404).json({ error: 'Student not found or not accessible.' });
     const result = await prisma.studentScore.create({
       data: {
         tenantId: req.tenantId!,
@@ -58,6 +61,11 @@ router.post('/student/remarks', authMiddleware, async (req: TenantRequest, res: 
     return res.status(400).json({ error: 'Student, subject, message, and a valid signal are required.' });
   }
   try {
+    const student = await prisma.student.findFirst({
+      where: { id: studentId, user: { tenantId: req.tenantId! } },
+      select: { id: true },
+    });
+    if (!student) return res.status(404).json({ error: 'Student not found.' });
     const enrollment = await prisma.enrollment.findFirst({
       where: { studentId, class: { course: { tenantId: req.tenantId! } }, status: { in: ['ACTIVE', 'BLOCKED'] } },
       include: { class: { select: { branchId: true, teacherId: true } } },

@@ -15,7 +15,7 @@ router.post(
     const { classroomId, itemsCondition, actionRequired, remarks, branchId } = req.body;
     const staffId = req.user!.id;
 
-    if (!classroomId || !itemsCondition || actionRequired === undefined || !branchId) {
+    if (!classroomId || !itemsCondition || typeof actionRequired !== 'boolean' || !branchId) {
       return res.status(400).json({
         error: 'Missing required parameters: classroomId, itemsCondition, actionRequired, branchId.',
       });
@@ -27,16 +27,17 @@ router.post(
     try {
       const branch = await prisma.branch.findFirst({ where: { id: branchId, tenantId: req.tenantId! } });
       if (!branch) return res.status(404).json({ error: 'Branch not found in your institution.' });
-      const defaultAssignee = await prisma.userRole.findFirst({
+      const defaultAssignee = actionRequired ? await prisma.userRole.findFirst({
         where: { branchId, user: { tenantId: req.tenantId! }, role: { name: 'Janitor' } },
         select: { userId: true },
-      });
-      if (!defaultAssignee) {
+      }) : null;
+      if (actionRequired && !defaultAssignee) {
         return res.status(422).json({ error: 'No Janitor is assigned to this branch. Assign one before logging maintenance work.' });
       }
-      const assignedStaffId = defaultAssignee.userId;
-      const tenantPolicy = await prisma.tenant.findUniqueOrThrow({ where: { id: req.tenantId! } });
-      const resourceLog = await prisma.resourceLog.create({
+      const assignedStaffId = defaultAssignee?.userId;
+      const tenantPolicy = actionRequired ? await prisma.tenant.findUniqueOrThrow({ where: { id: req.tenantId! } }) : null;
+      const { resourceLog, maintenanceTask } = await prisma.$transaction(async tx => {
+        const resourceLog = await tx.resourceLog.create({
           data: {
             branchId,
             classroomId,
@@ -47,9 +48,8 @@ router.post(
           },
         });
 
-      let maintenanceTask: any = null;
-      if (actionRequired) {
-        maintenanceTask = await prisma.maintenanceTask.create({
+        const maintenanceTask = actionRequired && assignedStaffId && tenantPolicy
+          ? await tx.maintenanceTask.create({
             data: {
               branchId,
               classroomId,
@@ -58,19 +58,30 @@ router.post(
               status: 'PENDING',
               escalationDaysSnapshot: tenantPolicy.maintenanceEscalationDays,
             },
-          });
+          }) : null;
+        return { resourceLog, maintenanceTask };
+      });
 
-        await MockPushNotificationService.sendPush(
-          assignedStaffId,
-          'New Maintenance Task Auto-Assigned',
-          `Room ${classroomId} requires check. Reason: ${remarks}`
-        );
+      let notificationDelivered = true;
+      if (maintenanceTask && assignedStaffId) {
+        try {
+          await MockPushNotificationService.sendPush(
+            assignedStaffId,
+            'New Maintenance Task Auto-Assigned',
+            `Room ${classroomId} requires check. Reason: ${remarks}`
+          );
+        } catch {
+          // The records have committed. Do not invite a duplicate POST by
+          // reporting a database failure when only notification failed.
+          notificationDelivered = false;
+        }
       }
 
       return res.status(201).json({
         message: 'Resource log successfully registered.',
         resourceLog,
         maintenanceTask,
+        notificationDelivered,
       });
     } catch (error: any) {
       return res.status(500).json({ error: 'Failed to log resource condition.', details: error.message });

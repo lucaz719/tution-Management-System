@@ -397,12 +397,17 @@ model AdmissionLoginDelivery {
   providerMessageId String?
   failureReason     String?
   attemptCount      Int                        @default(0)
+  encryptedPayload  String?
+  leaseToken        String?
+  leaseUntil        DateTime?
+  nextAttemptAt     DateTime                   @default(now())
   lastAttemptAt     DateTime?
   sentAt            DateTime?
   createdAt         DateTime                   @default(now())
   updatedAt         DateTime                   @updatedAt
 
   @@unique([studentId, recipient])
+  @@index([status, nextAttemptAt, leaseUntil])
   @@index([tenantId, status, updatedAt])
 }
 

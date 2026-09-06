@@ -4,6 +4,7 @@ import { calculateDistanceInMeters } from '../utils/geo';
 import { TenantRequest } from '../middleware/tenant';
 import { authMiddleware, hasPermission } from '../middleware/auth';
 import { parseStrictKeys, readFiniteNumber, readTrimmedString } from '../utils/request-validation';
+import { nepalCalendarDate } from '../services/timetable-service';
 
 const router = Router();
 
@@ -82,6 +83,7 @@ router.post(
         where: {
           teacherId,
           dailyUpdateSubmitted: false,
+          date: { lt: nepalCalendarDate() },
           class: { course: { tenantId: req.tenantId! } },
         },
       });

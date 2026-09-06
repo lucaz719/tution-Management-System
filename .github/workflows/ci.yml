@@ -51,6 +51,15 @@ jobs:
       - name: Authorization scope tests
         run: npx ts-node services/api/src/utils/access-control.test.ts
 
+      - name: Phase 1 security regression tests
+        run: npm run test:phase-one-security --workspace=@tms/api
+
+      - name: Phase 2 billing and attendance regression tests
+        run: npm run test:phase-two-billing --workspace=@tms/api
+
+      - name: Phase 3 workflow regression tests
+        run: npm run test:phase-three-workflows --workspace=@tms/api
+
       - name: Secret and fixed-identifier scan
         shell: bash
         run: |
