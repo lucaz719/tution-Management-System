@@ -84,7 +84,6 @@ class _FakeBranchRepository extends BranchPortalRepository {
 
   final BranchDashboard dashboard;
   final List<BranchLeaveRequest> leaves;
-  static const cashMessage = 'Approved within branch allowance.';
   int dashboardCalls = 0;
   int leaveQueueCalls = 0;
 
@@ -117,15 +116,6 @@ class _FakeBranchRepository extends BranchPortalRepository {
       status: approve ? 'APPROVED_LEVEL2' : 'REJECTED',
       remarks: remarks,
     );
-  }
-
-  @override
-  Future<String> approvePettyCashL1({
-    required String id,
-    String? remarks,
-    CancelToken? cancelToken,
-  }) async {
-    return cashMessage;
   }
 }
 
@@ -305,35 +295,6 @@ void main() {
       expect(entries.single.id, 'cash-1');
       expect(entries.single.amount, 2500);
     });
-
-    test('petty-cash L1 approval returns the server message', () async {
-      late RequestOptions captured;
-      final dio = ApiClient.buildDio(
-        baseUrl: 'https://test.invalid',
-        extraInterceptors: [
-          InterceptorsWrapper(
-            onRequest: (options, handler) {
-              captured = options;
-              handler.resolve(Response<dynamic>(
-                requestOptions: options,
-                statusCode: 200,
-                data: {'message': 'Approved within branch allowance.'},
-              ));
-            },
-          ),
-        ],
-      );
-
-      final message = await BranchPortalRepository(dio: dio)
-          .approvePettyCashL1(id: 'cash-1');
-
-      expect(captured.method, 'POST');
-      expect(
-        captured.path,
-        BranchPortalRepository.pettyCashApproveL1Path('cash-1'),
-      );
-      expect(message, 'Approved within branch allowance.');
-    });
   });
 
   group('BranchPortalViewModel', () {
@@ -402,7 +363,7 @@ void main() {
       expect(find.text('Ramesh Karki'), findsOneWidget);
       expect(find.text('Lab supplies'), findsOneWidget);
       expect(find.byKey(const Key('approve-leave-leave-1')), findsOneWidget);
-      expect(find.byKey(const Key('approve-cash-cash-1')), findsOneWidget);
+      expect(find.byKey(const Key('cash-cash-1')), findsOneWidget);
     });
 
     testWidgets('shows an empty state when no branch is managed',

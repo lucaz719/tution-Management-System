@@ -10,7 +10,8 @@
 /// - `GET /api/leaves?level=L1`
 /// - `POST /api/leaves/approve/:leaveId`
 /// - `GET /api/finances/petty-cash`
-/// - `POST /api/finances/petty-cash/approve-l1/:id`
+/// Petty cash is read-only here: funding decisions are tenant-admin-only,
+/// so no approve action is offered (TODO when the backend adds one).
 ///
 /// Server-side but intentionally not on this screen: teacher-workflows,
 /// fee overrides, emergency-out, appointment respond, petty-cash L1 reject.
@@ -437,35 +438,25 @@ class _PettyCashSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Petty cash (L1)', style: Theme.of(context).textTheme.titleLarge),
+        Text('Petty cash', style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 12),
         if (pending.isEmpty)
           const Card(
             child: ListTile(
               leading: Icon(Icons.check_circle_outline_rounded),
-              title: Text('No petty-cash requests awaiting L1 approval'),
+              title: Text('No pending petty-cash requests'),
             ),
           )
         else
           ...pending.take(5).map((entry) {
-            final deciding = state.decidingCashId == entry.id;
             return Card(
               child: ListTile(
+                key: Key('cash-${entry.id}'),
                 title:
                     Text(entry.purpose.isEmpty ? 'Petty cash' : entry.purpose),
-                subtitle: Text('NPR ${entry.amount.toStringAsFixed(2)}'),
-                trailing: deciding
-                    ? const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : IconButton(
-                        key: Key('approve-cash-${entry.id}'),
-                        tooltip: 'Approve at L1',
-                        icon: const Icon(Icons.check_rounded),
-                        onPressed: () => vm.approveCash(entry),
-                      ),
+                subtitle: Text(
+                    'NPR ${entry.amount.toStringAsFixed(2)} • ${entry.status}'),
+                trailing: const Icon(Icons.visibility_outlined),
               ),
             );
           }),

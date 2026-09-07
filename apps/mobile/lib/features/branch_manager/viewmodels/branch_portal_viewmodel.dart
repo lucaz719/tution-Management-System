@@ -2,8 +2,8 @@
 ///
 /// Loads one `GET /api/branch-admin/dashboard` plus the L1 leave queue
 /// (`GET /api/leaves?level=L1`) per load via [BranchPortalRepository].
-/// Petty-cash approvals read their queue from the dashboard snapshot and
-/// refresh it after each decision.
+/// Petty cash is read-only here (no branch-side decision endpoint exists;
+/// funding decisions are tenant-admin-only).
 library;
 
 import 'package:flutter/foundation.dart';
@@ -31,7 +31,6 @@ class BranchPortalState extends ViewModelState {
     this.leaves = const [],
     this.isRefreshing = false,
     this.decidingLeaveId,
-    this.decidingCashId,
     this.notice,
     this.errorKind,
     super.error,
@@ -42,7 +41,6 @@ class BranchPortalState extends ViewModelState {
   final List<BranchLeaveRequest> leaves;
   final bool isRefreshing;
   final String? decidingLeaveId;
-  final String? decidingCashId;
   final String? notice;
   final ApiErrorKind? errorKind;
 
@@ -64,8 +62,6 @@ class BranchPortalState extends ViewModelState {
     bool? isRefreshing,
     String? decidingLeaveId,
     bool clearDecidingLeaveId = false,
-    String? decidingCashId,
-    bool clearDecidingCashId = false,
     String? notice,
     bool clearNotice = false,
     ApiErrorKind? errorKind,
@@ -81,8 +77,6 @@ class BranchPortalState extends ViewModelState {
       decidingLeaveId: clearDecidingLeaveId
           ? null
           : (decidingLeaveId ?? this.decidingLeaveId),
-      decidingCashId:
-          clearDecidingCashId ? null : (decidingCashId ?? this.decidingCashId),
       notice: clearNotice ? null : (notice ?? this.notice),
       errorKind: clearErrorKind ? null : (errorKind ?? this.errorKind),
       isLoading: isLoading ?? this.isLoading,
@@ -215,31 +209,6 @@ class BranchPortalViewModel extends BaseViewModel<BranchPortalState> {
       }
       state = state.copyWith(
         clearDecidingLeaveId: true,
-        error: error.message,
-        errorKind: error.kind,
-      );
-    }
-  }
-
-  /// Records an L1 petty-cash approval, then refreshes the dashboard
-  /// snapshot so the queue reflects the new status.
-  Future<void> approveCash(BranchPettyCashEntry entry,
-      {String? remarks}) async {
-    state = state.copyWith(decidingCashId: entry.id, clearNotice: true);
-    try {
-      final message = await _repository.approvePettyCashL1(
-        id: entry.id,
-        remarks: remarks?.trim().isEmpty == true ? null : remarks?.trim(),
-      );
-      state = state.copyWith(clearDecidingCashId: true, notice: message);
-      await refresh();
-    } on ApiException catch (error) {
-      if (error.kind == ApiErrorKind.cancelled) {
-        state = state.copyWith(clearDecidingCashId: true);
-        return;
-      }
-      state = state.copyWith(
-        clearDecidingCashId: true,
         error: error.message,
         errorKind: error.kind,
       );

@@ -17,17 +17,17 @@
 ///   (`{action: APPROVE|REJECT, remarks?}`).
 /// - `GET /api/finances/petty-cash` — branch-scoped petty-cash list
 ///   (`routes/finances.ts`, mounted at `/api/finances`).
-/// - `POST /api/finances/petty-cash/approve-l1/:id` — L1 petty-cash approval
-///   (`{remarks?}`).
 ///
-/// Missing (exist server-side but not wired to this home screen; listed in
-/// the view layer as follow-ups, not TODO demo data):
+/// Missing (no branch-side decision endpoint exists: petty-cash funding
+/// decisions are tenant-admin-only via
+/// `POST /api/finances/petty-cash/funding/:id/decide`, and expense requests
+/// are accountant-submitted via `POST /api/finances/petty-cash/request` —
+/// so this screen is read-only for petty cash; TODO when the backend adds a
+/// branch decision action):
 /// - `GET /api/branch-admin/teacher-workflows`, fee overrides
 ///   (`POST /api/branch-admin/fee-overrides`), emergency-out
 ///   (`POST /api/leaves/emergency-out`), appointment respond
-///   (`POST /api/appointments/respond/:appointmentId`), petty-cash L1
-///   reject/return-for-revision (no dedicated L1 reject endpoint; approve-l1
-///   only moves PENDING forward).
+///   (`POST /api/appointments/respond/:appointmentId`).
 /// Failures surface as typed [ApiException]s — never demo data.
 library;
 
@@ -47,9 +47,6 @@ class BranchPortalRepository {
   static const String pettyCashPath = '/api/finances/petty-cash';
   static String leaveApprovePath(String leaveId) =>
       '/api/leaves/approve/$leaveId';
-  static String pettyCashApproveL1Path(String id) =>
-      '/api/finances/petty-cash/approve-l1/$id';
-
   /// Consolidated branch dashboard. When [branchId] is empty the server
   /// falls back to the caller's first managed branch.
   Future<BranchDashboard> fetchDashboard({
@@ -157,29 +154,6 @@ class BranchPortalRepository {
           .whereType<Map<String, dynamic>>()
           .map(BranchPettyCashEntry.fromJson)
           .toList();
-    } on DioException catch (error) {
-      throw _typed(error);
-    }
-  }
-
-  /// L1 petty-cash approval. Returns the server message for surfacing.
-  Future<String> approvePettyCashL1({
-    required String id,
-    String? remarks,
-    CancelToken? cancelToken,
-  }) async {
-    try {
-      final response = await _dio.post<dynamic>(
-        pettyCashApproveL1Path(id),
-        data: {
-          if (remarks != null && remarks.isNotEmpty) 'remarks': remarks,
-        },
-        cancelToken: cancelToken,
-      );
-      final body = response.data;
-      final message =
-          body is Map<String, dynamic> ? body['message'] as String? : null;
-      return message ?? 'Petty-cash decision recorded.';
     } on DioException catch (error) {
       throw _typed(error);
     }
