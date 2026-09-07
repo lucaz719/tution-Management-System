@@ -1,0 +1,14 @@
+.branch-payment-settings, .payment-settings-page { display: grid; gap: 1rem; }
+.branch-payment-settings form, .branch-payment-settings fieldset { display: grid; gap: 1rem; min-width: 0; }
+.branch-payment-settings fieldset { border: 0; padding: 0; margin: 0; }
+.branch-payment-settings label { display: grid; gap: .5rem; }
+.branch-payment-settings input:not([type=checkbox]), .branch-payment-settings textarea, .payment-settings-page select { width: 100%; min-height: 44px; padding: .75rem; border: 1px solid var(--color-border, currentColor); border-radius: .5rem; background: var(--color-surface); color: var(--color-text); font: inherit; box-sizing: border-box; }
+.branch-payment-settings .payment-toggle { display: flex; align-items: center; min-height: 44px; gap: .75rem; }
+.branch-payment-settings :focus-visible, .payment-settings-page :focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
+.payment-settings-actions { display: flex; flex-wrap: wrap; gap: .75rem; }
+.payment-qr-preview { object-fit: contain; max-width: 100%; background: white; }
+.payment-source { display: inline-block; font-weight: 600; color: var(--color-text); }
+.payment-settings-skeleton { min-height: 240px; background: var(--color-surface); border-radius: .75rem; }
+.payment-settings-table { overflow-x: auto; }
+.payment-settings-table table { width: 100%; border-collapse: collapse; }
+.payment-settings-table th, .payment-settings-table td { text-align: left; padding: .75rem; border-bottom: 1px solid var(--color-border, currentColor); }

@@ -1,3 +1,4 @@
+import { sendPaymentCode, consumePaymentCode, isUploadedQr } from '../services/payment-settings-verification';
 import { branchAllowance, pettyCashPeriod } from '../services/petty-cash';
 import { Router, Response } from 'express';
 import { LateFeeMode, Prisma, RefundPolicy } from '@prisma/client';
@@ -38,7 +39,13 @@ async function deliverPaidAdmission(invoice: { invoiceType: string; tenantId: st
 // GET /payment-settings - Fetch payment settings for tenant or specific branch
 router.get('/payment-settings', authMiddleware, async (req: TenantRequest, res: Response) => {
   try {
-    const branchId = req.query.branchId as string | undefined;
+    const branchId = req.query.branchId;
+    if (branchId !== undefined && (typeof branchId !== 'string' || !branchId.trim())) {
+      return res.status(400).json({ error: 'Branch ID must be a non-empty string' });
+    }
+    if (!isTenantAdmin(req.user!) && (!branchId || !managedBranchIds(req.user!).includes(branchId))) {
+      return res.status(403).json({ error: 'Insufficient permissions to view branch payment settings' });
+    }
     
     // If no branch specified, return tenant defaults
     if (!branchId) {
@@ -61,6 +68,16 @@ router.get('/payment-settings', authMiddleware, async (req: TenantRequest, res: 
   } catch (error) {
     return res.status(500).json({ error: 'Failed to fetch payment settings' });
   }
+});
+
+router.post('/branches/:branchId/payment-settings/verification', authMiddleware, async (req: TenantRequest, res: Response) => {
+  if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Tenant Admin access required' });
+  const branch = await prisma.branch.findFirst({ where: { id: req.params.branchId, tenantId: req.tenantId! } });
+  if (!branch) return res.status(404).json({ error: 'Branch not found' });
+  if (!['save', 'reset'].includes(req.body?.action)) return res.status(400).json({ error: 'Invalid verification action' });
+  if (req.body.action === 'save' && req.body.config?.staticQrEnabled && !isUploadedQr(req.body.config.staticQrImageUrl)) return res.status(400).json({ error: 'Upload a valid QR image before requesting verification.' });
+  try { return res.json(await sendPaymentCode(req.tenantId!, req.user!.id, req.params.branchId, req.body.action, req.body.config)); }
+  catch (error) { return res.status(400).json({ error: error instanceof Error ? error.message : 'Unable to send verification SMS.' }); }
 });
 
 // PUT /branches/:branchId/payment-settings - Update branch-specific payment settings (tenant admin only)
@@ -87,12 +104,26 @@ router.put('/branches/:branchId/payment-settings', authMiddleware, async (req: T
     }
     
     // Parse and validate input
-    const { staticQrEnabled, staticQrImageUrl, accountName, accountNumber, bankName, instructions } = req.body;
+    const { staticQrEnabled, staticQrImageUrl, accountName, accountNumber, bankName, instructions } = req.body ?? {};
     
     if (typeof staticQrEnabled !== 'boolean') {
       return res.status(400).json({ error: 'staticQrEnabled must be boolean' });
     }
     
+    for (const [field, value, min, max] of [
+      ['staticQrImageUrl', staticQrImageUrl, 1, 1_400_000],
+      ['accountName', accountName, 1, 100],
+      ['accountNumber', accountNumber, 5, 20],
+      ['bankName', bankName, 1, 100],
+      ['instructions', instructions, 0, 500],
+    ] as const) {
+      if (value != null && typeof value !== 'string') return res.status(400).json({ error: `${field} must be text` });
+      if ((value?.trim().length ?? 0) > max || (staticQrEnabled && (value?.trim().length ?? 0) < min)) {
+        return res.status(400).json({ error: `${field} must contain ${min}-${max} characters` });
+      }
+    }
+    if (staticQrEnabled && !isUploadedQr(staticQrImageUrl)) return res.status(400).json({ error: 'Upload a PNG, JPEG, or WebP QR image under 1 MB. External URLs are not accepted.' });
+
     if (staticQrEnabled) {
       if (!staticQrImageUrl?.toString().trim()) return res.status(400).json({ error: 'QR image URL is required when static QR is enabled' });
       if (!accountName?.toString().trim()) return res.status(400).json({ error: 'Account name is required when static QR is enabled' });
@@ -100,6 +131,7 @@ router.put('/branches/:branchId/payment-settings', authMiddleware, async (req: T
       if (!bankName?.toString().trim()) return res.status(400).json({ error: 'Bank name is required when static QR is enabled' });
     }
     
+    if (!await consumePaymentCode(req.tenantId!, req.user!.id, branchId, 'save', req.body, req.body?.verification)) return res.status(403).json({ error: 'SMS verification is invalid, expired, or does not match these changes.' });
     // Upsert branch settings
     const settings = await upsertBranchPaymentSettings(req.tenantId!, branchId, {
       staticQrEnabled,
@@ -142,6 +174,7 @@ router.delete('/branches/:branchId/payment-settings', authMiddleware, async (req
       return res.status(404).json({ error: 'Branch not found' });
     }
     
+    if (!await consumePaymentCode(req.tenantId!, req.user!.id, branchId, 'reset', null, req.body?.verification)) return res.status(403).json({ error: 'SMS verification is invalid or expired.' });
     // Delete branch-specific settings
     await deleteBranchPaymentSettings(req.tenantId!, branchId);
     
@@ -254,6 +287,17 @@ async function loadStudentBillingAccess(req: TenantRequest, studentId: string) {
     || branchIds.some((branchId) => billingAccess.scopes.includes(branchId));
   return allowed ? student : null;
 }
+
+// Checkout resolves the branch from an authorized invoice, never a client-selected branch.
+router.get('/invoices/:invoiceId/payment-settings', authMiddleware, async (req: TenantRequest, res: Response) => {
+  try {
+    const invoice = await loadInvoicePaymentAccess(req, req.params.invoiceId);
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found or unavailable to this account.' });
+    return res.json(await getBranchPaymentSettings(req.tenantId!, invoice.branchId));
+  } catch {
+    return res.status(500).json({ error: 'Failed to fetch payment instructions' });
+  }
+});
 
 router.post('/connectips/initiate/:invoiceId', authMiddleware, async (req: TenantRequest, res: Response) => {
   try {

@@ -329,7 +329,8 @@ async function testManualPaymentBranchSensitive() {
   const settings1 = await getBranchPaymentSettings('tenant-1', 'branch-1');
   const settings2 = await getBranchPaymentSettings('tenant-1', 'branch-2');
   
-  assert.equal(settings1.staticQrEnabled, false, 'Branch 1 static QR disabled');
+  assert.equal(settings1.staticQrEnabled, true, 'Disabled branch QR falls back to enabled tenant QR');
+  assert.equal(settings1.source, 'tenant_default');
   assert.equal(settings2.staticQrEnabled, true, 'Branch 2 static QR enabled');
   
   console.log('✓ Manual payment endpoint (branch-sensitive): different settings per branch');

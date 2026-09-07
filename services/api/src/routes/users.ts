@@ -202,6 +202,35 @@ function validateAdmissionDetails(body: unknown) {
 }
 
 // --- Caller capabilities: drives what the People UI can do ---
+// Personal account endpoints derive identity exclusively from the session.
+router.get('/me/account', authMiddleware, async (req: TenantRequest, res: Response) => {
+  try {
+  if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Tenant Admin access required.' });
+  const account = await prisma.user.findFirst({ where: { id: req.user!.id, tenantId: req.tenantId! }, select: {
+    id: true, firstName: true, lastName: true, email: true, emailVerified: true, phone: true, image: true,
+    twoFactorEnabled: true, tenant: { select: { name: true } },
+  } });
+  if (!account) return res.status(404).json({ error: 'Account not found.' });
+  return res.json(account);
+  } catch { return res.status(500).json({ error: 'Unable to load or save your account. Please try again.' }); }
+});
+router.patch('/me/account', authMiddleware, async (req: TenantRequest, res: Response) => {
+  try {
+  if (!isTenantAdmin(req.user!)) return res.status(403).json({ error: 'Tenant Admin access required.' });
+  const shape = parseStrictKeys(req.body, ['firstName', 'lastName']);
+  if (!shape.success) return res.status(400).json({ error: shape.error });
+  const firstName = readTrimmedString(shape.data, 'firstName', { required: true, maxLength: 100, message: 'Enter a first name of 1-100 characters.' });
+  const lastName = readTrimmedString(shape.data, 'lastName', { required: true, maxLength: 100, message: 'Enter a last name of 1-100 characters.' });
+  if (!firstName.success) return res.status(400).json({ error: firstName.error });
+  if (!lastName.success) return res.status(400).json({ error: lastName.error });
+  const changed = await prisma.user.updateMany({ where: { id: req.user!.id, tenantId: req.tenantId! }, data: {
+    firstName: firstName.data, lastName: lastName.data, name: `${firstName.data} ${lastName.data}`,
+  } });
+  if (!changed.count) return res.status(404).json({ error: 'Account not found.' });
+  return res.json({ firstName: firstName.data, lastName: lastName.data, name: `${firstName.data} ${lastName.data}` });
+  } catch { return res.status(500).json({ error: 'Unable to load or save your account. Please try again.' }); }
+});
+
 router.get('/me', authMiddleware, async (req: TenantRequest, res: Response) => {
   const user = req.user as UserPayload;
   const tenantAdmin = isTenantAdmin(user);
@@ -1761,6 +1790,10 @@ router.put('/:id', authMiddleware, async (req: TenantRequest, res: Response) => 
     return res.status(loaded.error).json({ error: loaded.error === 404 ? 'User not found in your institution.' : 'You cannot manage this user.' });
   }
   const { user } = loaded;
+  if (typeof req.body?.phone === 'string' && req.body.phone.trim() !== user.phone) {
+    const protectedRole = await prisma.userRole.findFirst({ where: { userId: user.id, role: { name: 'Tenant Admin' } } });
+    if (protectedRole) return res.status(403).json({ error: 'Tenant admin security numbers cannot be changed through people management. Use verified account recovery.' });
+  }
 
   const data: Record<string, unknown> = {};
   if (typeof req.body?.firstName === 'string' && req.body.firstName.trim()) data.firstName = req.body.firstName.trim();

@@ -51,7 +51,7 @@ export async function getBranchPaymentSettings(
     where: { branchId },
   });
 
-  if (!branchSettings) {
+  if (!branchSettings || branchSettings.tenantId !== tenantId || !branchSettings.staticQrEnabled) {
     // No custom settings; return tenant defaults
     return {
       ...getTenantPaymentSettings(),
@@ -152,6 +152,7 @@ export async function getTenantBranchPaymentSettings(tenantId: string) {
     select: {
       id: true,
       name: true,
+      address: true,
       paymentSettings: true,
     },
     orderBy: { name: 'asc' },
@@ -160,7 +161,7 @@ export async function getTenantBranchPaymentSettings(tenantId: string) {
   return {
     tenantDefaults: getTenantPaymentSettings(),
     branches: branches.map(b => ({
-      branch: { id: b.id, name: b.name },
+      branch: { id: b.id, name: b.name, location: b.address },
       hasCustomSettings: !!b.paymentSettings,
       settings: b.paymentSettings || null,
     })),

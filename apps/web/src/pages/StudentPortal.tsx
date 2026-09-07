@@ -9,7 +9,7 @@ import {
   type StudentPortalDataset,
   type SubjectInsight,
 } from '../features/student/studentPortalData';
-import { loadNepalPayPayload, loadStudentPortal, studentFileUrl } from '../features/student/studentPortalService';
+import { loadStudentPortal, studentFileUrl } from '../features/student/studentPortalService';
 import { errorMessage } from '../services/api/client';
 import { ChangePasswordForm } from '../components/ChangePasswordForm';
 import { toDualDateLabel } from '../utils/nepaliDate';
@@ -311,7 +311,7 @@ function FeesView() {
         <section className="student-card"><SectionHeader title={`${current.cycle} invoice`} description="Current billing-cycle breakdown." /><div className="student-invoice-lines">{current.lines.map((line) => <div key={line.label}><span>{line.label}</span><strong className={line.amount < 0 ? 'is-discount' : ''}>{line.amount < 0 ? '−' : ''}{money(line.amount)}</strong></div>)}<div className="student-invoice-total"><span>Net payable</span><strong>{money(total)}</strong></div></div></section>
         <aside className="student-card student-payment-help">{icon('verified_user')}<h3>Before you pay</h3><p>Confirm the merchant name, invoice reference, and exact amount in your payment app.</p><dl><div><dt>Invoice reference</dt><dd>{current.paymentReference ?? current.id}</dd></div><div><dt>Due date</dt><dd>{toDualDateLabel(current.dueDate)}</dd></div><div><dt>Amount</dt><dd>{money(total)}</dd></div></dl></aside>
       </div>
-      {showQr ? <PaymentCheckoutDialog invoiceId={current.id} payerName={studentProfile.name} description={`${current.cycle} · ${current.paymentReference ?? current.id}`} amount={total} loadDynamicQr={() => loadNepalPayPayload(current.id)} onClose={() => setShowQr(false)} /> : null}
+      {showQr ? <PaymentCheckoutDialog invoiceId={current.id} payerName={studentProfile.name} description={`${current.cycle} · ${current.paymentReference ?? current.id}`} amount={total} onClose={() => setShowQr(false)} /> : null}
       {bill ? <InvoiceDocumentDialog data={bill.document} onClose={() => setBill(null)} onPay={bill.state === 'Paid' ? undefined : () => { setBill(null); setShowQr(true); }} /> : null}
     </div>
   );

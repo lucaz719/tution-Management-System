@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -7,6 +6,7 @@ import '../data/student_fees_models.dart';
 import '../student_design.dart';
 import '../viewmodels/student_fees_viewmodel.dart';
 import '../widgets/student_scaffold.dart';
+import '../widgets/invoice_payment_settings_sheet.dart';
 import 'package:tms_mobile/core/providers/feature_flags_provider.dart';
 
 class StudentFeesScreen extends ConsumerWidget {
@@ -134,10 +134,16 @@ class StudentFeesScreen extends ConsumerWidget {
       current: current,
       onSelect: viewModel.selectInvoice,
       onRefresh: viewModel.refresh,
-      onShowQr: () async {
-        await viewModel.loadQr();
-        final qr = ref.read(studentFeesViewModelProvider).qr;
-        if (qr != null && context.mounted) _showQr(context, qr, current);
+      onShowQr: () {
+        showModalBottomSheet<void>(
+          context: context,
+          showDragHandle: true,
+          isScrollControlled: true,
+          builder: (context) => InvoicePaymentSettingsSheet(
+            invoiceId: current.id,
+            onConnectIps: viewModel.startPayment,
+          ),
+        );
       },
       onStartPayment: viewModel.startPayment,
       onConfirmReturn: viewModel.confirmReturn,
@@ -145,66 +151,6 @@ class StudentFeesScreen extends ConsumerWidget {
     );
   }
 
-  static void _showQr(
-    BuildContext context,
-    NepalPayQr qr,
-    ApiStudentInvoice invoice,
-  ) {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (context) => Padding(
-        padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Nepal Pay', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: StudentSpace.xs),
-            Text('Scan to pay NPR ${qr.amount.toStringAsFixed(0)}'),
-            const SizedBox(height: StudentSpace.lg),
-            Container(
-              width: 220,
-              alignment: Alignment.center,
-              padding: const EdgeInsets.all(StudentSpace.md),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border.all(color: StudentColors.border),
-                borderRadius: BorderRadius.circular(StudentRadius.card),
-              ),
-              child: SelectableText(
-                qr.qrString.isEmpty ? 'QR payload unavailable' : qr.qrString,
-                style: Theme.of(context).textTheme.bodySmall,
-                textAlign: TextAlign.center,
-              ),
-            ),
-            const SizedBox(height: StudentSpace.md),
-            Text(
-              '${qr.merchantName} · Ref ${invoice.paymentReference ?? invoice.id}',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: StudentSpace.xs),
-            Text(
-              'Verify the merchant and amount in your payment app before confirming.',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: StudentSpace.md),
-            OutlinedButton.icon(
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: qr.qrString));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('QR payload copied.')),
-                );
-              },
-              icon: const Icon(Icons.copy_rounded),
-              label: const Text('Copy payload'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 class _MessageBody extends StatelessWidget {
@@ -496,7 +442,7 @@ class _StudentFeesContent extends StatelessWidget {
                               )
                             : const Icon(Icons.qr_code_2_rounded),
                         label: Text(current.qrAvailable
-                            ? 'Show Nepal Pay QR'
+                            ? 'Show payment instructions'
                             : 'Already paid'),
                       ),
                     ),

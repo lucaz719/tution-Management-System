@@ -139,8 +139,12 @@ async function testUpsertDisabledIgnoresFields() {
   });
 
   const settings = await getBranchPaymentSettings('tenant-1', 'branch-b');
-  assert.equal(settings.staticQrEnabled, false);
-  assert.equal(settings.accountName, null);
+  assert.equal(settings.staticQrEnabled, true);
+  assert.equal(settings.accountName, 'Tenant Main Account');
+  assert.equal(settings.source, 'tenant_default');
+  const stored = state.branchPaymentSettings.find((s: any) => s.branchId === 'branch-b');
+  assert.equal(stored.staticQrEnabled, false);
+  assert.equal(stored.accountName, null);
   console.log('✓ upsertBranchPaymentSettings (disabled): nullifies QR-specific fields');
 }
 
