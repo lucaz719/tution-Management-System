@@ -27,6 +27,7 @@
     "test:financial-intelligence": "ts-node src/utils/financial-intelligence.test.ts",
     "test:payroll": "ts-node src/services/payroll-service.test.ts",
     "test:route-auth": "ts-node src/routes/route-authentication.test.ts",
+    "test:attendance": "ts-node src/routes/attendance.test.ts",
     "test:tenant-admin:integration": "ts-node src/integration/tenant-admin.integration.test.ts"
   },
   "prisma": {

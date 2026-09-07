@@ -10,6 +10,22 @@ const router = Router();
 // Constant GPS accuracy threshold in meters
 const MAX_GPS_ACCURACY_METERS = 20.0;
 
+function findAssignedTeacherBranch(branchId: string, teacherId: string, tenantId: string) {
+  return prisma.branch.findFirst({
+    where: {
+      id: branchId,
+      tenantId,
+      classes: {
+        some: {
+          teacherId,
+          archivedAt: null,
+          course: { tenantId },
+        },
+      },
+    },
+  });
+}
+
 function parseGeoAttendanceInput(body: unknown) {
   const shape = parseStrictKeys(body, ['branchId', 'latitude', 'longitude', 'gpsAccuracy']);
   if (!shape.success) return shape;
@@ -104,10 +120,10 @@ router.post(
 
     try {
       // 2. Fetch the target branch's geofencing boundaries
-      const branch = await prisma.branch.findFirst({ where: { id: branchId, tenantId: req.tenantId! } });
+      const branch = await findAssignedTeacherBranch(branchId, teacherId, req.tenantId!);
 
       if (!branch) {
-        return res.status(404).json({ error: 'Branch not found.' });
+        return res.status(403).json({ error: 'You are not assigned to this branch.' });
       }
 
       // 3. Compute distance between teacher and center coordinates
@@ -171,10 +187,10 @@ router.post(
     }
 
     try {
-      const branch = await prisma.branch.findFirst({ where: { id: branchId, tenantId: req.tenantId! } });
+      const branch = await findAssignedTeacherBranch(branchId, teacherId, req.tenantId!);
 
       if (!branch) {
-        return res.status(404).json({ error: 'Branch not found.' });
+        return res.status(403).json({ error: 'You are not assigned to this branch.' });
       }
 
       const distance = calculateDistanceInMeters(

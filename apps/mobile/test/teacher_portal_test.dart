@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +9,7 @@ import 'package:tms_mobile/core/sync/sync.dart';
 import 'package:tms_mobile/features/teacher/data/teacher_portal_repository.dart';
 import 'package:tms_mobile/features/teacher/models/teacher_portal_dto.dart';
 import 'package:tms_mobile/features/teacher/screens/teacher_leave_screen.dart';
+import 'package:tms_mobile/features/teacher/screens/teacher_home_screen.dart';
 import 'package:tms_mobile/features/teacher/screens/teacher_timetable_screen.dart';
 import 'package:tms_mobile/features/teacher/viewmodels/geo_attendance_viewmodel.dart';
 import 'package:tms_mobile/features/teacher/viewmodels/teacher_leave_viewmodel.dart';
@@ -15,6 +18,7 @@ import 'package:tms_mobile/features/teacher/widgets/geo_radius_card.dart';
 
 Map<String, dynamic> workspaceJson({
   List<Map<String, dynamic>>? leaves,
+  List<Map<String, dynamic>>? pendingUpdates,
 }) =>
     {
       'teacher': {
@@ -40,8 +44,8 @@ Map<String, dynamic> workspaceJson({
           'schedule': [
             {
               'day': 'Sunday',
-              'start': '09:00',
-              'end': '10:00',
+              'startTime': '09:00',
+              'endTime': '10:00',
               'subject': 'Algebra',
             },
           ],
@@ -49,17 +53,24 @@ Map<String, dynamic> workspaceJson({
           'dailyUpdateSubmitted': false,
         },
       ],
-      'pendingUpdates': [
-        {'sessionId': 'session-1'},
-      ],
+      'pendingUpdates': pendingUpdates ??
+          [
+            {
+              'sessionId': 'session-1',
+              'classId': 'class-1',
+              'className': 'Grade 8 · A',
+              'courseName': 'Mathematics',
+              'date': '2026-09-05T00:00:00.000Z',
+            },
+          ],
       'classes': [
         {
           'id': 'class-1',
           'name': 'Grade 8 · A',
           'subject': 'Mathematics',
           'schedule': [
-            {'day': 'Sun', 'start': '09:00', 'end': '10:00'},
-            {'day': 'Wednesday', 'start': '11:00', 'end': '12:00'},
+            {'day': 'Sun', 'startTime': '09:00', 'endTime': '10:00'},
+            {'day': 'Wednesday', 'startTime': '11:00', 'endTime': '12:00'},
           ],
           'branch': {
             'id': 'branch-1',
@@ -102,7 +113,9 @@ class _FakeRepository extends TeacherPortalRepository {
   final List<TeacherWorkspace> workspaces;
   final TeacherLeaveEntry? submittedLeave;
   int fetchCount = 0;
+  int geoMarkCount = 0;
   Map<String, Object?>? leaveRequest;
+  Map<String, String>? sessionUpdateRequest;
 
   @override
   Future<TeacherWorkspace> fetchWorkspace({CancelToken? cancelToken}) async {
@@ -129,6 +142,43 @@ class _FakeRepository extends TeacherPortalRepository {
       'reason': reason,
     };
     return submittedLeave!;
+  }
+
+  @override
+  Future<Map<String, dynamic>> markGeoIn({
+    required String branchId,
+    required double latitude,
+    required double longitude,
+    required double gpsAccuracy,
+    CancelToken? cancelToken,
+  }) async {
+    geoMarkCount += 1;
+    return {'message': 'Marked'};
+  }
+
+  @override
+  Future<void> submitSessionUpdate({
+    required String sessionId,
+    required String updateContent,
+    CancelToken? cancelToken,
+  }) async {
+    sessionUpdateRequest = {
+      'sessionId': sessionId,
+      'updateContent': updateContent,
+    };
+  }
+}
+
+class _DeferredRepository extends TeacherPortalRepository {
+  _DeferredRepository() : super(dio: Dio());
+
+  final requests = <Completer<TeacherWorkspace>>[];
+
+  @override
+  Future<TeacherWorkspace> fetchWorkspace({CancelToken? cancelToken}) {
+    final request = Completer<TeacherWorkspace>();
+    requests.add(request);
+    return request.future;
   }
 }
 
@@ -192,6 +242,8 @@ void main() {
       expect(workspace.classes.single.isScheduledOn('Mon'), isFalse);
       expect(workspace.classes.single.branch!.radiusMeters, 125);
       expect(workspace.pendingUpdateCount, 1);
+      expect(workspace.pendingUpdates.single.sessionId, 'session-1');
+      expect(workspace.pendingUpdates.single.courseName, 'Mathematics');
       expect(workspace.leaves.single.isPending, isTrue);
     });
 
@@ -286,6 +338,27 @@ void main() {
   });
 
   group('teacher viewmodels', () {
+    test('older workspace response cannot overwrite a newer refresh', () async {
+      final repository = _DeferredRepository();
+      final vm = TeacherPortalViewModel(repository: repository);
+      expect(repository.requests, hasLength(1));
+
+      final refresh = vm.refresh();
+      expect(repository.requests, hasLength(2));
+      final newer = TeacherWorkspace.fromJson(
+        workspaceJson(pendingUpdates: []),
+      );
+      repository.requests[1].complete(newer);
+      await refresh;
+      repository.requests[0].complete(
+        TeacherWorkspace.fromJson(workspaceJson()),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(vm.state.workspace, same(newer));
+      vm.dispose();
+    });
+
     test('portal load exposes workspace-backed daily and weekly data',
         () async {
       final workspace = TeacherWorkspace.fromJson(workspaceJson());
@@ -339,6 +412,39 @@ void main() {
   });
 
   group('teacher timetable and leave widgets', () {
+    testWidgets('submits a pending daily update and refreshes the workspace',
+        (tester) async {
+      final before = TeacherWorkspace.fromJson(workspaceJson());
+      final after = TeacherWorkspace.fromJson(
+        workspaceJson(pendingUpdates: []),
+      );
+      final repository = _FakeRepository(workspaces: [before, after]);
+      await tester.binding.setSurfaceSize(const Size(900, 1000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await _pumpWithRepository(
+        tester,
+        const TeacherHomeScreen(),
+        repository,
+      );
+
+      expect(find.text('Mathematics — Grade 8 · A'), findsOneWidget);
+      await tester.tap(find.text('Submit daily update'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byType(TextField),
+        'Covered linear equations and assigned exercise 4.',
+      );
+      await tester.tap(find.text('Submit update'));
+      await tester.pumpAndSettle();
+
+      expect(repository.sessionUpdateRequest, {
+        'sessionId': 'session-1',
+        'updateContent': 'Covered linear equations and assigned exercise 4.',
+      });
+      expect(repository.fetchCount, 2);
+      expect(find.text('Pending daily updates: 0'), findsOneWidget);
+    });
+
     testWidgets('renders workspace daily and weekly timetable records',
         (tester) async {
       final repository = _FakeRepository(
@@ -383,9 +489,70 @@ void main() {
       expect(find.text('APPROVED_LEVEL1'), findsOneWidget);
       expect(find.text('Family event'), findsOneWidget);
     });
+
+    testWidgets('offers only leave types supported by the API', (tester) async {
+      final repository = _FakeRepository(
+        workspaces: [TeacherWorkspace.fromJson(workspaceJson())],
+      );
+      await _pumpWithRepository(
+        tester,
+        const TeacherLeaveScreen(),
+        repository,
+      );
+
+      await tester.tap(find.text('New Request'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('CASUAL').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('SICK'), findsOneWidget);
+      expect(find.text('LONG_SICK'), findsOneWidget);
+      expect(find.text('EARLY_OUT'), findsOneWidget);
+      expect(find.text('EMERGENCY'), findsNothing);
+    });
   });
 
   group('geo-attendance radius eligibility', () {
+    test('rejects unusable GPS accuracy before attendance network requests',
+        () async {
+      final repository = _FakeRepository(workspaces: const []);
+      final vm = GeoAttendanceViewModel(
+        repository: repository,
+        branchId: 'branch-1',
+        branchLatitude: null,
+        branchLongitude: null,
+        branchRadiusMeters: 100,
+      );
+
+      for (final accuracy in <double?>[
+        null,
+        double.nan,
+        double.infinity,
+        0,
+        -1,
+        20.01,
+      ]) {
+        vm.updatePosition(
+          latitude: 27.7172,
+          longitude: 85.3240,
+          gpsAccuracy: accuracy,
+        );
+        expect(vm.canMark, isFalse, reason: 'accuracy=$accuracy');
+        expect(await vm.markIn(), isFalse, reason: 'accuracy=$accuracy');
+      }
+      expect(repository.geoMarkCount, 0);
+
+      vm.updatePosition(
+        latitude: 27.7172,
+        longitude: 85.3240,
+        gpsAccuracy: 20,
+      );
+      expect(vm.canMark, isTrue);
+      expect(await vm.markIn(), isTrue);
+      expect(repository.geoMarkCount, 1);
+      vm.dispose();
+    });
+
     test('enables inside, blocks outside, and defers unknown center to server',
         () {
       final inside = GeoAttendanceViewModel(

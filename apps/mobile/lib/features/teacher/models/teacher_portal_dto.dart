@@ -65,8 +65,8 @@ class TeacherScheduleSlot {
   factory TeacherScheduleSlot.fromJson(Map<String, dynamic> json) {
     return TeacherScheduleSlot(
       day: _str(json['day']),
-      start: _str(json['start']),
-      end: _str(json['end']),
+      start: _str(json['startTime'] ?? json['start']),
+      end: _str(json['endTime'] ?? json['end']),
       subject: json['subject'] as String?,
     );
   }
@@ -109,6 +109,32 @@ class TeacherTodayClass {
       scheduleLabel: _scheduleLabel(rawSchedule),
       branchName:
           branch is Map<String, dynamic> ? branch['name'] as String? : null,
+    );
+  }
+}
+
+class TeacherPendingUpdate {
+  const TeacherPendingUpdate({
+    required this.sessionId,
+    required this.classId,
+    required this.className,
+    required this.courseName,
+    this.date,
+  });
+
+  final String sessionId;
+  final String classId;
+  final String className;
+  final String courseName;
+  final DateTime? date;
+
+  factory TeacherPendingUpdate.fromJson(Map<String, dynamic> json) {
+    return TeacherPendingUpdate(
+      sessionId: _str(json['sessionId']),
+      classId: _str(json['classId']),
+      className: _str(json['className']),
+      courseName: _str(json['courseName']),
+      date: _date(json['date']),
     );
   }
 }
@@ -206,10 +232,10 @@ class TeacherWorkspace {
     required this.designation,
     required this.branches,
     required this.todayClasses,
+    required this.pendingUpdates,
     required this.classes,
     required this.leaves,
     required this.stamps,
-    required this.pendingUpdateCount,
     this.checkedIn = false,
     this.lastStampType,
     this.lastStampAt,
@@ -221,10 +247,11 @@ class TeacherWorkspace {
   final String designation;
   final List<TeacherBranchRef> branches;
   final List<TeacherTodayClass> todayClasses;
+  final List<TeacherPendingUpdate> pendingUpdates;
   final List<TeacherClassInfo> classes;
   final List<TeacherLeaveEntry> leaves;
   final List<TeacherStamp> stamps;
-  final int pendingUpdateCount;
+  int get pendingUpdateCount => pendingUpdates.length;
   final bool checkedIn;
   final String? lastStampType;
   final DateTime? lastStampAt;
@@ -256,14 +283,13 @@ class TeacherWorkspace {
       branches: listOf<TeacherBranchRef>(branchMaps, TeacherBranchRef.fromJson),
       todayClasses: listOf<TeacherTodayClass>(
           json['todayClasses'], TeacherTodayClass.fromJson),
+      pendingUpdates: listOf<TeacherPendingUpdate>(
+          json['pendingUpdates'], TeacherPendingUpdate.fromJson),
       classes:
           listOf<TeacherClassInfo>(json['classes'], TeacherClassInfo.fromJson),
       leaves:
           listOf<TeacherLeaveEntry>(json['leaves'], TeacherLeaveEntry.fromJson),
       stamps: listOf<TeacherStamp>(json['stamps'], TeacherStamp.fromJson),
-      pendingUpdateCount: json['pendingUpdates'] is List
-          ? (json['pendingUpdates'] as List).length
-          : 0,
       checkedIn: attendance['checkedIn'] == true,
       lastStampType: attendance['lastStampType'] as String?,
       lastStampAt: _date(attendance['lastStampAt']),

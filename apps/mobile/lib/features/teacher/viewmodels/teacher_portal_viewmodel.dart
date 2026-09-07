@@ -18,6 +18,7 @@ class TeacherPortalState extends ViewModelState {
   const TeacherPortalState({
     this.workspace,
     this.isRefreshing = false,
+    this.updatingSessionId,
     this.errorKind,
     super.error,
     super.isLoading,
@@ -25,6 +26,7 @@ class TeacherPortalState extends ViewModelState {
 
   final TeacherWorkspace? workspace;
   final bool isRefreshing;
+  final String? updatingSessionId;
   final ApiErrorKind? errorKind;
 
   bool get hasData => workspace != null;
@@ -34,6 +36,8 @@ class TeacherPortalState extends ViewModelState {
   TeacherPortalState copyWith({
     TeacherWorkspace? workspace,
     bool? isRefreshing,
+    String? updatingSessionId,
+    bool clearUpdatingSessionId = false,
     ApiErrorKind? errorKind,
     bool clearErrorKind = false,
     bool? isLoading,
@@ -43,6 +47,9 @@ class TeacherPortalState extends ViewModelState {
     return TeacherPortalState(
       workspace: workspace ?? this.workspace,
       isRefreshing: isRefreshing ?? this.isRefreshing,
+      updatingSessionId: clearUpdatingSessionId
+          ? null
+          : (updatingSessionId ?? this.updatingSessionId),
       errorKind: clearErrorKind ? null : (errorKind ?? this.errorKind),
       isLoading: isLoading ?? this.isLoading,
       error: clearError ? null : (error ?? this.error),
@@ -62,14 +69,17 @@ class TeacherPortalViewModel extends BaseViewModel<TeacherPortalState> {
 
   final TeacherPortalRepository _repository;
   final RequestCanceller _canceller;
+  int _requestGeneration = 0;
 
   Future<void> load() async {
+    final generation = ++_requestGeneration;
     state =
         state.copyWith(isLoading: true, clearError: true, clearErrorKind: true);
     try {
       final workspace = await _repository.fetchWorkspace(
         cancelToken: _canceller.tokenFor('workspace'),
       );
+      if (generation != _requestGeneration) return;
       state = state.copyWith(
         isLoading: false,
         workspace: workspace,
@@ -77,6 +87,7 @@ class TeacherPortalViewModel extends BaseViewModel<TeacherPortalState> {
         clearErrorKind: true,
       );
     } on ApiException catch (error) {
+      if (generation != _requestGeneration) return;
       if (error.kind == ApiErrorKind.cancelled) return;
       state = state.copyWith(
         isLoading: false,
@@ -87,11 +98,13 @@ class TeacherPortalViewModel extends BaseViewModel<TeacherPortalState> {
   }
 
   Future<void> refresh() async {
+    final generation = ++_requestGeneration;
     state = state.copyWith(isRefreshing: true);
     try {
       final workspace = await _repository.fetchWorkspace(
         cancelToken: _canceller.tokenFor('workspace'),
       );
+      if (generation != _requestGeneration) return;
       state = state.copyWith(
         isRefreshing: false,
         workspace: workspace,
@@ -99,6 +112,7 @@ class TeacherPortalViewModel extends BaseViewModel<TeacherPortalState> {
         clearErrorKind: true,
       );
     } on ApiException catch (error) {
+      if (generation != _requestGeneration) return;
       if (error.kind == ApiErrorKind.cancelled) {
         state = state.copyWith(isRefreshing: false);
         return;
@@ -111,8 +125,46 @@ class TeacherPortalViewModel extends BaseViewModel<TeacherPortalState> {
     }
   }
 
+  Future<bool> submitSessionUpdate({
+    required String sessionId,
+    required String updateContent,
+  }) async {
+    final content = updateContent.trim();
+    if (content.isEmpty) {
+      state = state.copyWith(error: 'Daily update content is required.');
+      return false;
+    }
+    state = state.copyWith(
+      updatingSessionId: sessionId,
+      clearError: true,
+      clearErrorKind: true,
+    );
+    try {
+      await _repository.submitSessionUpdate(
+        sessionId: sessionId,
+        updateContent: content,
+        cancelToken: _canceller.tokenFor('session-update'),
+      );
+      await refresh();
+      state = state.copyWith(clearUpdatingSessionId: true);
+      return true;
+    } on ApiException catch (error) {
+      if (error.kind == ApiErrorKind.cancelled) {
+        state = state.copyWith(clearUpdatingSessionId: true);
+        return false;
+      }
+      state = state.copyWith(
+        clearUpdatingSessionId: true,
+        error: error.message,
+        errorKind: error.kind,
+      );
+      return false;
+    }
+  }
+
   @override
   void dispose() {
+    _requestGeneration += 1;
     _canceller.cancelAll();
     super.dispose();
   }
