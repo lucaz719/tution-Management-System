@@ -2,13 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:tms_mobile/core/providers/auth_provider.dart';
-import 'package:tms_mobile/features/tenant_admin/data/tenant_admin_demo_data.dart';
-import 'package:tms_mobile/features/tenant_admin/models/tenant_admin_dashboard_models.dart';
+import 'package:tms_mobile/features/tenant_admin/models/tenant_admin_dashboard.dart';
+import 'package:tms_mobile/features/tenant_admin/widgets/tenant_admin_state_view.dart';
 
-/// Tenant-wide operational dashboard using presentation-only demo data.
+/// Tenant-wide operational dashboard backed by
+/// `GET /api/tenant-admin/dashboard`.
 ///
-/// TODO(tenant-admin): Supply repository-backed data through Riverpod providers
-/// and replace the local action feedback with tenant-admin navigation.
+/// Tenant scope is server-derived from the Better Auth session cookie —
+/// the client never sends a tenant identifier.
+///
+/// Missing server-side (TODO(api), never demo data — actions surface a
+/// "not available yet" message until the backend adds the route):
+/// - per-branch pending-approval counts (tiles show staffing/enrolment only)
+/// - tenant notification feed (no notifications affordance)
+/// - tenant-scoped people/reports/approvals list endpoints behind
+///   `GET /api/tenant-admin/*`.
 class TenantAdminHomeScreen extends ConsumerWidget {
   const TenantAdminHomeScreen({super.key});
 
@@ -21,11 +29,6 @@ class TenantAdminHomeScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Tenant operations'),
         actions: [
-          IconButton(
-            tooltip: 'Notifications',
-            onPressed: () => _showDemoMessage(context, 'Notifications'),
-            icon: const Icon(Icons.notifications_none_rounded),
-          ),
           IconButton(
             tooltip: 'Change password',
             onPressed: () => context.push('/tenant/change-password'),
@@ -48,9 +51,9 @@ class TenantAdminHomeScreen extends ConsumerWidget {
               alignment: Alignment.topCenter,
               child: ConstrainedBox(
                 constraints: BoxConstraints(maxWidth: maxContentWidth),
-                child: SingleChildScrollView(
+                child: TenantAdminStateView(
                   padding: const EdgeInsets.all(_pagePadding),
-                  child: Column(
+                  builder: (context, dashboard) => Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
@@ -59,33 +62,38 @@ class TenantAdminHomeScreen extends ConsumerWidget {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Monitor branches, people, and approvals across your organisation.',
+                        'Monitor branches, staffing, and enrolment across your organisation.',
                         style: Theme.of(context).textTheme.bodyLarge,
                       ),
                       const SizedBox(height: _sectionSpacing),
-                      const _KpiGrid(kpis: TenantAdminDemoData.kpis),
+                      _KpiGrid(dashboard: dashboard),
                       const SizedBox(height: _sectionSpacing),
                       if (isExpanded)
                         Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Expanded(flex: 3, child: _BranchOverview()),
+                            Expanded(
+                              flex: 3,
+                              child: _BranchOverview(
+                                dashboard: dashboard,
+                              ),
+                            ),
                             const SizedBox(width: _sectionSpacing),
                             Expanded(
                               flex: 2,
                               child: _QuickActions(
                                 onActionSelected: (label) =>
-                                    _showDemoMessage(context, label),
+                                    _showUnavailable(context, label),
                               ),
                             ),
                           ],
                         )
                       else ...[
-                        const _BranchOverview(),
+                        _BranchOverview(dashboard: dashboard),
                         const SizedBox(height: _sectionSpacing),
                         _QuickActions(
                           onActionSelected: (label) =>
-                              _showDemoMessage(context, label),
+                              _showUnavailable(context, label),
                         ),
                       ],
                     ],
@@ -99,20 +107,69 @@ class TenantAdminHomeScreen extends ConsumerWidget {
     );
   }
 
-  void _showDemoMessage(BuildContext context, String destination) {
+  void _showUnavailable(BuildContext context, String destination) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$destination is a demo action.')),
+      SnackBar(content: Text('$destination is not available yet.')),
     );
   }
 }
 
-class _KpiGrid extends StatelessWidget {
-  const _KpiGrid({required this.kpis});
+String _formatNpr(double amount) {
+  final digits = '${amount.round()}'.replaceAllMapped(
+    RegExp(r'\B(?=(?:\d{3})+(?!\d))'),
+    (_) => ',',
+  );
+  return 'Rs $digits';
+}
 
-  final List<TenantAdminKpi> kpis;
+class _KpiData {
+  const _KpiData({
+    required this.label,
+    required this.value,
+    required this.supportingText,
+  });
+
+  final String label;
+  final String value;
+  final String supportingText;
+}
+
+List<_KpiData> _kpisFor(TenantAdminDashboard dashboard) => [
+      _KpiData(
+        label: 'Active branches',
+        value: '${dashboard.branchSummary.length}',
+        supportingText: 'Reporting in this snapshot',
+      ),
+      _KpiData(
+        label: 'Staff',
+        value: '${dashboard.totalStaff}',
+        supportingText: 'Across all branches',
+      ),
+      _KpiData(
+        label: 'Students',
+        value: '${dashboard.activeStudentsCount}',
+        supportingText: 'Currently enrolled',
+      ),
+      _KpiData(
+        label: 'Pending leave requests',
+        value: '${dashboard.pendingLeaveRequestsCount}',
+        supportingText: 'Requires your review',
+      ),
+      _KpiData(
+        label: 'Overdue fees',
+        value: _formatNpr(dashboard.totalOverdueAmountNpr),
+        supportingText: 'Total overdue (NPR)',
+      ),
+    ];
+
+class _KpiGrid extends StatelessWidget {
+  const _KpiGrid({required this.dashboard});
+
+  final TenantAdminDashboard dashboard;
 
   @override
   Widget build(BuildContext context) {
+    final kpis = _kpisFor(dashboard);
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = constraints.maxWidth >= 840
@@ -140,13 +197,17 @@ class _KpiGrid extends StatelessWidget {
 class _KpiCard extends StatelessWidget {
   const _KpiCard({required this.kpi});
 
-  final TenantAdminKpi kpi;
+  final _KpiData kpi;
 
   @override
   Widget build(BuildContext context) {
-    final isApproval = kpi.label == 'Pending L2 approvals';
-    final color =
-        isApproval ? Colors.deepOrange : Theme.of(context).colorScheme.primary;
+    final pendingAttention =
+        kpi.label == 'Pending leave requests' && kpi.value != '0';
+    final overdueAttention = kpi.label == 'Overdue fees' && kpi.value != 'Rs 0';
+    final needsAttention = pendingAttention || overdueAttention;
+    final color = needsAttention
+        ? Colors.deepOrange
+        : Theme.of(context).colorScheme.primary;
 
     return Semantics(
       label: '${kpi.label}: ${kpi.value}. ${kpi.supportingText}',
@@ -177,7 +238,9 @@ class _KpiCard extends StatelessWidget {
 }
 
 class _BranchOverview extends StatelessWidget {
-  const _BranchOverview();
+  const _BranchOverview({required this.dashboard});
+
+  final TenantAdminDashboard dashboard;
 
   @override
   Widget build(BuildContext context) {
@@ -187,18 +250,26 @@ class _BranchOverview extends StatelessWidget {
         Text('Branch overview', style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 4),
         Text(
-          'Staffing, enrolment, and approval workload by branch.',
+          'Staffing and enrolment by branch.',
           style: Theme.of(context).textTheme.bodyMedium,
         ),
         const SizedBox(height: 12),
-        Card(
-          child: Column(
-            children: [
-              for (final branch in TenantAdminDemoData.branches)
-                _BranchTile(branch: branch),
-            ],
+        if (dashboard.branchSummary.isEmpty)
+          const Card(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('No branches found for this institution.'),
+            ),
+          )
+        else
+          Card(
+            child: Column(
+              children: [
+                for (final branch in dashboard.branchSummary)
+                  _BranchTile(branch: branch),
+              ],
+            ),
           ),
-        ),
       ],
     );
   }
@@ -207,13 +278,13 @@ class _BranchOverview extends StatelessWidget {
 class _BranchTile extends StatelessWidget {
   const _BranchTile({required this.branch});
 
-  final TenantBranchOverview branch;
+  final TenantBranchSummary branch;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
-      label: '${branch.name}, ${branch.location}: ${branch.staffCount} staff, '
-          '${branch.studentCount} students, ${branch.pendingApprovals} pending approvals',
+      label:
+          '${branch.branchName}: ${branch.staffCount} staff, ${branch.activeStudents} students',
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         leading: CircleAvatar(
@@ -223,34 +294,9 @@ class _BranchTile extends StatelessWidget {
             color: Theme.of(context).colorScheme.onPrimaryContainer,
           ),
         ),
-        title: Text(branch.name),
+        title: Text(branch.branchName),
         subtitle: Text(
-            '${branch.location} · ${branch.staffCount} staff · ${branch.studentCount} students'),
-        trailing: _ApprovalBadge(count: branch.pendingApprovals),
-      ),
-    );
-  }
-}
-
-class _ApprovalBadge extends StatelessWidget {
-  const _ApprovalBadge({required this.count});
-
-  final int count;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.deepOrange.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        '$count pending',
-        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: Colors.deepOrange.shade900,
-              fontWeight: FontWeight.w700,
-            ),
+            '${branch.staffCount} staff · ${branch.activeStudents} students'),
       ),
     );
   }
@@ -263,6 +309,8 @@ class _QuickActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // TODO(api): wire to tenant-scoped people/reports/approvals list
+    // endpoints once the backend adds routes behind `GET /api/tenant-admin/*`.
     const actions = [
       _QuickActionData(
         label: 'People',
@@ -276,7 +324,7 @@ class _QuickActions extends StatelessWidget {
       ),
       _QuickActionData(
         label: 'Approvals',
-        description: 'Review requests awaiting L2 approval.',
+        description: 'Review requests awaiting your approval.',
         icon: Icons.fact_check_outlined,
       ),
     ];

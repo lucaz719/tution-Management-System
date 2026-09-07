@@ -167,6 +167,9 @@ class _AuthInterceptor extends Interceptor {
     if (err.response?.statusCode == 401) {
       // Session expired or invalidated: clear local state, then tell the
       // app layer so the router kicks back to /login (MOB-005).
+      // Exactly-once wipe: clearAuth only drops cookies/prefs — the per-user
+      // offline wipe happens once in AuthNotifier.forceLogout, which captures
+      // the user id first and becomes a no-op on repeat 401s (null user).
       await ApiClient.clearAuth();
       ApiClient.onSessionInvalidated?.call();
     }
