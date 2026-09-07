@@ -2,12 +2,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:url_launcher/url_launcher.dart' as url_launcher;
 
 import '../data/student_fees_models.dart';
 import '../student_design.dart';
 import '../viewmodels/student_fees_viewmodel.dart';
 import '../widgets/student_scaffold.dart';
 import 'package:tms_mobile/core/providers/feature_flags_provider.dart';
+
+/// Injectable gateway launcher so widget tests can substitute a fake
+/// instead of calling url_launcher directly.
+typedef GatewayLauncher = Future<bool> Function(Uri uri);
+
+/// Default launcher: opens [uri] in the external browser.
+Future<bool> defaultGatewayLauncher(Uri uri) => url_launcher.launchUrl(uri,
+    mode: url_launcher.LaunchMode.externalApplication);
 
 class StudentFeesScreen extends ConsumerWidget {
   const StudentFeesScreen({super.key});
@@ -154,54 +164,77 @@ class StudentFeesScreen extends ConsumerWidget {
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
-      builder: (context) => Padding(
-        padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Nepal Pay', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: StudentSpace.xs),
-            Text('Scan to pay NPR ${qr.amount.toStringAsFixed(0)}'),
-            const SizedBox(height: StudentSpace.lg),
-            Container(
-              width: 220,
-              alignment: Alignment.center,
-              padding: const EdgeInsets.all(StudentSpace.md),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border.all(color: StudentColors.border),
-                borderRadius: BorderRadius.circular(StudentRadius.card),
-              ),
-              child: SelectableText(
-                qr.qrString.isEmpty ? 'QR payload unavailable' : qr.qrString,
-                style: Theme.of(context).textTheme.bodySmall,
-                textAlign: TextAlign.center,
-              ),
+      builder: (context) => NepalPayQrSheet(qr: qr, invoice: invoice),
+    );
+  }
+}
+
+/// Bottom-sheet content rendering the NepalPay payload as a scannable QR
+/// code, keeping the amount/merchant/reference text and the copy-payload
+/// fallback. An empty payload shows a message instead of a broken code.
+class NepalPayQrSheet extends StatelessWidget {
+  const NepalPayQrSheet({super.key, required this.qr, required this.invoice});
+
+  final NepalPayQr qr;
+  final ApiStudentInvoice invoice;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('Nepal Pay', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: StudentSpace.xs),
+          Text('Scan to pay NPR ${qr.amount.toStringAsFixed(0)}'),
+          const SizedBox(height: StudentSpace.lg),
+          Container(
+            width: 220,
+            alignment: Alignment.center,
+            padding: const EdgeInsets.all(StudentSpace.md),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border.all(color: StudentColors.border),
+              borderRadius: BorderRadius.circular(StudentRadius.card),
             ),
-            const SizedBox(height: StudentSpace.md),
-            Text(
-              '${qr.merchantName} · Ref ${invoice.paymentReference ?? invoice.id}',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: StudentSpace.xs),
-            Text(
-              'Verify the merchant and amount in your payment app before confirming.',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: StudentSpace.md),
-            OutlinedButton.icon(
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: qr.qrString));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('QR payload copied.')),
-                );
-              },
-              icon: const Icon(Icons.copy_rounded),
-              label: const Text('Copy payload'),
-            ),
-          ],
-        ),
+            child: qr.qrString.isEmpty
+                ? SelectableText(
+                    'QR payload unavailable',
+                    style: Theme.of(context).textTheme.bodySmall,
+                    textAlign: TextAlign.center,
+                  )
+                : QrImageView(
+                    data: qr.qrString,
+                    version: QrVersions.auto,
+                    size: 200,
+                    semanticsLabel:
+                        'NepalPay QR for NPR ${qr.amount.toStringAsFixed(0)}',
+                  ),
+          ),
+          const SizedBox(height: StudentSpace.md),
+          Text(
+            '${qr.merchantName} · Ref ${invoice.paymentReference ?? invoice.id}',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: StudentSpace.xs),
+          Text(
+            'Verify the merchant and amount in your payment app before confirming.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: StudentSpace.md),
+          OutlinedButton.icon(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: qr.qrString));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('QR payload copied.')),
+              );
+            },
+            icon: const Icon(Icons.copy_rounded),
+            label: const Text('Copy payload'),
+          ),
+        ],
       ),
     );
   }
@@ -405,16 +438,14 @@ class _StudentFeesContent extends StatelessWidget {
                           color: _stateColor(invoice.state),
                           width: selected ? 2 : 1,
                         ),
-                        borderRadius:
-                            BorderRadius.circular(StudentRadius.card),
+                        borderRadius: BorderRadius.circular(StudentRadius.card),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(invoice.cycle,
-                              style:
-                                  Theme.of(context).textTheme.titleMedium),
+                              style: Theme.of(context).textTheme.titleMedium),
                           StudentStatusPill(
                             label: _stateLabel(invoice.state),
                             icon: _stateIcon(invoice.state),
@@ -457,17 +488,14 @@ class _StudentFeesContent extends StatelessWidget {
                       children: [
                         Expanded(
                           child: Text('Net payable',
-                              style:
-                                  Theme.of(context).textTheme.titleMedium),
+                              style: Theme.of(context).textTheme.titleMedium),
                         ),
                         Text(
                           'NPR ${current.netPayable.toStringAsFixed(0)}',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(
-                                color: StudentColors.primaryDark,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    color: StudentColors.primaryDark,
+                                  ),
                         ),
                       ],
                     ),
@@ -491,8 +519,8 @@ class _StudentFeesContent extends StatelessWidget {
                             ? const SizedBox(
                                 width: 20,
                                 height: 20,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2),
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
                               )
                             : const Icon(Icons.qr_code_2_rounded),
                         label: Text(current.qrAvailable
@@ -512,8 +540,8 @@ class _StudentFeesContent extends StatelessWidget {
                             ? const SizedBox(
                                 width: 20,
                                 height: 20,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2),
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
                               )
                             : const Icon(Icons.account_balance_rounded),
                         label: const Text('Pay with connectIPS'),
@@ -525,7 +553,7 @@ class _StudentFeesContent extends StatelessWidget {
             ),
             if (state.handoff != null) ...[
               const SizedBox(height: StudentSpace.sm),
-              _HandoffCard(
+              ConnectIpsHandoffCard(
                 handoff: state.handoff!,
                 isVerifying: state.isVerifying,
                 paymentOutcome: state.paymentOutcome,
@@ -560,24 +588,27 @@ class _StudentFeesContent extends StatelessWidget {
   }
 }
 
-class _HandoffCard extends StatefulWidget {
-  const _HandoffCard({
+class ConnectIpsHandoffCard extends StatefulWidget {
+  const ConnectIpsHandoffCard({
+    super.key,
     required this.handoff,
     required this.isVerifying,
     required this.paymentOutcome,
     required this.onConfirmReturn,
+    this.launchUrl = defaultGatewayLauncher,
   });
 
   final ConnectIpsHandoff handoff;
   final bool isVerifying;
   final PaymentOutcome paymentOutcome;
   final ValueChanged<String> onConfirmReturn;
+  final GatewayLauncher launchUrl;
 
   @override
-  State<_HandoffCard> createState() => _HandoffCardState();
+  State<ConnectIpsHandoffCard> createState() => ConnectIpsHandoffCardState();
 }
 
-class _HandoffCardState extends State<_HandoffCard> {
+class ConnectIpsHandoffCardState extends State<ConnectIpsHandoffCard> {
   late final TextEditingController _txnController;
 
   @override
@@ -587,7 +618,7 @@ class _HandoffCardState extends State<_HandoffCard> {
   }
 
   @override
-  void didUpdateWidget(covariant _HandoffCard oldWidget) {
+  void didUpdateWidget(covariant ConnectIpsHandoffCard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.handoff.txnId != widget.handoff.txnId) {
       _txnController.text = widget.handoff.txnId;
@@ -598,6 +629,32 @@ class _HandoffCardState extends State<_HandoffCard> {
   void dispose() {
     _txnController.dispose();
     super.dispose();
+  }
+
+  Future<void> _openInBrowser(BuildContext context) async {
+    final uri = Uri.tryParse(widget.handoff.gatewayUrl);
+    if (uri == null || !uri.hasScheme) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not open the payment page. Copy the gateway URL instead.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+    final launched = await widget.launchUrl(uri);
+    if (!launched && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not open the browser. Copy the gateway URL below.',
+          ),
+        ),
+      );
+    }
   }
 
   @override
@@ -619,6 +676,15 @@ class _HandoffCardState extends State<_HandoffCard> {
             SelectableText('Gateway: ${widget.handoff.gatewayUrl}'),
             SelectableText('TXNID: ${widget.handoff.txnId}'),
             const SizedBox(height: StudentSpace.sm),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => _openInBrowser(context),
+                icon: const Icon(Icons.open_in_browser_rounded),
+                label: const Text('Open in browser'),
+              ),
+            ),
+            const SizedBox(height: StudentSpace.sm),
             TextField(
               controller: _txnController,
               decoration: const InputDecoration(
@@ -632,25 +698,20 @@ class _HandoffCardState extends State<_HandoffCard> {
               child: FilledButton.icon(
                 onPressed: widget.isVerifying
                     ? null
-                    : () => widget
-                        .onConfirmReturn(_txnController.text.trim()),
+                    : () => widget.onConfirmReturn(_txnController.text.trim()),
                 icon: widget.isVerifying
                     ? const SizedBox(
                         width: 20,
                         height: 20,
-                        child:
-                            CircularProgressIndicator(strokeWidth: 2),
+                        child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.verified_rounded),
                 label: Text(
                   switch (widget.paymentOutcome) {
                     PaymentOutcome.success => 'Verified — paid',
-                    PaymentOutcome.failed =>
-                      'Re-check status',
-                    PaymentOutcome.unknown =>
-                      'Retry verification',
-                    PaymentOutcome.pending =>
-                      'I completed payment — verify',
+                    PaymentOutcome.failed => 'Re-check status',
+                    PaymentOutcome.unknown => 'Retry verification',
+                    PaymentOutcome.pending => 'I completed payment — verify',
                   },
                 ),
               ),
