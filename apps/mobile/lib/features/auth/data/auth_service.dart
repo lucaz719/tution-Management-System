@@ -112,8 +112,12 @@ class AuthService {
       final user = AuthUser(
         id: 'mock-${mock.role.toLowerCase()}-1',
         email: mock.email,
-        firstName: first.isNotEmpty ? first[0].toUpperCase() + first.substring(1) : mock.role,
-        lastName: last.isNotEmpty ? last[0].toUpperCase() + last.substring(1) : 'User',
+        firstName: first.isNotEmpty
+            ? first[0].toUpperCase() + first.substring(1)
+            : mock.role,
+        lastName: last.isNotEmpty
+            ? last[0].toUpperCase() + last.substring(1)
+            : 'User',
         role: mock.role,
         requiresTwoFactor: mock.requiresTwoFactor,
       );

@@ -2,104 +2,30 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:tms_mobile/core/providers/child_selection_provider.dart';
 import 'package:tms_mobile/core/theme/app_colors.dart';
+import 'package:tms_mobile/features/parent/models/parent_portal.dart';
 import 'package:tms_mobile/features/parent/widgets/child_switcher_bar.dart';
+import 'package:tms_mobile/features/parent/widgets/parent_portal_state_view.dart';
 import 'package:tms_mobile/shared/models/app_models.dart';
 import 'package:tms_mobile/shared/widgets/progress_ring.dart';
 import 'package:tms_mobile/shared/widgets/status_chip.dart';
+
+enum _AttendanceView { list, compact }
 
 class ParentAttendanceScreen extends ConsumerStatefulWidget {
   const ParentAttendanceScreen({super.key});
 
   @override
-  ConsumerState<ParentAttendanceScreen> createState() => _ParentAttendanceScreenState();
+  ConsumerState<ParentAttendanceScreen> createState() =>
+      _ParentAttendanceScreenState();
 }
 
-class _ParentAttendanceScreenState extends ConsumerState<ParentAttendanceScreen> {
-  AttendanceViewMode _viewMode = AttendanceViewMode.list;
+class _ParentAttendanceScreenState
+    extends ConsumerState<ParentAttendanceScreen> {
+  _AttendanceView _view = _AttendanceView.list;
 
   @override
   Widget build(BuildContext context) {
-    final selectedChild = ref.watch(childSelectionProvider);
-    final isAarav = selectedChild == 'Aarav';
-    final attendanceRate = isAarav ? 0.92 : 0.96;
-    final presentDays = isAarav ? 23 : 24;
-    final absentDays = isAarav ? 2 : 1;
-    final excusedDays = isAarav ? 1 : 0;
-
-    final records = isAarav
-        ? [
-            (
-              'Fri, Jul 18',
-              'Present',
-              'On-time arrival (08:45 AM)',
-              AttendanceStatus.present
-            ),
-            (
-              'Thu, Jul 17',
-              'Present',
-              'On-time arrival (08:50 AM)',
-              AttendanceStatus.present
-            ),
-            (
-              'Wed, Jul 16',
-              'Absent',
-              'Medical leave submitted & verified',
-              AttendanceStatus.absent
-            ),
-            (
-              'Tue, Jul 15',
-              'Present',
-              'On-time arrival (08:42 AM)',
-              AttendanceStatus.present
-            ),
-            (
-              'Mon, Jul 14',
-              'Excused',
-              'Approved family event leave',
-              AttendanceStatus.excused
-            ),
-            (
-              'Fri, Jul 11',
-              'Present',
-              'Bus delay recorded (+10 min)',
-              AttendanceStatus.present
-            ),
-          ]
-        : [
-            (
-              'Fri, Jul 18',
-              'Present',
-              'On-time arrival (08:40 AM)',
-              AttendanceStatus.present
-            ),
-            (
-              'Thu, Jul 17',
-              'Present',
-              'On-time arrival (08:44 AM)',
-              AttendanceStatus.present
-            ),
-            (
-              'Wed, Jul 16',
-              'Present',
-              'On-time arrival (08:48 AM)',
-              AttendanceStatus.present
-            ),
-            (
-              'Tue, Jul 15',
-              'Absent',
-              'Sick leave - Doctor note provided',
-              AttendanceStatus.absent
-            ),
-            (
-              'Mon, Jul 14',
-              'Present',
-              'On-time arrival (08:41 AM)',
-              AttendanceStatus.present
-            ),
-          ];
-
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
@@ -114,238 +40,187 @@ class _ParentAttendanceScreenState extends ConsumerState<ParentAttendanceScreen>
         ),
         actions: [
           IconButton(
-            icon: Icon(_viewMode == AttendanceViewMode.list
-                ? Icons.calendar_month_rounded
-                : Icons.format_list_bulleted_rounded),
-            tooltip: _viewMode == AttendanceViewMode.list
-                ? 'Calendar View'
-                : 'List View',
-            onPressed: () {
-              setState(() {
-                _viewMode = _viewMode == AttendanceViewMode.list
-                    ? AttendanceViewMode.calendar
-                    : AttendanceViewMode.list;
-              });
-            },
-          )
+            icon: Icon(
+              _view == _AttendanceView.list
+                  ? Icons.grid_view_rounded
+                  : Icons.format_list_bulleted_rounded,
+            ),
+            tooltip:
+                _view == _AttendanceView.list ? 'Compact view' : 'List view',
+            onPressed: () => setState(() {
+              _view = _view == _AttendanceView.list
+                  ? _AttendanceView.compact
+                  : _AttendanceView.list;
+            }),
+          ),
         ],
       ),
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            const ChildSwitcherBar(),
-            const SizedBox(height: 20),
-
-            // Summary Card with ProgressRing
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Row(
-                  children: [
-                    ProgressRing(
-                      percent: attendanceRate,
-                      size: 84,
-                      strokeWidth: 8,
-                      color:
-                          attendanceRate >= 0.9 ? kColorSuccess : kColorWarning,
-                    ),
-                    const SizedBox(width: 20),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '$selectedChild\'s Rate',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Monthly Attendance Summary',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              _StatBadge(
-                                  label: 'Present',
-                                  count: '$presentDays d',
-                                  color: kColorSuccess),
-                              _StatBadge(
-                                  label: 'Absent',
-                                  count: '$absentDays d',
-                                  color: kColorError),
-                              _StatBadge(
-                                  label: 'Excused',
-                                  count: '$excusedDays d',
-                                  color: kColorWarning),
-                            ],
-                          )
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        child: ParentPortalStateView(
+          builder: (context, portal, child) {
+            final rate = (child.attendanceRate / 100).clamp(0.0, 1.0);
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                const ChildSwitcherBar(),
+                const SizedBox(height: 20),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final summary = Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${child.name}\'s rate',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${portal.attendance.length} recent records',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                            const SizedBox(height: 12),
+                            Wrap(
+                              spacing: 20,
+                              runSpacing: 8,
+                              children: [
+                                _StatBadge(
+                                  label: 'Present',
+                                  count: '${portal.presentCount}',
+                                  color: kColorSuccess,
+                                ),
+                                _StatBadge(
+                                  label: 'Absent',
+                                  count: '${portal.absentCount}',
+                                  color: kColorError,
+                                ),
+                              ],
+                            ),
+                          ],
+                        );
+                        if (constraints.maxWidth < 420) {
+                          return Column(
+                            children: [
+                              ProgressRing(percent: rate, size: 84),
+                              const SizedBox(height: 16),
+                              summary,
+                            ],
+                          );
+                        }
+                        return Row(
+                          children: [
+                            ProgressRing(
+                              percent: rate,
+                              size: 84,
+                              color:
+                                  rate >= 0.9 ? kColorSuccess : kColorWarning,
+                            ),
+                            const SizedBox(width: 20),
+                            Expanded(child: summary),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
                 Text(
                   'Recent Activity Log',
                   style: GoogleFonts.fraunces(
-                      fontSize: 18, fontWeight: FontWeight.w700),
-                ),
-                Text(
-                  'July 2026',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(fontWeight: FontWeight.w600),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-
-            if (_viewMode == AttendanceViewMode.list) ...[
-              for (final record in records) ...[
-                Card(
-                  child: ListTile(
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-                    leading: Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: record.$4.chipVariant ==
-                                StatusChipVariant.success
-                            ? kColorSuccess.withValues(alpha: 0.12)
-                            : record.$4.chipVariant == StatusChipVariant.error
-                                ? kColorError.withValues(alpha: 0.12)
-                                : kColorWarning.withValues(alpha: 0.12),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        record.$4.icon,
-                        color: record.$4.chipVariant ==
-                                StatusChipVariant.success
-                            ? kColorSuccess
-                            : record.$4.chipVariant == StatusChipVariant.error
-                                ? kColorError
-                                : kColorWarning,
-                        size: 20,
-                      ),
-                    ),
-                    title: Text(
-                      record.$1,
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleSmall
-                          ?.copyWith(fontWeight: FontWeight.w700),
-                    ),
-                    subtitle: Text(record.$3),
-                    trailing: StatusChip(
-                      label: record.$2,
-                      variant: record.$4.chipVariant,
-                    ),
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 10),
-              ],
-            ] else ...[
-              // Grid Calendar Mock view
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    children: [
-                      Text(
-                        'Monthly Overview Grid',
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
-                      const SizedBox(height: 14),
-                      GridView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 7,
-                          mainAxisSpacing: 8,
-                          crossAxisSpacing: 8,
-                        ),
-                        itemCount: 31,
-                        itemBuilder: (context, index) {
-                          final day = index + 1;
-                          final isWeekend = (day % 7 == 6 || day % 7 == 0);
-                          final isAbs = day == 16;
-                          final isExc = day == 14;
-
-                          Color bgColor = kColorSuccess.withValues(alpha: 0.15);
-                          Color textColor = kColorSuccess;
-                          if (isWeekend) {
-                            bgColor = kColorSurface;
-                            textColor = kColorText.withValues(alpha: 0.4);
-                          } else if (isAbs) {
-                            bgColor = kColorError.withValues(alpha: 0.15);
-                            textColor = kColorError;
-                          } else if (isExc) {
-                            bgColor = kColorWarning.withValues(alpha: 0.15);
-                            textColor = kColorWarning;
-                          }
-
-                          return Container(
-                            decoration: BoxDecoration(
-                              color: bgColor,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Center(
-                              child: Text(
-                                '$day',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: textColor,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ],
+                const SizedBox(height: 12),
+                if (portal.attendance.isEmpty)
+                  const Card(
+                    child: Padding(
+                      padding: EdgeInsets.all(20),
+                      child: Text('No attendance records are available.'),
+                    ),
+                  )
+                else if (_view == _AttendanceView.list)
+                  for (final record in portal.attendance) ...[
+                    _AttendanceTile(record: record),
+                    const SizedBox(height: 10),
+                  ]
+                else
+                  LayoutBuilder(
+                    builder: (context, constraints) => Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        for (final record in portal.attendance)
+                          SizedBox(
+                            width: constraints.maxWidth >= 600
+                                ? (constraints.maxWidth - 10) / 2
+                                : constraints.maxWidth,
+                            child: _AttendanceTile(record: record),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-              ),
-            ],
-          ],
+              ],
+            );
+          },
         ),
       ),
     );
   }
 }
 
+class _AttendanceTile extends StatelessWidget {
+  const _AttendanceTile({required this.record});
+
+  final ParentAttendanceRecord record;
+
+  @override
+  Widget build(BuildContext context) {
+    final variant = record.isPresent
+        ? StatusChipVariant.success
+        : record.state.toLowerCase().contains('excused')
+            ? StatusChipVariant.warning
+            : StatusChipVariant.error;
+    return Card(
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+        leading: Icon(
+          record.isPresent ? Icons.check_rounded : Icons.close_rounded,
+          color: record.isPresent ? kColorSuccess : kColorError,
+        ),
+        title: Text(record.date),
+        subtitle: Text('${record.subject} · ${record.session}'),
+        trailing: StatusChip(label: record.state, variant: variant),
+      ),
+    );
+  }
+}
+
 class _StatBadge extends StatelessWidget {
-  const _StatBadge(
-      {required this.label, required this.count, required this.color});
+  const _StatBadge({
+    required this.label,
+    required this.count,
+    required this.color,
+  });
+
   final String label;
   final String count;
   final Color color;
 
   @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(
-          count,
-          style: GoogleFonts.outfit(
-              fontWeight: FontWeight.w700, fontSize: 15, color: color),
-        ),
-        Text(
-          label,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 11),
-        ),
-      ],
-    );
-  }
+  Widget build(BuildContext context) => Column(
+        children: [
+          Text(
+            count,
+            style: GoogleFonts.outfit(
+              fontWeight: FontWeight.w700,
+              fontSize: 15,
+              color: color,
+            ),
+          ),
+          Text(label, style: Theme.of(context).textTheme.bodySmall),
+        ],
+      );
 }
