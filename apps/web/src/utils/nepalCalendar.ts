@@ -80,3 +80,11 @@ export function nepalDateTimeInputToIso(value: string): string {
   if (Number.isNaN(instant.getTime())) throw new Error('Enter a valid Nepal date and time.');
   return instant.toISOString();
 }
+
+/** Convert an instant to the wall-clock value used by Nepal appointment fields. */
+export function nepalDateTimeInput(value: string): string {
+  const instant = new Date(value);
+  if (Number.isNaN(instant.getTime())) throw new Error('Invalid appointment date.');
+  const time = new Intl.DateTimeFormat('en-GB', { timeZone: NEPAL_TIME_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(instant);
+  return `${nepalDateKey(instant)}T${time}`;
+}

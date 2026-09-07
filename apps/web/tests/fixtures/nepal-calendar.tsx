@@ -25,4 +25,4 @@ function ReaderFixture() {
   const [child, setChild] = useState('one');
   return <BrowserRouter><button type="button" onClick={() => setChild('two')}>Switch child</button><AcademicCalendarView studentId={child} /><AcademicCalendarView studentId={child} upcoming calendarPath={`/parent/calendar?child=${child}`} /></BrowserRouter>;
 }
-createRoot(document.getElementById('root')!).render(new URLSearchParams(location.search).has('control') ? <ToastProvider><TenantControlCenter /></ToastProvider> : new URLSearchParams(location.search).has('reader') ? <ReaderFixture /> : <Fixture />);
+createRoot(document.getElementById('root')!).render(new URLSearchParams(location.search).has('accountant') ? <BrowserRouter><AcademicCalendarView viewerRole="Accountant" /><AcademicCalendarView viewerRole="Accountant" upcoming calendarPath="/staff/finance#calendar" /></BrowserRouter> : new URLSearchParams(location.search).has('control') ? <ToastProvider><TenantControlCenter /></ToastProvider> : new URLSearchParams(location.search).has('reader') ? <ReaderFixture /> : <Fixture />);

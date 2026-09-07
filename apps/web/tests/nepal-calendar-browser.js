@@ -6,9 +6,11 @@ const readerEvents = RequestMock().onRequestTo(/\/api\/academic-events\?studentI
   res.headers['content-type'] = 'application/json';
   res.setBody({ events: [{ id: child, title: `Child ${child} assembly`, eventType: 'EVENT', startDate: '2026-09-05', endDate: '2026-09-05', branch: { name: `Branch ${child}` }, class: { name: `Class ${child}` } }] });
 });
+let failClassOptions = false;
 const controlApi = RequestMock().onRequestTo(/\/api\//).respond((req, res) => {
   const path = new URL(req.url).pathname;
   res.headers['content-type'] = 'application/json';
+  if (failClassOptions && path.endsWith('/academic-events/options')) { res.statusCode = 403; res.setBody({ error: 'Forbidden' }); return; }
   res.setBody(path.endsWith('/petty-cash') ? [] : path.endsWith('/academic-events/options') ? { classes: [] } : path.endsWith('/academic-events') ? { events: [], event: { id: 'new' } } : path.endsWith('/alerts') ? { expiringDocs: [] } : { vatRate: 13, gracePeriod: 15, pettyCashCap: 20000 });
 });
 const publication = RequestLogger((req) => req.method === 'post' && req.url.endsWith('/api/academic-events'), { logRequestBody: true, stringifyRequestBody: true });
@@ -106,4 +108,27 @@ test.requestHooks(controlApi, publication)('Control Center publishes an explicit
     const body = JSON.parse(record.request.body);
     return body.audience === 'ALL' && body.eventType === 'HOLIDAY' && body.classId === null && body.startDate === '2026-09-05T03:15:00.000Z' && body.endDate === '2026-09-06T03:15:00.000Z';
   })).ok();
+});
+
+test.requestHooks(controlApi)('Publishing stays blocked after class loading fails and recovers after retry', async (t) => {
+  failClassOptions = true;
+  try {
+    await t.navigateTo('http://localhost:5187/?control');
+    await t.click(Selector('button').withText('Calendar'));
+    await t.expect(Selector('[role="alert"]').withText('Publishing is blocked').exists).ok();
+    const submit = Selector('button[type="submit"]').withText('Publish event');
+    await t.expect(submit.hasAttribute('disabled')).ok();
+    failClassOptions = false;
+    await t.click(Selector('button').withText('Retry'));
+    await t.expect(submit.hasAttribute('disabled')).notOk();
+  } finally { failClassOptions = false; }
+});
+
+const accountantEvents = RequestMock().onRequestTo(/\/api\/academic-events\?viewerRole=Accountant$/).respond({ events: [{ id: 'fee-deadline', title: 'Branch fee deadline', eventType: 'FEE_DUE', audience: 'STAFF', startDate: '2026-09-05', endDate: '2026-09-06', branch: { name: 'Assigned branch' } }] }, 200, { 'content-type': 'application/json' });
+test.requestHooks(accountantEvents)('Accountant calendar uses its explicit role and read-only upcoming link', async (t) => {
+  await t.navigateTo('http://localhost:5187/?accountant');
+  await t.expect(Selector('.academic-upcoming').withText('Branch fee deadline').exists).ok();
+  await t.expect(Selector('.academic-upcoming a').getAttribute('href')).eql('/staff/finance#calendar');
+  await t.expect(Selector('.event-target-field').exists).notOk();
+  await t.expect(Selector('button').withText('Add event').exists).notOk();
 });

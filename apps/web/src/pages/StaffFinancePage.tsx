@@ -1,3 +1,4 @@
+import { AcademicCalendarView } from '../components/calendar/AcademicCalendarView';
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { PageShell } from '../components/patterns/PageShell';
@@ -10,7 +11,7 @@ import { useAuth } from '../context/AuthContext';
 import { api, type AccountantWorkspace } from '../services/api';
 import './staffFinance.css';
 
-type Tab = 'overview' | 'petty-cash' | 'billing' | 'payroll' | 'payments' | 'reports' | 'security';
+type Tab = 'calendar' | 'overview' | 'petty-cash' | 'billing' | 'payroll' | 'payments' | 'reports' | 'security';
 type PettyCash = AccountantWorkspace['pettyCash'][number];
 type Invoice = AccountantWorkspace['invoices'][number];
 type CashDialog = 'new' | PettyCash | null;
@@ -25,6 +26,7 @@ const createCashLine = (item?: PettyCash['items'][number]): CashLine => ({
 });
 
 const accountantNavItems = [
+  { section: 'FINANCE' as const, label: 'Academic calendar', icon: 'calendar_month', path: '/staff/finance#calendar' },
   { section: 'FINANCE' as const, label: 'Overview', icon: 'space_dashboard', path: '/staff/finance#overview' },
   { section: 'FINANCE' as const, label: 'Petty cash', icon: 'account_balance_wallet', path: '/staff/finance#petty-cash' },
   { section: 'FINANCE' as const, label: 'Fee & billing', icon: 'payments', path: '/staff/finance#billing' },
@@ -143,16 +145,14 @@ export function StaffFinancePage() {
   }, [loadWorkspace]);
   useEffect(() => {
     const section = location.hash.slice(1);
-    if (['overview', 'petty-cash', 'billing', 'payroll', 'payments', 'reports', 'security'].includes(section)) setTab(section as Tab);
+    if (['overview', 'petty-cash', 'billing', 'payroll', 'payments', 'reports', 'security', 'calendar'].includes(section)) setTab(section as Tab);
   }, [location.hash]);
 
   const cap = workspace?.pettyCashCap ?? 0;
-  const totalCap = cap * (workspace?.branches.length ?? 0);
+  const totalCap = workspace?.pettyCashUsage.reduce((sum, item) => sum + item.limit, 0) ?? 0;
   const committed = workspace?.pettyCashUsage.reduce((sum, item) => sum + item.committed, 0) ?? 0;
   const remaining = Math.max(0, totalCap - committed);
-  const selectedBranchCommitted = workspace?.pettyCashUsage.find((item) => item.branchId === branchId)?.committed ?? 0;
-  const selectedBranchRemaining = Math.max(0, cap - selectedBranchCommitted);
-  const requestBudget = selectedBranchRemaining + (cashDialog && cashDialog !== 'new' ? cashDialog.amount : 0);
+  const requestBudget = Math.max(0, workspace?.pettyCashUsage.find(item => item.branchId === branchId)?.available ?? 0);
   const requestTotal = Math.round(cashItems.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unitAmount || 0), 0) * 100) / 100;
   const cashItemsValid = cashItems.length > 0 && cashItems.every((item) => item.name.trim() && Number.isInteger(Number(item.quantity)) && Number(item.quantity) > 0 && Number(item.unitAmount) > 0);
   const branchLabel = !workspace?.branches.length ? 'No assigned finance branch' : workspace.branches.length === 1 ? workspace.branches[0].name : `${workspace.branches.length} assigned branches`;
@@ -172,8 +172,8 @@ export function StaffFinancePage() {
 
   const submitCash = async (event: FormEvent) => {
     event.preventDefault();
-    if (!branchId || !purpose.trim() || !cashItemsValid || requestTotal <= 0 || requestTotal > requestBudget) {
-      setCashError(requestTotal > requestBudget ? 'The item total exceeds the available branch budget.' : 'Complete every required item field before submitting.');
+    if (!branchId || !purpose.trim() || !cashItemsValid || requestTotal <= 0) {
+      setCashError('Complete every required item field before submitting.');
       return;
     }
     const items = cashItems.map((item) => ({ name: item.name.trim(), quantity: Number(item.quantity), unitAmount: Number(item.unitAmount) }));
@@ -230,19 +230,19 @@ export function StaffFinancePage() {
       </td></tr>)}
     </tbody></table></div>;
 
-  const body = loading ? <section className="accountant-panel"><EmptyState title="Loading finance workspace" description="Fetching current branch records and permissions." /></section>
+  const body = tab === 'calendar' ? <section aria-label="Academic calendar"><h1>Academic calendar</h1><p>Institution and assigned-branch events shared with everyone or staff.</p><AcademicCalendarView viewerRole="Accountant" /></section> : loading ? <section className="accountant-panel"><EmptyState title="Loading finance workspace" description="Fetching current branch records and permissions." /></section>
     : loadError ? <section className="accountant-panel"><div className="accountant-empty"><Icon name="error" /><strong>Finance workspace unavailable</strong><p>{loadError}</p><button type="button" className="accountant-secondary-button" onClick={() => void loadWorkspace()}>Try again</button></div></section>
     : !workspace ? null : <>
       {tab === 'overview' && <section className="accountant-hero"><div><span className="accountant-eyebrow"><Icon name="account_balance_wallet" />{branchLabel}</span><h1>Finance control centre</h1><p>Reconcile branch collections and move petty cash through the recorded approval workflow.</p></div><button type="button" className="accountant-primary-button" disabled={!workspace.branches.length} onClick={() => openCashDialog('new')}><Icon name="add" />New petty cash request</button></section>}
 
-      {tab === 'overview' && <><section className="accountant-kpis" aria-label="Finance summary">
+      {tab === 'overview' && <><AcademicCalendarView viewerRole="Accountant" upcoming calendarPath="/staff/finance#calendar" /><section className="accountant-kpis" aria-label="Finance summary">
         <article><span className="is-success"><Icon name="payments" /></span><div><p>Collected</p><strong>{money(workspace.summary.collected)}</strong><small>Across permitted invoices</small></div></article>
         <article><span className="is-warning"><Icon name="pending_actions" /></span><div><p>Outstanding</p><strong>{money(workspace.summary.outstanding)}</strong><small>{money(workspace.summary.overdueAmount)} overdue</small></div></article>
-        <article><span className="is-info"><Icon name="account_balance_wallet" /></span><div><p>Petty cash available</p><strong>{money(remaining)}</strong><small>{money(cap)} per branch this month</small></div></article>
+        <article><span className="is-info"><Icon name="account_balance_wallet" /></span><div><p>Petty cash available</p><strong>{money(remaining)}</strong><small>{money(cap)} base allowance per branch this month</small></div></article>
         <article><span className="is-error"><Icon name="fact_check" /></span><div><p>Payment requests</p><strong>{workspace.summary.pendingPaymentReviews}</strong><small>{workspace.summary.pendingPaymentReviews === 1 ? 'receipt awaiting review' : 'receipts awaiting review'}</small></div></article>
       </section><section className="accountant-panel"><header><div><h2>Recent petty cash activity</h2><p>Latest persisted records in your assigned scope.</p></div><button type="button" className="accountant-text-button" onClick={() => navigate('/staff/finance#petty-cash')}>View all<Icon name="arrow_forward" /></button></header>{renderCashTable(workspace.pettyCash.slice(0, 5))}</section></>}
 
-      {tab === 'petty-cash' && <><section className="accountant-section-head"><div><span className="accountant-eyebrow">Controlled disbursements</span><h2>Petty cash requests</h2><p>Requests remain open until an administrator verifies the receipt and closes the record.</p></div><button type="button" className="accountant-primary-button" disabled={!workspace.branches.length} onClick={() => openCashDialog('new')}><Icon name="add" />New request</button></section><section className="accountant-cap-strip"><div><Icon name="policy" /><span>Monthly cap per branch</span><strong>{money(cap)}</strong></div><div><span>Committed in scope</span><strong>{money(committed)}</strong></div><div><span>Available in scope</span><strong>{money(remaining)}</strong></div><small>Rejected requests do not consume the monthly cap.</small></section><section className="accountant-panel">{renderCashTable(workspace.pettyCash)}</section></>}
+      {tab === 'petty-cash' && <><section className="accountant-section-head"><div><span className="accountant-eyebrow">Controlled disbursements</span><h2>Petty cash requests</h2><p>Requests remain open until an administrator verifies the receipt and closes the record.</p></div><button type="button" className="accountant-primary-button" disabled={!workspace.branches.length} onClick={() => openCashDialog('new')}><Icon name="add" />New request</button></section><section className="accountant-cap-strip"><div><Icon name="policy" /><span>Base monthly allowance</span><strong>{money(cap)}</strong></div><div><span>Committed in scope</span><strong>{money(committed)}</strong></div><div><span>Available in scope</span><strong>{money(remaining)}</strong></div><small>Only released cash consumes the allowance. Approved additional funding increases the branch balance.</small></section><section className="accountant-panel">{renderCashTable(workspace.pettyCash)}</section></>}
 
       {tab === 'billing' && <AcademicFees canRetryAdmissionLogins={false} />}
       {tab === 'payroll' && <SharedBillingWorkspace heading="Payroll" />}
@@ -256,7 +256,7 @@ export function StaffFinancePage() {
       <form className="accountant-form" onSubmit={submitCash} noValidate>
         <label htmlFor="cash-branch">Branch <span aria-hidden="true">*</span>
           <select id="cash-branch" value={branchId} disabled={cashDialog !== 'new'} onChange={(event) => { setBranchId(event.target.value); setCashError(''); }} required>{workspace?.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select>
-          <small>{money(requestBudget)} is available for this request within the branch's monthly cap.</small>
+          <small>{money(requestBudget)} is available in this branch. Requests above this balance require tenant approval or additional branch funding.</small>
         </label>
         <fieldset className="accountant-line-items">
           <legend>Required items <span aria-hidden="true">*</span></legend>
@@ -277,7 +277,7 @@ export function StaffFinancePage() {
         <div className="accountant-request-total" aria-live="polite"><span>Total amount</span><strong>{money(requestTotal)}</strong><small>{money(Math.max(0, requestBudget - requestTotal))} will remain available in this branch.</small></div>
         <label htmlFor="cash-purpose">Description / purpose <span aria-hidden="true">*</span><textarea id="cash-purpose" maxLength={1000} rows={4} placeholder="Explain why these items are required…" value={purpose} onChange={(event) => { setPurpose(event.target.value); setCashError(''); }} required /></label>
         {cashError && <p className="accountant-field-error" role="alert">{cashError}</p>}
-        <footer><button type="button" className="accountant-secondary-button" onClick={() => setCashDialog(null)}>Cancel</button><button type="submit" className="accountant-primary-button" disabled={submitting || !branchId || !purpose.trim() || !cashItemsValid || requestTotal <= 0 || requestTotal > requestBudget}>{submitting ? 'Saving…' : cashDialog === 'new' ? 'Submit itemized request' : 'Resubmit revision'}</button></footer>
+        <footer><button type="button" className="accountant-secondary-button" onClick={() => setCashDialog(null)}>Cancel</button><button type="submit" className="accountant-primary-button" disabled={submitting || !branchId || !purpose.trim() || !cashItemsValid || requestTotal <= 0}>{submitting ? 'Saving…' : cashDialog === 'new' ? 'Submit itemized request' : 'Resubmit revision'}</button></footer>
       </form>
     </Modal>}
     {receiptDialog && <Modal title={`Submit receipt · ${receiptDialog.id.slice(0, 8)}`} description="Use a durable HTTPS link from approved document storage. The record stays open until administrator verification." onClose={() => setReceiptDialog(null)}><form className="accountant-form" onSubmit={submitReceipt}><div className="accountant-receipt-summary"><span><small>Purpose</small><strong>{receiptDialog.purpose}</strong></span><span><small>Released amount</small><strong>{money(receiptDialog.amount)}</strong></span></div><label htmlFor="receipt-url">Receipt URL <span aria-hidden="true">*</span><input id="receipt-url" type="url" maxLength={2000} placeholder="https://…" value={receiptUrl} onChange={(event) => setReceiptUrl(event.target.value)} required /><small>Direct uploads will be enabled with the production object-storage contract.</small></label><footer><button type="button" className="accountant-secondary-button" onClick={() => setReceiptDialog(null)}>Cancel</button><button type="submit" className="accountant-primary-button" disabled={submitting || !/^https?:\/\/\S+$/i.test(receiptUrl.trim())}>{submitting ? 'Submitting…' : 'Submit receipt link'}</button></footer></form></Modal>}

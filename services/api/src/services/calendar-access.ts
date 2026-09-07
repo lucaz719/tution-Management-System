@@ -17,7 +17,7 @@ export class CalendarAccessError extends Error {}
 export async function calendarAccessWhere(actor: UserPayload, tenantId: string, options: { branchId?: string; studentId?: string; viewerRole?: string } = {}): Promise<Prisma.AcademicEventWhereInput> {
   if (actor.tenantId !== tenantId) throw new CalendarAccessError('Institution access denied.');
   if (options.viewerRole) {
-    if (!['Teacher', 'Student', 'Parent'].includes(options.viewerRole) || !hasRole(actor, options.viewerRole)) throw new CalendarAccessError('Calendar role access denied.');
+    if (!['Teacher', 'Student', 'Parent', 'Accountant'].includes(options.viewerRole) || !hasRole(actor, options.viewerRole)) throw new CalendarAccessError('Calendar role access denied.');
     actor = { ...actor, roles: actor.roles.filter((role) => role.roleName === options.viewerRole) };
   }
   if (options.studentId || hasRole(actor, 'Parent')) {
@@ -34,6 +34,11 @@ export async function calendarAccessWhere(actor: UserPayload, tenantId: string, 
   if (branches.length) {
     if (options.branchId && !branches.includes(options.branchId)) throw new CalendarAccessError('Branch access denied.');
     return { tenantId, OR: [{ branchId: null }, { branchId: { in: options.branchId ? [options.branchId] : branches } }] };
+  }
+  if (hasRole(actor, 'Accountant')) {
+    const branchIds = actor.roles.filter((role) => role.roleName === 'Accountant' && role.branchId).map((role) => role.branchId!);
+    if (options.branchId && !branchIds.includes(options.branchId)) throw new CalendarAccessError('Branch access denied.');
+    return readerCalendarWhere(tenantId, options.branchId ? [options.branchId] : branchIds, [], ['ALL', 'STAFF']);
   }
   if (hasRole(actor, 'Teacher')) {
     const classes = await prisma.class.findMany({ where: { teacherId: actor.id, archivedAt: null, course: { tenantId } }, select: { id: true, branchId: true } });

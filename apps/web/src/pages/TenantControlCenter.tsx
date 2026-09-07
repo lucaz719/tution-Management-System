@@ -51,6 +51,7 @@ export function TenantControlCenter() {
   const { showToast } = useToast();
   const [tab, setTab] = useState<Tab>('policies');
   const [calendarSystem, setCalendarSystem] = useState<CalendarSystem>('BS');
+  const [targetingReady, setTargetingReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [config, setConfig] = useState<any>(null);
@@ -139,6 +140,7 @@ export function TenantControlCenter() {
       const startDate = nepalDateTimeInputToIso(eventForm.startDate);
       const endDate = nepalDateTimeInputToIso(eventForm.endDate);
       if (endDate < startDate) throw new Error('End must be on or after the start date and time.');
+      if (!targetingReady) throw new Error('Wait for class targeting to load before publishing.');
       await academicEventsApi.createTenantWide({
         ...eventForm,
         title: eventForm.title.trim(),
@@ -279,11 +281,11 @@ export function TenantControlCenter() {
         <Card hoverable={false}><h3>Publish institution event</h3><form onSubmit={(e) => void publishEvent(e)} style={{ display: 'grid', gap: 12, marginTop: 14 }}>
           <label style={label}>Title<input style={input} value={eventForm.title} onChange={(e) => setEventForm((old) => ({ ...old, title: e.target.value }))} required /></label>
           <label style={label}>Type<select style={input} value={eventForm.eventType} onChange={(e) => setEventForm((old) => ({ ...old, eventType: e.target.value as EventType }))}><option value="HOLIDAY">Holiday</option><option value="EXAM">Exam</option><option value="EVENT">Event</option><option value="FEE_DUE">Fee deadline</option></select></label>
-          <EventTargetFields audience={eventForm.audience} classId={eventForm.classId} onAudienceChange={(audience) => setEventForm((old) => ({ ...old, audience }))} onClassChange={(classId) => setEventForm((old) => ({ ...old, classId }))} />
+          <EventTargetFields onReadyChange={setTargetingReady} audience={eventForm.audience} classId={eventForm.classId} onAudienceChange={(audience) => setEventForm((old) => ({ ...old, audience }))} onClassChange={(classId) => setEventForm((old) => ({ ...old, classId }))} />
           <NepaliDateTimeField label="Starts" value={eventForm.startDate} onChange={(startDate) => setEventForm((old) => ({ ...old, startDate }))} />
           <NepaliDateTimeField label="Ends" value={eventForm.endDate} onChange={(endDate) => setEventForm((old) => ({ ...old, endDate }))} />
           <label style={label}>Description<textarea style={input} value={eventForm.description} onChange={(e) => setEventForm((old) => ({ ...old, description: e.target.value }))} /></label>
-          <Button type="submit" disabled={publishing} aria-busy={publishing}>{publishing ? 'Publishing...' : 'Publish event'}</Button>
+          <Button type="submit" disabled={publishing || !targetingReady} aria-busy={publishing}>{publishing ? 'Publishing...' : 'Publish event'}</Button>
         </form></Card>
         <Card hoverable={false}><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}><h3>Institution calendar</h3><CalendarSystemToggle value={calendarSystem} onChange={setCalendarSystem} /></div>{events.map((item) => <div key={item.id} style={{ borderTop: '1px solid #E8EDF3', padding: '12px 0' }}><strong>{item.title}</strong><p style={{ fontSize: 12, color: 'var(--text-muted)' }}>{calendarSystem === 'BS' ? nepaliDateHeading(nepalDateKey(item.startDate)) : englishDateLabel(nepalDateKey(item.startDate))} · {new Date(item.startDate).toLocaleTimeString([], { timeZone: NEPAL_TIME_ZONE, hour: '2-digit', minute: '2-digit' }) + ' NPT'} · {item.eventType} / {AUDIENCE_LABELS[item.audience ?? 'STAFF']}</p>{!item.branchId ? <StatusBadge variant="info">Read-only institution event</StatusBadge> : null}</div>)}</Card>
       </div> : null}

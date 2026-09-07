@@ -6,6 +6,8 @@ import { MockSmsSender, MockPushNotificationService } from '../utils/notificatio
 import { isTenantAdmin } from '../utils/access-control';
 import { reconcilePendingConnectIps } from '../utils/connectips';
 import { generateDailyTeacherSessions } from '../services/timetable-service';
+import { markOverdueInvoices } from '../services/billing-access';
+import { recoverAdmissionDeliveries } from '../services/admission-delivery';
 
 const router = Router();
 
@@ -28,26 +30,9 @@ router.post(
       const smsSender = new MockSmsSender();
 
       if (taskName === 'monthly-due-verification') {
-        try {
-          await prisma.invoice.updateMany({
-            where: { tenantId: req.tenantId!, status: 'UNPAID' },
-            data: { status: 'OVERDUE' },
-          });
-          
-          await prisma.enrollment.updateMany({
-            where: {
-              student: {
-                user: { tenantId: req.tenantId! },
-                invoices: { some: { tenantId: req.tenantId!, status: 'OVERDUE' } },
-              },
-            },
-            data: { status: 'BLOCKED' },
-          });
-        } catch (dbErr) {
-          throw dbErr;
-        }
+        await prisma.$transaction(tx => markOverdueInvoices(tx, req.tenantId!));
 
-        logs.push('Verified unpaid invoices, updated status to OVERDUE, and blocked enrollments.');
+        logs.push('Marked past-due unpaid invoices OVERDUE and blocked active enrollments in their issuing branches.');
       } else if (taskName === 'fee-reminder-sms') {
         await smsSender.sendSms(
           '98510XXXXX',
@@ -90,6 +75,9 @@ router.post(
       } else if (taskName === 'connectips-revalidate') {
         const result = await reconcilePendingConnectIps({ tenantId: req.tenantId! });
         logs.push(`Revalidated ${result.checked} pending connectIPS payment(s); confirmed ${result.confirmed}.`);
+      } else if (taskName === 'admission-delivery-recovery') {
+        const result = await recoverAdmissionDeliveries(req.tenantId!);
+        logs.push(`Checked ${result.checked} admission(s); completed ${result.delivered}; failed ${result.failed}.`);
       } else if (taskName === 'daily-teacher-sessions') {
         const result = await generateDailyTeacherSessions({ tenantId: req.tenantId! });
         logs.push(`Generated ${result.created} teacher session(s) for ${result.day}; ${result.eligible} scheduled class(es) were eligible.`);

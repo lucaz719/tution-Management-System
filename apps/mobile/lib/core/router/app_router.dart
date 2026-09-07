@@ -8,7 +8,6 @@ import 'package:tms_mobile/features/auth/screens/login_screen.dart';
 import 'package:tms_mobile/features/auth/screens/forgot_password_screen.dart';
 import 'package:tms_mobile/features/auth/screens/reset_password_screen.dart';
 import 'package:tms_mobile/features/auth/screens/two_factor_screen.dart';
-import 'package:tms_mobile/features/admin/screens/branch_admin_home_screen.dart';
 import 'package:tms_mobile/features/auth/screens/change_password_screen.dart';
 import 'package:tms_mobile/features/teacher/screens/teacher_home_screen.dart';
 import 'package:tms_mobile/features/teacher/screens/teacher_timetable_screen.dart';
@@ -134,12 +133,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         },
       ),
 
-      // ── Admin routes ──
-      GoRoute(
-        path: '/admin/home',
-        builder: (BuildContext context, GoRouterState state) =>
-            const BranchAdminHomeScreen(),
-      ),
       // ── Branch Manager routes (canonical role: BRANCH_ADMIN) ──
       GoRoute(
         path: '/branch/home',

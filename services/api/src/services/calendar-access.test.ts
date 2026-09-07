@@ -29,6 +29,22 @@ async function main() {
   await assert.rejects(() => calendarAccessWhere(actor('Tenant Admin'), 'tenant-b'), CalendarAccessError);
   await assert.rejects(() => calendarAccessWhere(actor('Student'), 'tenant-a', { viewerRole: 'Teacher' }), CalendarAccessError);
 
+  const accountantActor = actor('Accountant', 'branch-a');
+  const accountant = await calendarAccessWhere(accountantActor, 'tenant-a', { viewerRole: 'Accountant' });
+  const staffEvent = { ...event, classId: null, audience: 'STAFF' };
+  assert.ok(matches(staffEvent, accountant));
+  assert.ok(matches({ ...staffEvent, branchId: null, audience: 'ALL' }, accountant));
+  for (const override of [{ tenantId: 'tenant-b' }, { branchId: 'branch-b' }, { classId: 'class-a' }, { audience: 'STUDENTS' }, { audience: 'PARENTS' }]) {
+    assert.equal(matches({ ...staffEvent, ...override }, accountant), false);
+  }
+  await assert.rejects(() => calendarAccessWhere(accountantActor, 'tenant-a', { viewerRole: 'Accountant', branchId: 'branch-b' }), CalendarAccessError);
+  await assert.rejects(() => calendarAccessWhere(actor('Student'), 'tenant-a', { viewerRole: 'Accountant' }), CalendarAccessError);
+  const mixed = { ...accountantActor, roles: [...accountantActor.roles, ...actor('Parent').roles, ...actor('Tenant Admin').roles] };
+  assert.deepEqual(await calendarAccessWhere(mixed, 'tenant-a', { viewerRole: 'Accountant' }), accountant);
+  const unassigned = await calendarAccessWhere(actor('Accountant'), 'tenant-a', { viewerRole: 'Accountant' });
+  assert.equal(matches(staffEvent, unassigned), false);
+  assert.ok(matches({ ...staffEvent, branchId: null }, unassigned));
+
   const originalStudent = prisma.student.findFirst;
   const originalClass = prisma.class.findMany;
   try {

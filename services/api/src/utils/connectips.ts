@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import forge from 'node-forge';
 import prisma from './db';
+import { reconcileBranchBillingAccess } from '../services/billing-access';
 import { activateAdmissionAndSendLogins } from './admission-logins';
 import { getAdmissionTenure } from './nepali';
 
@@ -212,6 +213,7 @@ export async function validateAndConfirmConnectIps(txnId: string) {
         data: { admissionStatus: 'READY_FOR_LOGIN' },
       });
     }
+    await reconcileBranchBillingAccess(tx, attempt.tenantId, attempt.invoice.studentId, attempt.invoice.branchId, now);
     return tx.paymentAttempt.findUniqueOrThrow({ where: { id: attempt.id } });
   });
   if (attempt.invoice.invoiceType === 'ADMISSION' && confirmed?.status === 'SUCCESS') {
