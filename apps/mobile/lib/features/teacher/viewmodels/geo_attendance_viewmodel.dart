@@ -69,6 +69,7 @@ class GeoAttendanceState extends ViewModelState {
     double? latitude,
     double? longitude,
     double? gpsAccuracy,
+    bool clearGpsAccuracy = false,
     bool? locationUnavailable,
     bool? permissionDenied,
     double? distanceMeters,
@@ -85,7 +86,7 @@ class GeoAttendanceState extends ViewModelState {
     return GeoAttendanceState(
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
-      gpsAccuracy: gpsAccuracy ?? this.gpsAccuracy,
+      gpsAccuracy: clearGpsAccuracy ? null : (gpsAccuracy ?? this.gpsAccuracy),
       locationUnavailable: locationUnavailable ?? this.locationUnavailable,
       permissionDenied: permissionDenied ?? this.permissionDenied,
       distanceMeters:
@@ -100,6 +101,8 @@ class GeoAttendanceState extends ViewModelState {
 }
 
 class GeoAttendanceViewModel extends BaseViewModel<GeoAttendanceState> {
+  static const maxGpsAccuracyMeters = 20.0;
+
   GeoAttendanceViewModel({
     TeacherPortalRepository? repository,
     RequestCanceller? canceller,
@@ -142,6 +145,7 @@ class GeoAttendanceViewModel extends BaseViewModel<GeoAttendanceState> {
     if (!state.hasFix || state.isMarking || state.locationUnavailable) {
       return false;
     }
+    if (!_hasUsableAccuracy) return false;
     // Branch center unknown to the client: leave the decision to the
     // server (authoritative) and keep the button enabled.
     final radius = insideRadiusOrUnknown;
@@ -160,6 +164,7 @@ class GeoAttendanceViewModel extends BaseViewModel<GeoAttendanceState> {
       latitude: latitude,
       longitude: longitude,
       gpsAccuracy: gpsAccuracy,
+      clearGpsAccuracy: gpsAccuracy == null,
       locationUnavailable: false,
       distanceMeters: centerLat == null || centerLng == null
           ? null
@@ -208,6 +213,12 @@ class GeoAttendanceViewModel extends BaseViewModel<GeoAttendanceState> {
           error: 'Waiting for a GPS fix — try again in a moment.');
       return false;
     }
+    if (!_hasUsableAccuracy) {
+      state = state.copyWith(
+        error: 'GPS accuracy must be between 0 and 20 meters.',
+      );
+      return false;
+    }
     state =
         state.copyWith(isMarking: true, clearError: true, clearErrorKind: true);
     try {
@@ -231,6 +242,14 @@ class GeoAttendanceViewModel extends BaseViewModel<GeoAttendanceState> {
       );
       return false;
     }
+  }
+
+  bool get _hasUsableAccuracy {
+    final accuracy = state.gpsAccuracy;
+    return accuracy != null &&
+        accuracy.isFinite &&
+        accuracy > 0 &&
+        accuracy <= maxGpsAccuracyMeters;
   }
 
   @override

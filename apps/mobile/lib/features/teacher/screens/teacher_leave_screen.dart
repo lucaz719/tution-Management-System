@@ -21,7 +21,6 @@ const _leaveTypes = [
   'SICK',
   'LONG_SICK',
   'EARLY_OUT',
-  'EMERGENCY',
 ];
 
 class TeacherLeaveScreen extends ConsumerWidget {

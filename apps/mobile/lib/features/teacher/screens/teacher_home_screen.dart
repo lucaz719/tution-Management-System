@@ -138,9 +138,27 @@ class _TeacherHomeScreenState extends ConsumerState<TeacherHomeScreen> {
           child: _TodayTab(
             workspace: workspace,
             onMarkAttendance: (today) => _openGeo(context, workspace, today),
+            onSubmitUpdate: (pending) =>
+                _showDailyUpdateDialog(context, vm, pending),
           ),
         );
     }
+  }
+
+  Future<void> _showDailyUpdateDialog(
+    BuildContext context,
+    TeacherPortalViewModel vm,
+    TeacherPendingUpdate pending,
+  ) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => _DailyUpdateDialog(
+        onSubmit: (content) => vm.submitSessionUpdate(
+          sessionId: pending.sessionId,
+          updateContent: content,
+        ),
+      ),
+    );
   }
 
   void _openGeo(
@@ -175,11 +193,74 @@ class _TeacherHomeScreenState extends ConsumerState<TeacherHomeScreen> {
   }
 }
 
+class _DailyUpdateDialog extends StatefulWidget {
+  const _DailyUpdateDialog({required this.onSubmit});
+
+  final Future<bool> Function(String content) onSubmit;
+
+  @override
+  State<_DailyUpdateDialog> createState() => _DailyUpdateDialogState();
+}
+
+class _DailyUpdateDialogState extends State<_DailyUpdateDialog> {
+  final _controller = TextEditingController();
+  bool _submitting = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Submit daily update'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        maxLines: 5,
+        maxLength: 5000,
+        decoration: const InputDecoration(
+          labelText: 'What was covered?',
+          alignLabelWithHint: true,
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _submitting
+              ? null
+              : () async {
+                  setState(() => _submitting = true);
+                  final submitted = await widget.onSubmit(_controller.text);
+                  if (!context.mounted) return;
+                  if (submitted) {
+                    Navigator.of(context).pop();
+                  } else {
+                    setState(() => _submitting = false);
+                  }
+                },
+          child: Text(_submitting ? 'Submitting…' : 'Submit update'),
+        ),
+      ],
+    );
+  }
+}
+
 class _TodayTab extends StatelessWidget {
-  const _TodayTab({required this.workspace, required this.onMarkAttendance});
+  const _TodayTab({
+    required this.workspace,
+    required this.onMarkAttendance,
+    required this.onSubmitUpdate,
+  });
 
   final TeacherWorkspace workspace;
   final void Function(TeacherTodayClass) onMarkAttendance;
+  final void Function(TeacherPendingUpdate) onSubmitUpdate;
 
   @override
   Widget build(BuildContext context) {
@@ -204,6 +285,22 @@ class _TodayTab extends StatelessWidget {
         const SizedBox(height: 16),
         Text('Pending daily updates: ${workspace.pendingUpdateCount}',
             style: Theme.of(context).textTheme.bodyMedium),
+        if (workspace.pendingUpdates.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          for (final pending in workspace.pendingUpdates)
+            Card(
+              child: ListTile(
+                title: Text('${pending.courseName} — ${pending.className}'),
+                subtitle: pending.date == null
+                    ? null
+                    : Text(pending.date!.toLocal().toString().split(' ').first),
+                trailing: FilledButton.tonal(
+                  onPressed: () => onSubmitUpdate(pending),
+                  child: const Text('Submit daily update'),
+                ),
+              ),
+            ),
+        ],
       ],
     );
   }
