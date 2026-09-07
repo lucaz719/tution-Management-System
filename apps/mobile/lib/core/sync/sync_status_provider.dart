@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'connectivity_monitor.dart';
+import 'api_mutation_sender.dart';
 import 'sync_models.dart';
 import 'sync_queue.dart';
 
@@ -12,26 +13,27 @@ class SyncStatusNotifier extends StateNotifier<SyncStatus> {
   final Ref _ref;
   final SyncQueueService _queue;
   final String? Function()? _currentUserId;
+  final MutationSender? _sender;
   StreamSubscription<SyncConflict>? _conflictSub;
   ProviderSubscription<ConnectivityState>? _connSub;
   bool _draining = false;
 
-  SyncStatusNotifier(this._ref, this._queue, {String? Function()? currentUserId})
+  SyncStatusNotifier(this._ref, this._queue,
+      {String? Function()? currentUserId, MutationSender? sender})
       : _currentUserId = currentUserId,
+        _sender = sender,
         super(const SyncStatus()) {
     _conflictSub = _queue.conflicts.listen((c) {
       state = state.copyWith(conflicts: [...state.conflicts, c]);
     });
     _connSub = _ref.listen<ConnectivityState>(connectivityMonitorProvider,
         (prev, next) {
-      state = state.copyWith(
-          isOnline: next == ConnectivityState.online);
+      state = state.copyWith(isOnline: next == ConnectivityState.online);
       if (next == ConnectivityState.online) drain();
     });
     state = state.copyWith(
         isOnline:
-            _ref.read(connectivityMonitorProvider) ==
-                ConnectivityState.online);
+            _ref.read(connectivityMonitorProvider) == ConnectivityState.online);
     refreshPending();
   }
 
@@ -54,10 +56,10 @@ class SyncStatusNotifier extends StateNotifier<SyncStatus> {
     _draining = true;
     state = state.copyWith(isSyncing: true);
     try {
-      // Default sender without a transport wired: treat everything as
-      // retryable (stay queued) — the app layer injects the real sender.
-      final result =
-          await _queue.drain(id, send ?? ((_) async => ReplayOutcome.retryable));
+      // Wired sender replays through the API; without one (tests that
+      // don't provide it) everything stays queued as retryable.
+      final result = await _queue.drain(
+          id, send ?? _sender ?? ((_) async => ReplayOutcome.retryable));
       await refreshPending();
       return result;
     } finally {
@@ -96,9 +98,17 @@ final syncQueueServiceProvider = Provider<SyncQueueService>((ref) {
 /// Current-user id supplier (app wires to AuthState).
 final syncCurrentUserIdProvider = Provider<String? Function()?>((ref) => null);
 
+/// Transport for replaying queued mutations. Defaults to the ApiClient
+/// sender; override in tests with a fake.
+final mutationSenderProvider = Provider<MutationSender>((ref) {
+  return buildApiMutationSender();
+});
+
 final syncStatusProvider =
     StateNotifierProvider<SyncStatusNotifier, SyncStatus>((ref) {
   final queue = ref.watch(syncQueueServiceProvider);
   final currentUser = ref.watch(syncCurrentUserIdProvider);
-  return SyncStatusNotifier(ref, queue, currentUserId: currentUser);
+  final sender = ref.watch(mutationSenderProvider);
+  return SyncStatusNotifier(ref, queue,
+      currentUserId: currentUser, sender: sender);
 });

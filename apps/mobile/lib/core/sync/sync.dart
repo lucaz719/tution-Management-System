@@ -2,6 +2,7 @@ library;
 
 export '../database/app_database.dart'
     show AppDatabase, clearOfflineCache, registerOfflineDatabase;
+export 'api_mutation_sender.dart';
 export 'connectivity_monitor.dart';
 export 'offline_entity_cache.dart';
 export 'sync_models.dart';
