@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:tms_mobile/core/auth/role_codes.dart';
+import 'package:tms_mobile/core/sync/sync.dart';
 import 'package:tms_mobile/features/auth/data/auth_service.dart';
 
 /// Global auth state — drives router guards and role-based navigation.
@@ -148,15 +150,42 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   /// Sign out and clear all session data.
+  ///
+  /// Captures the current user id BEFORE clearing state, then wipes that
+  /// user's offline rows ([clearOfflineCache]). A null/empty id skips the
+  /// wipe safely.
   Future<void> logout() async {
+    final userId = state.user?.id;
     await AuthService.signOut();
+    if (userId != null && userId.isNotEmpty) {
+      await clearOfflineCache(userId);
+    }
     state = const AuthState(isLoading: false);
   }
 
   /// Drop local session state without a network call (401/session-expired
   /// path — the server already rejected the session). Drives router to /login.
-  void forceLogout() {
+  ///
+  /// Captures the user id first, then wipes that user's offline rows exactly
+  /// once: after the first call the state user is null, so repeat calls
+  /// (e.g. concurrent 401s via [ApiClient.clearAuth] + onSessionInvalidated)
+  /// are safe no-ops that never touch another user's rows.
+  Future<void> forceLogout() async {
+    final userId = state.user?.id;
     state = const AuthState(isLoading: false);
+    if (userId != null && userId.isNotEmpty) {
+      await clearOfflineCache(userId);
+    }
+  }
+
+  /// Seed an authenticated user in tests without touching the network.
+  @visibleForTesting
+  void seedAuthenticatedForTesting(AuthUser user) {
+    state = AuthState(
+      user: user,
+      isAuthenticated: true,
+      isLoading: false,
+    );
   }
 
   /// Reset the failed-attempt counter (e.g. after a successful reset-password).
