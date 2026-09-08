@@ -30,6 +30,7 @@
     "test:financial-intelligence": "ts-node src/utils/financial-intelligence.test.ts",
     "test:payroll": "ts-node src/services/payroll-service.test.ts",
     "test:route-auth": "ts-node src/routes/route-authentication.test.ts",
+    "test:attendance": "ts-node src/routes/attendance.test.ts",
     "test:phase-one-security": "ts-node src/routes/phase-one-security.test.ts",
     "test:phase-two-billing": "ts-node src/routes/phase-two-billing.test.ts",
     "test:phase-three-workflows": "ts-node src/routes/phase-three-workflows.test.ts",
