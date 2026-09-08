@@ -144,6 +144,43 @@ enum AdmissionLoginRecipient {
 }
 
 // Client tenant onboarding request flow (Super Admin reviews, then manually provisions)
+model MobileRecovery {
+  id                String   @id @default(uuid())
+  userId            String
+  tenantId          String
+  tokenHash         String   @unique
+  newPhone          String
+  oldPhone          String
+  accountUpdatedAt  DateTime
+  credentialHash    String
+  reviewer          String
+  reviewReference   String
+  approvedAt        DateTime @default(now())
+  expiresAt         DateTime
+  consumedAt        DateTime?
+  revokedAt         DateTime?
+  codeHash          String?
+  codeExpiresAt     DateTime?
+  attempts          Int      @default(0)
+  sends             Int      @default(0)
+  lastSentAt        DateTime?
+
+  @@index([userId, consumedAt])
+}
+
+model RecoverySmsNotice {
+  id         String   @id @default(uuid())
+  recoveryId String
+  recipient  String
+  message    String
+  acceptedAt DateTime?
+  leaseUntil DateTime?
+  attempts   Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@unique([recoveryId, recipient])
+}
+
 model TenantRequest {
   id        String   @id @default(uuid())
   name      String
@@ -258,6 +295,8 @@ model User {
   firstName                String
   lastName                 String
   phone                    String
+  securityMobile           String?
+  securityMobileVerifiedAt DateTime?
   status                   UserStatus               @default(ACTIVE)
   createdAt                DateTime                 @default(now())
   updatedAt                DateTime                 @updatedAt

@@ -1773,11 +1773,15 @@ async function loadManageableUser(req: TenantRequest, id: string) {
 
   const user = await prisma.user.findFirst({
     where: { id, tenantId: req.tenantId! },
-    include: { userRoles: true, student: true, staffRecord: true },
+    include: { userRoles: { include: { role: { select: { name: true } } } }, student: true, staffRecord: true },
   });
   if (!user) return { error: 404 as const };
 
   if (!tenantAdmin) {
+    // Protect the whole admin account, even when another role matches this branch.
+    const adminTarget = user.userRoles.some((ur) =>
+      ['Branch Admin', 'Tenant Admin', 'Super Admin'].includes(ur.role.name));
+    if (adminTarget) return { error: 403 as const };
     const inScope = user.userRoles.some((ur) => ur.branchId && scopes.includes(ur.branchId));
     if (!inScope) return { error: 403 as const };
   }

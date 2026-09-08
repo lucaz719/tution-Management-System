@@ -41,6 +41,6 @@ export function MobileChangeForm() {
     </div>
     {challenge && <p>Both codes expire after five minutes. To request new codes, cancel and start again.</p>}
     <div className="account-actions"><Button type="submit" disabled={busy}>{busy ? 'Please wait…' : challenge ? 'Confirm mobile change' : 'Send verification codes'}</Button><Button type="button" variant="outline" disabled={busy} onClick={cancel}>Cancel</Button></div>
-    <details><summary>Can’t access your current number?</summary><p>Do not replace it through another person’s account. Contact your institution’s authorized support operator for identity review. Self-service recovery is not available until a verified recovery channel is configured.</p></details>
+    <details><summary>Can’t access your current number?</summary><p>Contact platform support for an identity review. After support approves your replacement number, <a href="/recover-mobile">complete recovery with your private token and SMS code</a>.</p></details>
   </form>;
 }

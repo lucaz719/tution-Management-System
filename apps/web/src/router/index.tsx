@@ -1,4 +1,5 @@
 import { TenantAccountPage } from '../pages/TenantAccountPage';
+import { MobileRecoveryPage } from '../pages/auth/MobileRecoveryPage';
 import { PaymentSettingsPage } from '../pages/PaymentSettingsPage';
 import { lazy, Suspense } from 'react';
 import {
@@ -220,6 +221,9 @@ function RoleWorkspacePlaceholder({ role }: { role: DashboardRole }) {
 }
 
 const router = createBrowserRouter([
+  // Available while signed in as well as when locked out; the private recovery
+  // token and approved-destination SMS authenticate this flow.
+  { path: '/recover-mobile', element: <PublicAuthLayout />, children: [{ index: true, element: <MobileRecoveryPage /> }], errorElement: <RouteFailurePage /> },
   {
     errorElement: <RouteFailurePage />,
     element: <RedirectIfAuth />,

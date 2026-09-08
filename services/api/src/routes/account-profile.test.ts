@@ -26,7 +26,7 @@ async function main() {
   }
   actor = { id: 'admin', tenantId: 'tenant', roles: [{ roleName: 'Tenant Admin', branchId: null, permissions: [] }] };
   assert.equal((await invoke('get')).status, 200);
-  for (const extra of [{ phone: '9800000000' }, { email: 'other@example.test' }, { tenantId: 'other' }, { id: 'other' }, { role: 'Super Admin' }]) {
+  for (const extra of [{ securityMobile: '9800000000' }, { securityMobileVerifiedAt: new Date().toISOString() }, { phone: '9800000000' }, { email: 'other@example.test' }, { tenantId: 'other' }, { id: 'other' }, { role: 'Super Admin' }]) {
     assert.equal((await invoke('patch', '/me/account', { firstName: 'New', lastName: 'Name', ...extra })).status, 400);
   }
   assert.equal((await invoke('patch', '/me/account', { firstName: ' ', lastName: 'Name' })).status, 400);

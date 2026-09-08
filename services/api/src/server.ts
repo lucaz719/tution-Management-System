@@ -1,5 +1,7 @@
-import accountContactRouter from './routes/account-contact';
 import 'dotenv/config';
+import accountContactRouter from './routes/account-contact';
+import mobileRecoveryRouter from './routes/mobile-recovery';
+import { authenticationSmsConfigured } from './utils/delivery';
 import crypto from 'crypto';
 import express, { Response } from 'express';
 import cors from 'cors';
@@ -106,6 +108,9 @@ app.use('/api/auth', (req, res, next) => {
 
 // Better Auth must receive the request before express.json() so its body
 // parser and cookie/session handling remain intact.
+app.use('/api/auth/two-factor/send-otp', (_req, res, next) => authenticationSmsConfigured()
+  ? next()
+  : res.status(503).json({ error: 'SMS authentication is temporarily unavailable.' }));
 app.all('/api/auth/*', monitorCredentialSignIn, toNodeHandler(auth));
 
 app.use('/api/finances/manual-payment', express.json({ limit: '2mb' }));
@@ -123,6 +128,7 @@ if (process.env.PLATFORM_ADMIN_ENABLED === 'true') {
 }
 app.use('/api/branches', branchesRouter);
 app.use('/api/account/contact', accountContactRouter);
+app.use('/api/account/recovery', mobileRecoveryRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/teacher', teacherRouter);
 app.use('/api/grades', gradesRouter);
