@@ -33,7 +33,7 @@ Mobile admin management is intentionally absent. The existing mobile parent fee 
 
 ## Verified image updates
 
-Tenant admins upload or replace an image, review the preview and account details, and choose **Verify and save**. A six-digit code is sent to their saved mobile number. Saving, disabling, and resetting all require SMS confirmation. Branch admins remain read-only.
+The tenant-admin page opens in a saved summary state. **Edit settings** reveals the form, and the file picker appears only when adding or replacing a QR image. Uploading and previewing an image never sends a code. **Continue to SMS verification** is enabled only after the configuration changes and requests one six-digit code for the exact pending update. Returning to the editor keeps the pending changes without sending another code. A successful confirmation returns to the saved summary. Turning off a branch override follows the restore-defaults confirmation flow. Branch admins remain read-only.
 
 `POST /branches/:branchId/payment-settings/verification` accepts `{ action: "save" | "reset", config }` and returns a challenge ID, masked destination, and expiry. Submit `{ verification: { challengeId, code } }` alongside the PUT settings or in the DELETE body. Codes are bound to the tenant, admin, branch, action, and exact submitted settings. They expire after five minutes, allow five guesses, and can only be consumed once. Request issuance is limited to five per admin per fifteen-minute rate-limit window.
 
