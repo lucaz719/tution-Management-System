@@ -19,6 +19,14 @@ An enabled branch QR overrides defaults. Saving `staticQrEnabled: false` retains
 
 ConnectIPS always uses tenant settings. Currently, tenant defaults are loaded from environment variables; there is no separate persisted tenant-default settings layer. When neither static QR nor ConnectIPS is available, checkout directs the payer to contact an administrator.
 
+The target product model is:
+
+- **Tenant default QR:** one fallback QR configured by the tenant admin and inherited by branches without an override.
+- **Branch QR override:** an optional QR for one branch. The invoice determines the branch; clients never choose it while submitting payment.
+- **ConnectIPS:** one tenant-level merchant configuration shared by every branch. Each payment attempt still stores the invoice-derived `tenantId`, `branchId`, and `invoiceId`, so callbacks can automate settlement for the correct branch and invoice.
+
+Persisted tenant-default editing is still a separate backend change. Until that exists, the default QR and ConnectIPS enablement come from deployment environment variables. The UI must not imply that an environment-backed default was saved by a tenant admin.
+
 Enabling QR requires an uploaded PNG, JPEG, or WebP image (under 1 MB; file signature checked by the server), account name and bank name (1–100 characters each), and account number (5–20 characters). Account numbers stay strings to preserve leading zeros. Instructions are optional (up to 500 characters).
 
 Reads retry transient network failures twice with exponential backoff. Writes are never automatically replayed. HTTP 400, 403, and 404 responses are shown without retrying automatically.
@@ -40,3 +48,13 @@ The tenant-admin page opens in a saved summary state. **Edit settings** reveals 
 SMS delivery requires `SMS_PROVIDER=AAKASH`, `AAKASH_SMS_AUTH_TOKEN`, and a valid saved Nepali mobile number. Mock or disabled SMS cannot authorize changes. No real SMS was sent during automated tests.
 
 The existing `staticQrImageUrl` field retains its name for compatibility but new writes contain the uploaded image as a data URI stored in the database; external image URLs are rejected on new saves. Existing URL configurations can still be read, but must be replaced with an upload before resaving. This needs no schema migration. Mobile renders uploaded images from bytes.
+
+## Payment proof and official receipt
+
+The image uploaded by a parent is **payment proof**. It remains attached to the manual QR payment attempt for administrative review. The tenant Payments page renders that data image in an authenticated in-app viewer and shows the attempt's branch. It does not navigate to the raw data URI.
+
+After an administrator approves the proof, the transaction marks the invoice paid. The paid invoice, payment date, transaction reference, original line items, PAN snapshot, and VAT snapshot form the official receipt shown to the parent or student. Rejecting proof does not create a paid receipt.
+
+Manual-payment proofs use private Cloudflare R2 when `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_BUCKET` are all configured. The API uploads the validated image under a tenant- and branch-scoped key, stores an `r2:` object reference in PostgreSQL, and returns a five-minute signed URL only after payment-list authorization. If the R2 configuration is incomplete, the existing database data URI remains as a rollout fallback.
+
+Branch QR images still use database data URIs. Moving them requires a second compatibility step because existing QR editing and SMS challenge hashing bind the exact image value. Do that together with persisted tenant-default QR settings rather than changing the storage identifier independently.

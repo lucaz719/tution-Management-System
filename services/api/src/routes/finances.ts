@@ -17,6 +17,7 @@ import { reconcileBranchBillingAccess } from '../services/billing-access';
 import { buildFinancialIntelligence } from '../utils/financial-intelligence';
 import { invoiceTypeLabel } from '../utils/invoice-document';
 import { getTenantPaymentSettings, getBranchPaymentSettings, upsertBranchPaymentSettings, deleteBranchPaymentSettings, getTenantBranchPaymentSettings } from '../services/branch-payment-settings';
+import { privateImageUrl, storePrivateImage } from '../services/object-storage';
 import {
   compensationStructure,
   createPayrollRecords,
@@ -407,7 +408,9 @@ router.post('/manual-payment/:invoiceId', authMiddleware, async (req: TenantRequ
   const duplicate = await prisma.paymentAttempt.findFirst({ where: { tenantId: req.tenantId!, provider: 'BANK', referenceId: referenceId.data } });
   if (duplicate) return res.status(409).json({ error: 'This payment reference was already submitted.' });
   const txnId = `qr_${crypto.randomBytes(8).toString('hex')}`;
-  const attempt = await prisma.paymentAttempt.create({ data: { tenantId: req.tenantId!, branchId: invoice.branchId, invoiceId: invoice.id, provider: 'BANK', status: 'PENDING', txnId, referenceId: referenceId.data, amountPaisa: BigInt(Math.round(Number(invoice.netPayable) * 100)), receiptProof: receiptProof.data, receiptMimeType: receiptProof.data.slice(5, receiptProof.data.indexOf(';')), gatewayStatus: 'AWAITING_REVIEW', createdBy: req.user!.id } });
+  const attemptId = crypto.randomUUID();
+  const storedProof = await storePrivateImage(receiptProof.data, { tenantId: req.tenantId!, branchId: invoice.branchId, category: 'payment-proofs', id: attemptId });
+  const attempt = await prisma.paymentAttempt.create({ data: { id: attemptId, tenantId: req.tenantId!, branchId: invoice.branchId, invoiceId: invoice.id, provider: 'BANK', status: 'PENDING', txnId, referenceId: referenceId.data, amountPaisa: BigInt(Math.round(Number(invoice.netPayable) * 100)), receiptProof: storedProof, receiptMimeType: receiptProof.data.slice(5, receiptProof.data.indexOf(';')), gatewayStatus: 'AWAITING_REVIEW', createdBy: req.user!.id } });
   return res.status(201).json({ id: attempt.id, txnId, status: attempt.status, message: 'Receipt submitted for verification.' });
 });
 
@@ -415,7 +418,7 @@ router.get('/manual-payments', authMiddleware, async (req: TenantRequest, res: R
   const access = billingBranchScopes(req.user);
   if (!access.isTenantAdmin && access.scopes.length === 0) return res.status(403).json({ error: 'You do not have access to payment receipts.' });
   const attempts = await prisma.paymentAttempt.findMany({ where: { tenantId: req.tenantId!, provider: 'BANK', status: { in: ['PENDING', 'SUCCESS', 'FAILED'] }, ...(access.isTenantAdmin ? {} : { branchId: { in: access.scopes } }) }, include: { invoice: { include: { student: { include: { user: true } } } } }, orderBy: { createdAt: 'desc' }, take: 100 });
-  return res.json({ attempts: attempts.map((attempt) => ({ id: attempt.id, txnId: attempt.txnId, referenceId: attempt.referenceId, amount: Number(attempt.amountPaisa) / 100, status: attempt.status, receiptProof: attempt.receiptProof, createdAt: attempt.createdAt, reviewedAt: attempt.reviewedAt, reviewRemarks: attempt.reviewRemarks, invoiceId: attempt.invoiceId, studentName: `${attempt.invoice.student.user.firstName} ${attempt.invoice.student.user.lastName}`.trim() })) });
+  return res.json({ attempts: await Promise.all(attempts.map(async (attempt) => ({ id: attempt.id, txnId: attempt.txnId, referenceId: attempt.referenceId, amount: Number(attempt.amountPaisa) / 100, status: attempt.status, receiptProof: await privateImageUrl(attempt.receiptProof), createdAt: attempt.createdAt, reviewedAt: attempt.reviewedAt, reviewRemarks: attempt.reviewRemarks, invoiceId: attempt.invoiceId, studentName: `${attempt.invoice.student.user.firstName} ${attempt.invoice.student.user.lastName}`.trim() }))) });
 });
 
 router.get('/payment-attempts', authMiddleware, async (req: TenantRequest, res: Response) => {
@@ -423,11 +426,11 @@ router.get('/payment-attempts', authMiddleware, async (req: TenantRequest, res: 
   if (!access.isTenantAdmin && access.scopes.length === 0) return res.status(403).json({ error: 'You do not have access to payment activity.' });
   const attempts = await prisma.paymentAttempt.findMany({
     where: { tenantId: req.tenantId!, provider: { in: ['CONNECTIPS', 'BANK'] }, ...(access.isTenantAdmin ? {} : { branchId: { in: access.scopes } }) },
-    include: { invoice: { include: { student: { include: { user: true } } } } },
+    include: { branch: { select: { id: true, name: true } }, invoice: { include: { student: { include: { user: true } } } } },
     orderBy: { createdAt: 'desc' },
     take: 200,
   });
-  return res.json({ attempts: attempts.map((attempt) => ({
+  return res.json({ attempts: await Promise.all(attempts.map(async (attempt) => ({
     id: attempt.id,
     txnId: attempt.txnId,
     provider: attempt.provider,
@@ -436,7 +439,7 @@ router.get('/payment-attempts', authMiddleware, async (req: TenantRequest, res: 
     status: attempt.status,
     gatewayStatus: attempt.gatewayStatus,
     gatewayMessage: attempt.gatewayMessage,
-    receiptProof: attempt.receiptProof,
+    receiptProof: await privateImageUrl(attempt.receiptProof),
     createdAt: attempt.createdAt,
     confirmedAt: attempt.confirmedAt,
     failedAt: attempt.failedAt,
@@ -444,8 +447,10 @@ router.get('/payment-attempts', authMiddleware, async (req: TenantRequest, res: 
     reviewRemarks: attempt.reviewRemarks,
     invoiceId: attempt.invoiceId,
     invoiceStatus: attempt.invoice.status,
+    branchId: attempt.branch.id,
+    branchName: attempt.branch.name,
     studentName: `${attempt.invoice.student.user.firstName} ${attempt.invoice.student.user.lastName}`.trim(),
-  })) });
+  }))) });
 });
 
 router.post('/manual-payments/:id/decision', authMiddleware, async (req: TenantRequest, res: Response) => {

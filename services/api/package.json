@@ -38,7 +38,7 @@
     "test:phase-one-security": "ts-node src/routes/phase-one-security.test.ts",
     "test:phase-two-billing": "ts-node src/routes/phase-two-billing.test.ts",
     "test:phase-three-workflows": "ts-node src/routes/phase-three-workflows.test.ts",
-    "test:phase-four-branch-payment": "ts-node src/services/branch-payment-settings.test.ts && ts-node src/routes/branch-payment-settings.test.ts && ts-node src/routes/payment-settings-access.test.ts && ts-node src/services/payment-settings-verification.test.ts",
+    "test:phase-four-branch-payment": "ts-node src/services/branch-payment-settings.test.ts && ts-node src/routes/branch-payment-settings.test.ts && ts-node src/routes/payment-settings-access.test.ts && ts-node src/services/payment-settings-verification.test.ts && ts-node src/services/object-storage.test.ts",
     "admissions:recover": "ts-node src/scripts/recover-admission-deliveries.ts",
     "test:tenant-admin:integration": "ts-node src/integration/tenant-admin.integration.test.ts"
   },
@@ -53,6 +53,8 @@
     "ext": "ts,json,env"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1128.0",
+    "@aws-sdk/s3-request-presigner": "^3.1128.0",
     "@prisma/client": "^5.0.0",
     "@tms/types": "*",
     "bcryptjs": "^2.4.3",
