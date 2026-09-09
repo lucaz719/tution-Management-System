@@ -39,7 +39,8 @@ class StudentHomeScreen extends ConsumerWidget {
         selectedIndex: 0,
         body: _HomeStateMessage(
           state: state,
-          isOffline: state.isOffline || connectivity == ConnectivityState.offline,
+          isOffline:
+              state.isOffline || connectivity == ConnectivityState.offline,
           onRetry: viewModel.load,
         ),
       );
@@ -630,8 +631,7 @@ class StudentHomeScreen extends ConsumerWidget {
                           width: 48,
                           height: 48,
                           decoration: BoxDecoration(
-                            color:
-                                StudentColors.accent.withValues(alpha: 0.1),
+                            color: StudentColors.accent.withValues(alpha: 0.1),
                             borderRadius:
                                 BorderRadius.circular(StudentRadius.card),
                           ),

@@ -11,7 +11,8 @@ class BranchAdminHomeScreen extends ConsumerStatefulWidget {
   const BranchAdminHomeScreen({super.key});
 
   @override
-  ConsumerState<BranchAdminHomeScreen> createState() => _BranchAdminHomeScreenState();
+  ConsumerState<BranchAdminHomeScreen> createState() =>
+      _BranchAdminHomeScreenState();
 }
 
 class _BranchAdminHomeScreenState extends ConsumerState<BranchAdminHomeScreen> {
@@ -104,7 +105,8 @@ class _BranchAdminHomeScreenState extends ConsumerState<BranchAdminHomeScreen> {
     final user = ref.watch(authProvider).user;
     final sizeClass = Breakpoints.fromWidth(MediaQuery.sizeOf(context).width);
     final canShowSidebar = const ShowSidebar().isAvailableAt(sizeClass);
-    final pendingCount = _leaveRequests.where((r) => r['status'] == 'PENDING').length;
+    final pendingCount =
+        _leaveRequests.where((r) => r['status'] == 'PENDING').length;
 
     return AdaptiveScaffold(
       appBar: AppBar(
@@ -233,7 +235,10 @@ class _BranchAdminHomeScreenState extends ConsumerState<BranchAdminHomeScreen> {
         ),
         const SizedBox(height: 24),
         Text('Quick Administrative Actions',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+            style: Theme.of(context)
+                .textTheme
+                .titleMedium
+                ?.copyWith(fontWeight: FontWeight.w700)),
         const SizedBox(height: 14),
         Row(
           children: [
@@ -279,7 +284,9 @@ class _BranchAdminHomeScreenState extends ConsumerState<BranchAdminHomeScreen> {
                 color: kColorPrimaryLight,
                 onTap: () {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Petty Cash L1 expense reports are currently up to date.')),
+                    const SnackBar(
+                        content: Text(
+                            'Petty Cash L1 expense reports are currently up to date.')),
                   );
                 },
               ),
@@ -288,10 +295,14 @@ class _BranchAdminHomeScreenState extends ConsumerState<BranchAdminHomeScreen> {
         ),
         const SizedBox(height: 24),
         Text('Recent Branch Activity',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+            style: Theme.of(context)
+                .textTheme
+                .titleMedium
+                ?.copyWith(fontWeight: FontWeight.w700)),
         const SizedBox(height: 12),
         Card(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           child: Column(
             children: [
               ListTile(
@@ -299,9 +310,11 @@ class _BranchAdminHomeScreenState extends ConsumerState<BranchAdminHomeScreen> {
                   backgroundColor: Color(0xFFE8F5E9),
                   child: Icon(Icons.check, color: kColorSuccess),
                 ),
-                title: const Text('Grade 10 Mathematics Geo-Attendance Verified'),
+                title:
+                    const Text('Grade 10 Mathematics Geo-Attendance Verified'),
                 subtitle: const Text('Aarati Shrestha • 28 students present'),
-                trailing: Text('08:02 AM', style: Theme.of(context).textTheme.bodySmall),
+                trailing: Text('08:02 AM',
+                    style: Theme.of(context).textTheme.bodySmall),
               ),
               const Divider(height: 1),
               ListTile(
@@ -310,8 +323,10 @@ class _BranchAdminHomeScreenState extends ConsumerState<BranchAdminHomeScreen> {
                   child: Icon(Icons.event_busy, color: kColorWarning),
                 ),
                 title: const Text('Leave Request Submitted'),
-                subtitle: const Text('Shyam Adhikari requested Sick Leave for 15 Jul'),
-                trailing: Text('08:30 AM', style: Theme.of(context).textTheme.bodySmall),
+                subtitle: const Text(
+                    'Shyam Adhikari requested Sick Leave for 15 Jul'),
+                trailing: Text('08:30 AM',
+                    style: Theme.of(context).textTheme.bodySmall),
               ),
             ],
           ),
@@ -327,7 +342,8 @@ class _BranchAdminHomeScreenState extends ConsumerState<BranchAdminHomeScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text('Leave Approvals', style: Theme.of(context).textTheme.headlineSmall),
+            Text('Leave Approvals',
+                style: Theme.of(context).textTheme.headlineSmall),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
@@ -336,7 +352,8 @@ class _BranchAdminHomeScreenState extends ConsumerState<BranchAdminHomeScreen> {
               ),
               child: Text(
                 '${_leaveRequests.where((r) => r['status'] == 'PENDING').length} Pending',
-                style: const TextStyle(fontWeight: FontWeight.w700, color: kColorPrimary),
+                style: const TextStyle(
+                    fontWeight: FontWeight.w700, color: kColorPrimary),
               ),
             ),
           ],
@@ -348,7 +365,8 @@ class _BranchAdminHomeScreenState extends ConsumerState<BranchAdminHomeScreen> {
 
           return Card(
             margin: const EdgeInsets.only(bottom: 14),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -358,9 +376,11 @@ class _BranchAdminHomeScreenState extends ConsumerState<BranchAdminHomeScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(leave['applicant'] as String,
-                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w700, fontSize: 16)),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
                           color: isApproved
                               ? kColorSuccess.withValues(alpha: 0.1)
@@ -385,7 +405,8 @@ class _BranchAdminHomeScreenState extends ConsumerState<BranchAdminHomeScreen> {
                     ],
                   ),
                   const SizedBox(height: 4),
-                  Text(leave['role'] as String, style: Theme.of(context).textTheme.bodySmall),
+                  Text(leave['role'] as String,
+                      style: Theme.of(context).textTheme.bodySmall),
                   const SizedBox(height: 10),
                   Container(
                     padding: const EdgeInsets.all(10),
@@ -398,14 +419,17 @@ class _BranchAdminHomeScreenState extends ConsumerState<BranchAdminHomeScreen> {
                       children: [
                         Row(
                           children: [
-                            const Icon(Icons.calendar_today_outlined, size: 16, color: kColorPrimary),
+                            const Icon(Icons.calendar_today_outlined,
+                                size: 16, color: kColorPrimary),
                             const SizedBox(width: 8),
                             Text('${leave['type']} • ${leave['dates']}',
-                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w600, fontSize: 13)),
                           ],
                         ),
                         const SizedBox(height: 6),
-                        Text('Reason: ${leave['reason']}', style: Theme.of(context).textTheme.bodyMedium),
+                        Text('Reason: ${leave['reason']}',
+                            style: Theme.of(context).textTheme.bodyMedium),
                       ],
                     ),
                   ),
@@ -415,14 +439,18 @@ class _BranchAdminHomeScreenState extends ConsumerState<BranchAdminHomeScreen> {
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
                         OutlinedButton(
-                          onPressed: () => _updateLeaveStatus(leave['id'] as String, 'REJECTED'),
-                          style: OutlinedButton.styleFrom(foregroundColor: kColorError),
+                          onPressed: () => _updateLeaveStatus(
+                              leave['id'] as String, 'REJECTED'),
+                          style: OutlinedButton.styleFrom(
+                              foregroundColor: kColorError),
                           child: const Text('Reject'),
                         ),
                         const SizedBox(width: 10),
                         FilledButton(
-                          onPressed: () => _updateLeaveStatus(leave['id'] as String, 'APPROVED'),
-                          style: FilledButton.styleFrom(backgroundColor: kColorSuccess),
+                          onPressed: () => _updateLeaveStatus(
+                              leave['id'] as String, 'APPROVED'),
+                          style: FilledButton.styleFrom(
+                              backgroundColor: kColorSuccess),
                           child: const Text('Approve Leave'),
                         ),
                       ],
@@ -444,8 +472,10 @@ class _BranchAdminHomeScreenState extends ConsumerState<BranchAdminHomeScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text('Branch Staff & Teachers', style: Theme.of(context).textTheme.headlineSmall),
-            Text('${_staffMembers.length} Members', style: const TextStyle(fontWeight: FontWeight.w600)),
+            Text('Branch Staff & Teachers',
+                style: Theme.of(context).textTheme.headlineSmall),
+            Text('${_staffMembers.length} Members',
+                style: const TextStyle(fontWeight: FontWeight.w600)),
           ],
         ),
         const SizedBox(height: 16),
@@ -453,7 +483,8 @@ class _BranchAdminHomeScreenState extends ConsumerState<BranchAdminHomeScreen> {
           final isCheckedIn = staff['status'] == 'CHECKED_IN';
           return Card(
             margin: const EdgeInsets.only(bottom: 12),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
             child: ListTile(
               leading: CircleAvatar(
                 backgroundColor: isCheckedIn
@@ -464,14 +495,16 @@ class _BranchAdminHomeScreenState extends ConsumerState<BranchAdminHomeScreen> {
                   color: isCheckedIn ? kColorSuccess : kColorWarning,
                 ),
               ),
-              title: Text(staff['name'] as String, style: const TextStyle(fontWeight: FontWeight.w700)),
+              title: Text(staff['name'] as String,
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
               subtitle: Text('${staff['role']}\n${staff['phone']}'),
               trailing: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
                       color: isCheckedIn
                           ? kColorSuccess.withValues(alpha: 0.1)
@@ -488,7 +521,8 @@ class _BranchAdminHomeScreenState extends ConsumerState<BranchAdminHomeScreen> {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  Text(staff['time'] as String, style: Theme.of(context).textTheme.bodySmall),
+                  Text(staff['time'] as String,
+                      style: Theme.of(context).textTheme.bodySmall),
                 ],
               ),
             ),
@@ -503,7 +537,8 @@ class _BranchAdminHomeScreenState extends ConsumerState<BranchAdminHomeScreen> {
       padding: const EdgeInsets.all(20),
       children: [
         Card(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           child: Padding(
             padding: const EdgeInsets.all(20),
             child: Column(
@@ -517,15 +552,18 @@ class _BranchAdminHomeScreenState extends ConsumerState<BranchAdminHomeScreen> {
                         color: kColorPrimary.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: const Icon(Icons.business_rounded, color: kColorPrimary, size: 32),
+                      child: const Icon(Icons.business_rounded,
+                          color: kColorPrimary, size: 32),
                     ),
                     const SizedBox(width: 14),
                     const Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('Baneshwor Branch',
-                            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
-                        Text('Branch Code: BR-KTM-01 • Active', style: TextStyle(color: kColorSuccess)),
+                            style: TextStyle(
+                                fontWeight: FontWeight.w700, fontSize: 18)),
+                        Text('Branch Code: BR-KTM-01 • Active',
+                            style: TextStyle(color: kColorSuccess)),
                       ],
                     ),
                   ],
@@ -534,7 +572,8 @@ class _BranchAdminHomeScreenState extends ConsumerState<BranchAdminHomeScreen> {
                 const Divider(),
                 const ListTile(
                   contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.location_on_outlined, color: kColorPrimary),
+                  leading:
+                      Icon(Icons.location_on_outlined, color: kColorPrimary),
                   title: Text('Address'),
                   subtitle: Text('New Baneshwor, Kathmandu, Nepal'),
                 ),
@@ -589,7 +628,8 @@ class _BranchAdminHomeScreenState extends ConsumerState<BranchAdminHomeScreen> {
           ),
           const SizedBox(height: 16),
           ListTile(
-            leading: const Icon(Icons.fact_check_outlined, color: kColorPrimary),
+            leading:
+                const Icon(Icons.fact_check_outlined, color: kColorPrimary),
             title: Text('Pending Approvals ($pendingCount)'),
             onTap: () => setState(() => _selectedIndex = 1),
           ),
@@ -660,8 +700,11 @@ class _AdminActionTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                    Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+                    Text(title,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w700, fontSize: 14)),
+                    Text(subtitle,
+                        style: Theme.of(context).textTheme.bodySmall),
                   ],
                 ),
               ),

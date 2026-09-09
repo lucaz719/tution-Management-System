@@ -220,8 +220,7 @@ void main() {
       expect(snapshot.attendanceRate, 0.5);
     });
 
-    test('fetches performance detail for the snapshot enrollment id',
-        () async {
+    test('fetches performance detail for the snapshot enrollment id', () async {
       final repo = StudentAcademicsRepository(dio: stubPortal());
       final detail = await repo.fetchPerformance('stu-1');
 
@@ -340,9 +339,7 @@ void main() {
       );
       addTearDown(container.dispose);
 
-      await container
-          .read(studentAcademicsViewModelProvider.notifier)
-          .load();
+      await container.read(studentAcademicsViewModelProvider.notifier).load();
       final state = container.read(studentAcademicsViewModelProvider);
       expect(state.offline, isTrue);
       expect(state.hasData, isFalse);
@@ -353,17 +350,14 @@ void main() {
         overrides: [
           studentAcademicsViewModelProvider.overrideWith(
             (ref) => StudentAcademicsViewModel(
-              repository:
-                  StudentAcademicsRepository(dio: stubFailure(403)),
+              repository: StudentAcademicsRepository(dio: stubFailure(403)),
             ),
           ),
         ],
       );
       addTearDown(container.dispose);
 
-      await container
-          .read(studentAcademicsViewModelProvider.notifier)
-          .load();
+      await container.read(studentAcademicsViewModelProvider.notifier).load();
       final state = container.read(studentAcademicsViewModelProvider);
       expect(state.accessDenied, isTrue);
     });

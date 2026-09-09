@@ -37,8 +37,8 @@ class ConnectivityMonitor extends StateNotifier<ConnectivityState> {
         ? (uri.hasPort ? uri.port : (uri.scheme == 'https' ? 443 : 80))
         : 3001;
     try {
-      final socket =
-          await Socket.connect(target, port, timeout: const Duration(seconds: 3));
+      final socket = await Socket.connect(target, port,
+          timeout: const Duration(seconds: 3));
       socket.destroy();
       return true;
     } catch (_) {
@@ -53,7 +53,8 @@ class ConnectivityMonitor extends StateNotifier<ConnectivityState> {
   /// Run one check now and publish the result.
   Future<ConnectivityState> refresh() async {
     final ok = await _check();
-    if (!_disposed) state = ok ? ConnectivityState.online : ConnectivityState.offline;
+    if (!_disposed)
+      state = ok ? ConnectivityState.online : ConnectivityState.offline;
     return state;
   }
 

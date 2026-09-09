@@ -45,8 +45,8 @@ class StudentCalendarScreen extends ConsumerWidget {
               return StudentErrorView(
                 icon: Icons.lock_outline_rounded,
                 title: 'Access denied',
-                message: state.error ??
-                    'Your account cannot view the calendar.',
+                message:
+                    state.error ?? 'Your account cannot view the calendar.',
                 retryLabel: 'Retry',
                 onRetry: viewModel.load,
               );
@@ -201,8 +201,7 @@ class _EventCard extends StatelessWidget {
                 height: 58,
                 decoration: BoxDecoration(
                   color: color.withValues(alpha: .10),
-                  borderRadius:
-                      BorderRadius.circular(StudentRadius.control),
+                  borderRadius: BorderRadius.circular(StudentRadius.control),
                 ),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -235,9 +234,7 @@ class _EventCard extends StatelessWidget {
                     ),
                     const SizedBox(height: StudentSpace.xxs),
                     Text(
-                      event.details.isEmpty
-                          ? event.dateLabel
-                          : event.details,
+                      event.details.isEmpty ? event.dateLabel : event.details,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodySmall,

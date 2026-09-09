@@ -89,8 +89,8 @@ class _StudentIdScreenState extends ConsumerState<StudentIdScreen>
               return StudentErrorView(
                 icon: Icons.lock_outline_rounded,
                 title: 'Access denied',
-                message: state.error ??
-                    'Your account cannot view this student ID.',
+                message:
+                    state.error ?? 'Your account cannot view this student ID.',
                 retryLabel: 'Retry',
                 onRetry: viewModel.load,
               );
@@ -121,8 +121,7 @@ class _StudentIdScreenState extends ConsumerState<StudentIdScreen>
   Widget _buildCard(BuildContext context, StudentIdCard card) {
     final profile = card.profile;
     return RefreshIndicator(
-      onRefresh: () =>
-          ref.read(studentIdViewModelProvider.notifier).refresh(),
+      onRefresh: () => ref.read(studentIdViewModelProvider.notifier).refresh(),
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(20),
@@ -154,11 +153,10 @@ class _StudentIdScreenState extends ConsumerState<StudentIdScreen>
                     Expanded(
                       child: Text(
                         card.statusReason,
-                        style:
-                            Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: StudentColors.error,
-                                  fontWeight: FontWeight.w700,
-                                ),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: StudentColors.error,
+                              fontWeight: FontWeight.w700,
+                            ),
                       ),
                     ),
                   ],
@@ -186,11 +184,10 @@ class _StudentIdScreenState extends ConsumerState<StudentIdScreen>
                     Flexible(
                       child: Text(
                         card.statusReason,
-                        style:
-                            Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: kColorSuccess,
-                                  fontWeight: FontWeight.w700,
-                                ),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: kColorSuccess,
+                              fontWeight: FontWeight.w700,
+                            ),
                       ),
                     ),
                   ],
@@ -336,22 +333,18 @@ class _StudentIdScreenState extends ConsumerState<StudentIdScreen>
                           profile.institution.isEmpty
                               ? 'TMS Academy'
                               : profile.institution,
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w800,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w800,
+                                  ),
                         ),
                         Text(
                           profile.branch,
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(
-                                color: Colors.white.withValues(alpha: 0.8),
-                              ),
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: Colors.white.withValues(alpha: 0.8),
+                                  ),
                         ),
                       ],
                     ),
@@ -368,13 +361,11 @@ class _StudentIdScreenState extends ConsumerState<StudentIdScreen>
                     backgroundColor: kColorPrimary.withValues(alpha: 0.1),
                     child: Text(
                       profile.initials,
-                      style: Theme.of(context)
-                          .textTheme
-                          .headlineMedium
-                          ?.copyWith(
-                            color: kColorPrimary,
-                            fontWeight: FontWeight.w800,
-                          ),
+                      style:
+                          Theme.of(context).textTheme.headlineMedium?.copyWith(
+                                color: kColorPrimary,
+                                fontWeight: FontWeight.w800,
+                              ),
                     ),
                   ),
                   const SizedBox(height: 14),

@@ -260,8 +260,7 @@ void main() {
       );
     });
 
-    test('non-SUCCESS verification keeps outcome failed, never paid',
-        () async {
+    test('non-SUCCESS verification keeps outcome failed, never paid', () async {
       final vm = StudentFeesViewModel(
         repository: StudentFeesRepository(
           dio: stubFeesDio(status: {

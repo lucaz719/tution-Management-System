@@ -146,8 +146,8 @@ class StudentCertificatesScreen extends ConsumerWidget {
                             width: 48,
                             height: 48,
                             decoration: BoxDecoration(
-                              color: StudentColors.primary
-                                  .withValues(alpha: .08),
+                              color:
+                                  StudentColors.primary.withValues(alpha: .08),
                               borderRadius: BorderRadius.circular(
                                 StudentRadius.control,
                               ),
@@ -164,15 +164,13 @@ class StudentCertificatesScreen extends ConsumerWidget {
                               children: [
                                 Text(
                                   certificate.title,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleMedium,
+                                  style:
+                                      Theme.of(context).textTheme.titleMedium,
                                 ),
                                 const SizedBox(height: StudentSpace.xxs),
                                 Text(
                                   '${certificate.course}\nIssued ${certificate.issuedLabel}',
-                                  style:
-                                      Theme.of(context).textTheme.bodySmall,
+                                  style: Theme.of(context).textTheme.bodySmall,
                                 ),
                               ],
                             ),
@@ -187,8 +185,7 @@ class StudentCertificatesScreen extends ConsumerWidget {
                           Expanded(
                             child: Text(
                               certificate.id,
-                              style:
-                                  Theme.of(context).textTheme.bodySmall,
+                              style: Theme.of(context).textTheme.bodySmall,
                             ),
                           ),
                           if (state.downloadingId == certificate.id)
@@ -211,8 +208,7 @@ class StudentCertificatesScreen extends ConsumerWidget {
                             )
                           else
                             TextButton.icon(
-                              onPressed: () =>
-                                  viewModel.download(certificate),
+                              onPressed: () => viewModel.download(certificate),
                               icon: const Icon(Icons.download_rounded),
                               label: const Text('Download PDF'),
                             ),

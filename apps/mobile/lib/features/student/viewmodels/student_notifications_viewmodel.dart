@@ -49,9 +49,8 @@ class StudentNotificationsState extends ViewModelState {
 
   int get unreadCount => notices.where((notice) => !notice.isRead).length;
 
-  List<InboxNotice> get visible => unreadOnly
-      ? notices.where((notice) => !notice.isRead).toList()
-      : notices;
+  List<InboxNotice> get visible =>
+      unreadOnly ? notices.where((notice) => !notice.isRead).toList() : notices;
 
   bool get isEmpty => notices.isEmpty;
 
@@ -79,8 +78,7 @@ class StudentNotificationsViewModel
     extends BaseViewModel<StudentNotificationsState> {
   StudentNotificationsViewModel({
     StudentIdCalendarNotificationsRepository? repository,
-  })  : _repository =
-            repository ?? StudentIdCalendarNotificationsRepository(),
+  })  : _repository = repository ?? StudentIdCalendarNotificationsRepository(),
         super(const StudentNotificationsState(isLoading: true)) {
     load();
   }

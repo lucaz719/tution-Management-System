@@ -31,15 +31,14 @@ class _StudentAttendanceScreenState
   @override
   void initState() {
     super.initState();
-    Future.microtask(() =>
-        ref.read(studentAttendanceViewModelProvider.notifier).load());
+    Future.microtask(
+        () => ref.read(studentAttendanceViewModelProvider.notifier).load());
   }
 
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(studentAttendanceViewModelProvider);
-    final viewModel =
-        ref.read(studentAttendanceViewModelProvider.notifier);
+    final viewModel = ref.read(studentAttendanceViewModelProvider.notifier);
 
     return StudentScaffold(
       title: 'Attendance',
@@ -68,8 +67,8 @@ class _StudentAttendanceScreenState
       return StudentErrorView(
         icon: Icons.block_rounded,
         title: 'Not available',
-        message: state.error ??
-            'Your account cannot view these attendance records.',
+        message:
+            state.error ?? 'Your account cannot view these attendance records.',
         retryLabel: 'Try again',
         onRetry: viewModel.refresh,
       );
@@ -183,8 +182,7 @@ class _StudentAttendanceScreenState
             ],
           ],
           const SizedBox(height: StudentSpace.lg),
-          Text('Session record',
-              style: Theme.of(context).textTheme.titleLarge),
+          Text('Session record', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: StudentSpace.sm),
           for (final record in records) ...[
             _AttendanceTile(record: record),
