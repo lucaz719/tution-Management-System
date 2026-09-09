@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:tms_mobile/core/auth/role_codes.dart';
 import 'package:tms_mobile/core/network/api_client.dart';
-import 'package:tms_mobile/features/auth/data/mock_auth_service.dart';
 
 /// Represents a failure in the auth flow with a human-readable message.
 class AuthFailure implements Exception {
@@ -86,7 +85,11 @@ class AuthUser {
       };
 }
 
-/// Auth service with seamless offline mock demo fallback.
+/// Production auth service — server-backed only.
+///
+/// There is no offline demo fallback: every path below hits the Better Auth
+/// API over the session-cookie transport. No fixed OTPs exist anywhere in
+/// production code; all one-time codes are issued and verified server-side.
 class AuthService {
   AuthService._();
 
@@ -99,33 +102,6 @@ class AuthService {
   }) async {
     final normalized = email.trim().toLowerCase();
 
-    // Check demo accounts directly for instant response
-    if (MockAuthService.demoUsers.containsKey(normalized)) {
-      final mock = await MockAuthService.signIn(
-        email: normalized,
-        password: password,
-        rememberMe: true,
-      );
-      final parts = normalized.split('@').first.split('.');
-      final first = parts.first;
-      final last = parts.length > 1 ? parts[1] : '';
-      final user = AuthUser(
-        id: 'mock-${mock.role.toLowerCase()}-1',
-        email: mock.email,
-        firstName: first.isNotEmpty
-            ? first[0].toUpperCase() + first.substring(1)
-            : mock.role,
-        lastName: last.isNotEmpty
-            ? last[0].toUpperCase() + last.substring(1)
-            : 'User',
-        role: mock.role,
-        requiresTwoFactor: mock.requiresTwoFactor,
-      );
-      await ApiClient.saveUser(jsonEncode(user.toJson()));
-      return user;
-    }
-
-    // Otherwise try API backend
     try {
       await _dio.post(
         '/api/auth/sign-in/email',
@@ -150,10 +126,6 @@ class AuthService {
   /// Use [email] to locate the account; delivery goes to its verified mobile.
   static Future<void> sendPasswordOtp(String email) async {
     final normalized = email.trim().toLowerCase();
-    if (MockAuthService.demoUsers.containsKey(normalized)) {
-      await MockAuthService.sendPasswordOtp(normalized);
-      return;
-    }
 
     try {
       await _dio.post(
@@ -172,10 +144,6 @@ class AuthService {
     required String otp,
   }) async {
     final normalized = email.trim().toLowerCase();
-    if (MockAuthService.demoUsers.containsKey(normalized)) {
-      await MockAuthService.verifyPasswordOtp(otp);
-      return 'mock-reset-token-${DateTime.now().millisecondsSinceEpoch}';
-    }
 
     try {
       final response = await _dio.post(
@@ -205,11 +173,6 @@ class AuthService {
     required String resetToken,
     required String newPassword,
   }) async {
-    if (resetToken.startsWith('mock-')) {
-      await MockAuthService.resetPassword(newPassword);
-      return;
-    }
-
     try {
       await _dio.post(
         '/api/auth/reset-password',
@@ -243,12 +206,6 @@ class AuthService {
 
   /// Request a 2FA code sent to the account's verified security mobile.
   static Future<void> sendTwoFactorCode(String email) async {
-    final normalized = email.trim().toLowerCase();
-    if (MockAuthService.demoUsers.containsKey(normalized)) {
-      await MockAuthService.sendTwoFactorCode();
-      return;
-    }
-
     try {
       await _dio.post(
         '/api/auth/two-factor/send-otp',
@@ -265,15 +222,9 @@ class AuthService {
     required String email,
     required String code,
   }) async {
-    final normalized = email.trim().toLowerCase();
-    if (MockAuthService.demoUsers.containsKey(normalized)) {
-      await MockAuthService.verifyTwoFactorCode(code);
-      return;
-    }
-
     try {
       await _dio.post(
-          '/api/auth/two-factor/verify-otp',
+        '/api/auth/two-factor/verify-otp',
         data: {
           'code': code.trim(),
         },
@@ -294,23 +245,29 @@ class AuthService {
     }
   }
 
-  /// Try to restore the server-backed session.
+  /// Validate the server session before trusting anything cached.
+  ///
+  /// Fail-closed: the cached user is never returned without a successful
+  /// `GET /api/auth/get-session`. On 401/expiry (or a session payload with
+  /// no user) local auth data is wiped and `null` is returned so the app
+  /// lands unauthenticated. Any other failure also returns `null` — a stale
+  /// cache must never resurrect a dead session.
   static Future<AuthUser?> restoreSession() async {
     try {
-      final storedUser = await ApiClient.getUser();
-      if (storedUser != null && storedUser.isNotEmpty) {
-        final parsed = jsonDecode(storedUser) as Map<String, dynamic>;
-        return AuthUser.fromJson(parsed);
-      }
-
       final session = await _dio.get('/api/auth/get-session');
       if (session.data is! Map<String, dynamic> ||
           (session.data as Map)['user'] == null) {
+        await ApiClient.clearAuth();
         return null;
       }
       final user = AuthUser.fromJson(session.data as Map<String, dynamic>);
       await ApiClient.saveUser(jsonEncode(user.toJson()));
       return user;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) {
+        await ApiClient.clearAuth();
+      }
+      return null;
     } catch (_) {
       return null;
     }
