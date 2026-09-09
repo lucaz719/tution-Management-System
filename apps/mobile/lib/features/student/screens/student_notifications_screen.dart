@@ -30,8 +30,7 @@ class StudentNotificationsScreen extends ConsumerWidget {
           : 'Notifications',
       actions: [
         TextButton(
-          onPressed:
-              state.isEmpty ? null : () => viewModel.markAllRead(),
+          onPressed: state.isEmpty ? null : () => viewModel.markAllRead(),
           child: const Text('Mark all read'),
         ),
       ],
@@ -55,8 +54,8 @@ class StudentNotificationsScreen extends ConsumerWidget {
               return StudentErrorView(
                 icon: Icons.lock_outline_rounded,
                 title: 'Access denied',
-                message: state.error ??
-                    'Your account cannot view notifications.',
+                message:
+                    state.error ?? 'Your account cannot view notifications.',
                 retryLabel: 'Retry',
                 onRetry: viewModel.load,
               );
@@ -126,8 +125,7 @@ class StudentNotificationsScreen extends ConsumerWidget {
                     ? StudentColors.background
                     : StudentColors.primary.withValues(alpha: .04),
                 child: InkWell(
-                  borderRadius:
-                      BorderRadius.circular(StudentRadius.card),
+                  borderRadius: BorderRadius.circular(StudentRadius.card),
                   onTap: () {
                     viewModel.markRead(notice.raw.id);
                     final destination = notice.raw.destination;
@@ -154,8 +152,7 @@ class StudentNotificationsScreen extends ConsumerWidget {
                         const SizedBox(width: StudentSpace.sm),
                         Expanded(
                           child: Column(
-                            crossAxisAlignment:
-                                CrossAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
                                 notice.raw.title,
@@ -175,9 +172,7 @@ class StudentNotificationsScreen extends ConsumerWidget {
                               const SizedBox(height: StudentSpace.xs),
                               Text(
                                 notice.raw.time,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall,
+                                style: Theme.of(context).textTheme.bodySmall,
                               ),
                             ],
                           ),

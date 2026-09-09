@@ -74,8 +74,7 @@ StudentIdCard buildIdCard(PortalProfile profile) {
     profile: profile,
     status: StudentIdStatus.active,
     statusReason: 'Active$duesNote',
-    validityLabel:
-        'AY ${profile.academicYear} · while actively enrolled',
+    validityLabel: 'AY ${profile.academicYear} · while actively enrolled',
   );
 }
 

@@ -27,9 +27,7 @@ void main() {
       );
       addTearDown(container.dispose);
 
-      await container
-          .read(studentAttendanceViewModelProvider.notifier)
-          .load();
+      await container.read(studentAttendanceViewModelProvider.notifier).load();
       final state = container.read(studentAttendanceViewModelProvider);
 
       expect(state.hasData, isTrue);
@@ -96,17 +94,14 @@ void main() {
         overrides: [
           studentAttendanceViewModelProvider.overrideWith(
             (ref) => StudentAttendanceViewModel(
-              repository:
-                  StudentAcademicsRepository(dio: stubFailure(401)),
+              repository: StudentAcademicsRepository(dio: stubFailure(401)),
             ),
           ),
         ],
       );
       addTearDown(container.dispose);
 
-      await container
-          .read(studentAttendanceViewModelProvider.notifier)
-          .load();
+      await container.read(studentAttendanceViewModelProvider.notifier).load();
       final state = container.read(studentAttendanceViewModelProvider);
       expect(state.sessionExpired, isTrue);
       expect(state.hasData, isFalse);

@@ -34,8 +34,8 @@ class _StudentAcademicsScreenState
   @override
   void initState() {
     super.initState();
-    Future.microtask(() =>
-        ref.read(studentAcademicsViewModelProvider.notifier).load());
+    Future.microtask(
+        () => ref.read(studentAcademicsViewModelProvider.notifier).load());
   }
 
   @override
@@ -92,8 +92,8 @@ class _StudentAcademicsScreenState
       return StudentErrorView(
         icon: Icons.block_rounded,
         title: 'Not available',
-        message: state.error ??
-            'Your account cannot view these academic records.',
+        message:
+            state.error ?? 'Your account cannot view these academic records.',
         retryLabel: 'Try again',
         onRetry: viewModel.refresh,
       );
@@ -141,8 +141,7 @@ class _ResultsView extends StatelessWidget {
       return const StudentEmptyView(
         icon: Icons.grade_outlined,
         title: 'No results yet',
-        message:
-            'Scores appear here as soon as your teacher publishes them.',
+        message: 'Scores appear here as soon as your teacher publishes them.',
       );
     }
     return RefreshIndicator(
@@ -169,8 +168,7 @@ class _ResultsView extends StatelessWidget {
             ),
           ),
           const SizedBox(height: StudentSpace.lg),
-          Text('Latest results',
-              style: Theme.of(context).textTheme.titleLarge),
+          Text('Latest results', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: StudentSpace.sm),
           for (final result in results) ...[
             _ResultCard(result: result),
@@ -194,8 +192,7 @@ class _ResultCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final classAverage = result.classAverage;
-    final aboveAverage =
-        classAverage == null || result.score >= classAverage;
+    final aboveAverage = classAverage == null || result.score >= classAverage;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(StudentSpace.md),
@@ -230,8 +227,7 @@ class _ResultCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(StudentRadius.pill),
               child: LinearProgressIndicator(
                 minHeight: 8,
-                value:
-                    (result.percentage / 100).clamp(0.0, 1.0).toDouble(),
+                value: (result.percentage / 100).clamp(0.0, 1.0).toDouble(),
                 backgroundColor: StudentColors.border,
               ),
             ),
@@ -276,8 +272,7 @@ class _SyllabusView extends StatelessWidget {
       return const StudentEmptyView(
         icon: Icons.menu_book_outlined,
         title: 'No syllabus shared yet',
-        message:
-            'Your teachers share the term syllabus here once it is ready.',
+        message: 'Your teachers share the term syllabus here once it is ready.',
       );
     }
     return RefreshIndicator(
@@ -285,8 +280,7 @@ class _SyllabusView extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.all(StudentSpace.md),
         children: [
-          Text('Term syllabus',
-              style: Theme.of(context).textTheme.titleLarge),
+          Text('Term syllabus', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: StudentSpace.xs),
           Text(
             'Follow the current topics and your class progress.',
@@ -309,9 +303,7 @@ class _SyllabusView extends StatelessWidget {
                         const SizedBox(width: StudentSpace.sm),
                         Expanded(
                           child: Text(syllabus.subject,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleMedium),
+                              style: Theme.of(context).textTheme.titleMedium),
                         ),
                         Text('${syllabus.topicCount} topics'),
                       ],
@@ -378,8 +370,7 @@ class _HomeworkView extends StatelessWidget {
                             ? StudentColors.error
                             : StudentColors.primary)
                         .withValues(alpha: .10),
-                    borderRadius:
-                        BorderRadius.circular(StudentRadius.control),
+                    borderRadius: BorderRadius.circular(StudentRadius.control),
                   ),
                   child: Icon(
                     item.isOverdue
@@ -413,8 +404,7 @@ class _HomeworkView extends StatelessWidget {
           ],
           StudentLoadMoreFooter(
             hasMore: state.hasMoreHomework,
-            remaining:
-                state.homework.length - state.pagedHomework.length,
+            remaining: state.homework.length - state.pagedHomework.length,
             onLoadMore: viewModel.loadMoreHomework,
           ),
         ],
@@ -438,8 +428,7 @@ class _InsightsView extends StatelessWidget {
       return const StudentEmptyView(
         icon: Icons.insights_outlined,
         title: 'No insights yet',
-        message:
-            'Insights are calculated from your published scores.',
+        message: 'Insights are calculated from your published scores.',
       );
     }
     final strongest = [...insights]
@@ -475,8 +464,7 @@ class _InsightsView extends StatelessWidget {
             ],
           ),
           const SizedBox(height: StudentSpace.lg),
-          Text('Subject trends',
-              style: Theme.of(context).textTheme.titleLarge),
+          Text('Subject trends', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: StudentSpace.sm),
           for (final insight in insights) ...[
             Card(
@@ -489,17 +477,15 @@ class _InsightsView extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(insight.subject,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleMedium),
+                              style: Theme.of(context).textTheme.titleMedium),
                           const SizedBox(height: StudentSpace.xs),
                           LinearProgressIndicator(
                             minHeight: 7,
                             value: (insight.average / 100)
                                 .clamp(0.0, 1.0)
                                 .toDouble(),
-                            borderRadius: BorderRadius.circular(
-                                StudentRadius.pill),
+                            borderRadius:
+                                BorderRadius.circular(StudentRadius.pill),
                             backgroundColor: StudentColors.border,
                           ),
                         ],
@@ -510,19 +496,15 @@ class _InsightsView extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text('${insight.average.toStringAsFixed(0)}%',
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleMedium),
+                            style: Theme.of(context).textTheme.titleMedium),
                         Text(
                           '${insight.trend} ${insight.change >= 0 ? '+' : ''}${insight.change.toStringAsFixed(0)}%',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(
-                                color: insight.change >= 0
-                                    ? StudentColors.success
-                                    : StudentColors.error,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: insight.change >= 0
+                                        ? StudentColors.success
+                                        : StudentColors.error,
+                                  ),
                         ),
                       ],
                     ),
