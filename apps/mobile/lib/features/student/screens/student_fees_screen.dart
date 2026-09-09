@@ -9,6 +9,7 @@ import '../data/student_fees_models.dart';
 import '../student_design.dart';
 import '../viewmodels/student_fees_viewmodel.dart';
 import '../widgets/student_scaffold.dart';
+import '../widgets/invoice_payment_settings_sheet.dart';
 import 'package:tms_mobile/core/providers/feature_flags_provider.dart';
 
 /// Injectable gateway launcher so widget tests can substitute a fake
@@ -144,27 +145,20 @@ class StudentFeesScreen extends ConsumerWidget {
       current: current,
       onSelect: viewModel.selectInvoice,
       onRefresh: viewModel.refresh,
-      onShowQr: () async {
-        await viewModel.loadQr();
-        final qr = ref.read(studentFeesViewModelProvider).qr;
-        if (qr != null && context.mounted) _showQr(context, qr, current);
+      onShowQr: () {
+        showModalBottomSheet<void>(
+          context: context,
+          showDragHandle: true,
+          isScrollControlled: true,
+          builder: (context) => InvoicePaymentSettingsSheet(
+            invoiceId: current.id,
+            onConnectIps: viewModel.startPayment,
+          ),
+        );
       },
       onStartPayment: viewModel.startPayment,
       onConfirmReturn: viewModel.confirmReturn,
       onDismissNotice: viewModel.dismissNotice,
-    );
-  }
-
-  static void _showQr(
-    BuildContext context,
-    NepalPayQr qr,
-    ApiStudentInvoice invoice,
-  ) {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (context) => NepalPayQrSheet(qr: qr, invoice: invoice),
     );
   }
 }
@@ -524,7 +518,7 @@ class _StudentFeesContent extends StatelessWidget {
                               )
                             : const Icon(Icons.qr_code_2_rounded),
                         label: Text(current.qrAvailable
-                            ? 'Show Nepal Pay QR'
+                            ? 'Show payment instructions'
                             : 'Already paid'),
                       ),
                     ),
